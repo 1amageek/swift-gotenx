@@ -73,7 +73,7 @@ struct ConfigurationLoaderTests {
         #expect(loaded?.time.end == 1.5)
 
         // Clean up
-        try? FileManager.default.removeItem(at: tempFile)
+        removeTestItemIfExists(at: tempFile)
     }
 
     @Test("JSONConfigurationProvider returns nil for missing file")
@@ -150,7 +150,7 @@ struct ConfigurationLoaderTests {
         #expect(config.time.end == 3.0)
 
         // Clean up
-        try? FileManager.default.removeItem(at: tempFile)
+        removeTestItemIfExists(at: tempFile)
     }
 
     @Test("ConfigurationLoader.loadFromJSON")
@@ -203,7 +203,7 @@ struct ConfigurationLoaderTests {
         #expect(config.runtime.static.mesh.majorRadius == 7.0)
 
         // Clean up
-        try? FileManager.default.removeItem(at: tempFile)
+        removeTestItemIfExists(at: tempFile)
     }
 
     @Test("ConfigurationOverrides from CLI")
@@ -328,6 +328,6 @@ struct ConfigurationLoaderTests {
         }
 
         // Clean up
-        try? FileManager.default.removeItem(at: tempFile)
+        removeTestItemIfExists(at: tempFile)
     }
 }

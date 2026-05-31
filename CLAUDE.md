@@ -425,16 +425,31 @@ let config = try await configReader.fetchConfiguration()
 
 ```bash
 # Build package
-swift build
+xcodebuild build \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug
 
 # Run tests
-swift test
+perl -e 'alarm shift; exec @ARGV' 700 xcodebuild test \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug \
+  -derivedDataPath /tmp/Gotenx-Package-Xcodebuild-DerivedData
 
 # Run specific test
-swift test --filter <TestName>
+perl -e 'alarm shift; exec @ARGV' 120 xcodebuild test \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug \
+  -derivedDataPath /tmp/Gotenx-Package-Xcodebuild-DerivedData \
+  -only-testing:GotenxTests/<SuiteName>
 
 # Release build
-swift build -c release
+xcodebuild build \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Release
 ```
 
 ### CLI Usage
@@ -475,7 +490,7 @@ swift package show-dependencies
 }
 ```
 
-**Minimum**: iOS 17.0+, macOS 14.0+
+**Minimum**: macOS 26.4+ on a Metal 4 capable Apple Silicon GPU
 
 ---
 

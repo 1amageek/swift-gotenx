@@ -42,7 +42,7 @@ struct OutputWriterTests {
         let outputURL = tempDir.appendingPathComponent("test_output.nc")
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
 
         // Write NetCDF
         try writer.write(result, to: outputURL)
@@ -51,7 +51,7 @@ struct OutputWriterTests {
         #expect(FileManager.default.fileExists(atPath: outputURL.path))
 
         // Clean up
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
     }
 
     @Test("NetCDF writer creates valid file with time series")
@@ -93,7 +93,7 @@ struct OutputWriterTests {
         let outputURL = URL(fileURLWithPath: "/tmp/gotenx_test_timeseries.nc")
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
 
         // Write NetCDF
         try writer.write(result, to: outputURL)
@@ -105,7 +105,7 @@ struct OutputWriterTests {
         print("Inspect with: ncdump -h \(outputURL.path)")
 
         // Don't clean up - leave for inspection
-        // try? FileManager.default.removeItem(at: outputURL)
+        // removeTestItemIfExists(at: outputURL)
     }
 
     @Test("JSON writer still works")
@@ -141,7 +141,7 @@ struct OutputWriterTests {
         let outputURL = tempDir.appendingPathComponent("test_output.json")
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
 
         // Write JSON
         try writer.write(result, to: outputURL)
@@ -150,7 +150,7 @@ struct OutputWriterTests {
         #expect(FileManager.default.fileExists(atPath: outputURL.path))
 
         // Clean up
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
     }
 
     @Test("NetCDF handles single cell edge case")
@@ -185,7 +185,7 @@ struct OutputWriterTests {
         let outputURL = URL(fileURLWithPath: "/tmp/gotenx_single_cell.nc")
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
 
         // Write NetCDF - should not crash with division by zero
         try writer.write(result, to: outputURL)
@@ -285,7 +285,7 @@ struct OutputWriterTests {
 
         let writer = OutputWriter(format: .netcdf)
         let outputURL = FileManager.default.temporaryDirectory.appendingPathComponent("gotenx_compression_ratio.nc")
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
 
         try writer.write(result, to: outputURL)
 
@@ -304,6 +304,6 @@ struct OutputWriterTests {
 
         #expect(compressionRatio > 8.0, "Compression ratio should exceed 8× (got \(String(format: "%.2f", compressionRatio)))")
 
-        try? FileManager.default.removeItem(at: outputURL)
+        removeTestItemIfExists(at: outputURL)
     }
 }

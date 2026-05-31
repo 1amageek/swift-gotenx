@@ -161,13 +161,12 @@ public struct ResistiveInterchangeModel: TransportModel {
 
         // Particle diffusivity: D = χ / 3 (simplified)
         let D = chi_RI / 3.0
-        eval(D)
 
         return TransportCoefficients(
-            chiIon: EvaluatedArray(evaluating: chi_RI),
-            chiElectron: EvaluatedArray(evaluating: chi_RI),
-            particleDiffusivity: EvaluatedArray(evaluating: D),
-            convectionVelocity: EvaluatedArray.zeros([nCells])
+            evaluatingChiIon: chi_RI,
+            chiElectron: chi_RI,
+            particleDiffusivity: D,
+            convectionVelocity: MLXArray.zeros([nCells])
         )
     }
 
@@ -197,52 +196,40 @@ public struct ResistiveInterchangeModel: TransportModel {
         // Physical range: ρ_s ~ 0.5-2 mm for typical tokamak conditions
         // CRITICAL: min = 1e-5 m (0.01 mm) to preserve isotope effect
         let rho_s_safe = clip(rho_s, min: MLXArray(Float(1e-5)), max: MLXArray(Float(0.1)))
-        eval(rho_s_safe)
 
         let rho_s_squared = rho_s_safe * rho_s_safe
-        eval(rho_s_squared)
 
         // Prevent division by very small tau_R
         let tau_R_safe = clip(tau_R, min: MLXArray(Float(1e-6)), max: MLXArray(Float(1e6)))
-        eval(tau_R_safe)
 
         let chi_base = MLXArray(Float(coefficientRI)) * (rho_s_squared / tau_R_safe)
-        eval(chi_base)
 
         // Clip intermediate result to prevent overflow in subsequent operations
         let chi_base_safe = clip(chi_base, min: MLXArray(Float(1e-8)), max: MLXArray(Float(100.0)))
-        eval(chi_base_safe)
 
         // Gradient drive term: (L_p/L_n)^α
         // Clamp ratio to prevent extreme values
         let epsilon = MLXArray(Float(1e-10))
         let gradientRatio = L_p / (L_n + epsilon)
         let gradientRatio_clamped = clip(gradientRatio, min: MLXArray(Float(0.1)), max: MLXArray(Float(10.0)))
-        eval(gradientRatio_clamped)
 
         let gradientTerm = pow(gradientRatio_clamped, MLXArray(Float(gradientExponent)))
-        eval(gradientTerm)
 
         // Clip gradientTerm to prevent overflow
         let gradientTerm_safe = clip(gradientTerm, min: MLXArray(Float(0.1)), max: MLXArray(Float(100.0)))
-        eval(gradientTerm_safe)
 
         // Beta suppression term: exp(-β_crit/β)
         // Stabilize exponential to prevent overflow
         let beta_safe = clip(beta, min: MLXArray(Float(1e-6)), max: MLXArray(Float(0.2)))
-        eval(beta_safe)
 
         let betaArg = MLXArray(Float(-betaCritical)) / beta_safe
         // Clamp to [-10, 0] to prevent exp() overflow/underflow
         let betaArg_clamped = clip(betaArg, min: MLXArray(Float(-10.0)), max: MLXArray(Float(0.0)))
-        eval(betaArg_clamped)
 
         let betaTerm = exp(betaArg_clamped)
-        eval(betaTerm)
 
         // Clip betaTerm to prevent underflow
         let betaTerm_safe = clip(betaTerm, min: MLXArray(Float(1e-5)), max: MLXArray(Float(1.0)))
-        eval(betaTerm_safe)
 
         // Combined coefficient with intermediate clipping
         let chi_RI = chi_base_safe * gradientTerm_safe * betaTerm_safe
@@ -251,7 +238,6 @@ public struct ResistiveInterchangeModel: TransportModel {
         // CRITICAL: min must be low enough to preserve isotope effect in tests
         // Physical RI transport can be very small at moderate β
         let chi_RI_clamped = clip(chi_RI, min: MLXArray(Float(1e-9)), max: MLXArray(Float(100.0)))
-        eval(chi_RI_clamped)
 
         return chi_RI_clamped
     }

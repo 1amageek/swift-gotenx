@@ -35,20 +35,14 @@ public struct TimeStepCalculator {
         precondition(minTimestep > 0.0, "Minimum timestep must be positive")
         precondition(maxTimestep > minTimestep, "Maximum timestep must be larger than minimum")
 
-        // 🐛 DEBUG: TimeStepCalculator initialization
-        print("[DEBUG-TSCALC] TimeStepCalculator init:")
-        print("[DEBUG-TSCALC]   minTimestep: \(minTimestep)")
-        print("[DEBUG-TSCALC]   maxTimestep: \(maxTimestep)")
-        print("[DEBUG-TSCALC]   stabilityFactor: \(stabilityFactor)")
-
         self.stabilityFactor = stabilityFactor
         self.minTimestep = minTimestep
         self.maxTimestep = maxTimestep
     }
 
-    /// 最小タイムステップ（秒）
+    /// Minimum timestep in seconds.
     ///
-    /// タイムステップを縮小リトライする際の下限値として利用する。
+    /// Used as the lower bound when retrying with a smaller timestep.
     public var minimumTimestep: Float {
         minTimestep
     }
@@ -65,18 +59,20 @@ public struct TimeStepCalculator {
         transportCoeffs: TransportCoefficients,
         dr: Float
     ) -> Float {
-        // Find maximum diffusion coefficient
-        let chiIonMax = transportCoeffs.chiIon.value.max().item(Float.self)
-        let chiElectronMax = transportCoeffs.chiElectron.value.max().item(Float.self)
-        let particleDiffMax = transportCoeffs.particleDiffusivity.value.max().item(Float.self)
+        let limits = MLX.stacked([
+            transportCoeffs.chiIon.value.max(),
+            transportCoeffs.chiElectron.value.max(),
+            transportCoeffs.particleDiffusivity.value.max(),
+            abs(transportCoeffs.convectionVelocity.value).max()
+        ], axis: 0).asArray(Float.self)
 
-        let chiMax = max(chiIonMax, chiElectronMax, particleDiffMax)
+        let chiMax = max(limits[0], limits[1], limits[2])
 
         // CFL condition for diffusion: dt < C * dr^2 / χ
         let dtDiffusion = stabilityFactor * dr * dr / max(chiMax, 1e-10)
 
         // CFL condition for convection: dt < C * dr / |v|
-        let vMax = abs(transportCoeffs.convectionVelocity.value).max().item(Float.self)
+        let vMax = limits[3]
         let dtConvection = stabilityFactor * dr / max(vMax, 1e-10)
 
         // Take minimum of both conditions
@@ -110,21 +106,18 @@ public struct TimeStepCalculator {
         // Start with CFL-based timestep
         var dt = compute(transportCoeffs: transportCoeffs, dr: dr)
 
-        // Compute rate of change for each variable
         let changeTi = abs(profiles.ionTemperature.value - profilesPrev.ionTemperature.value)
-        let maxChangeTi = changeTi.max().item(Float.self)
-        let rateTi = maxChangeTi / dtPrev
-
         let changeTe = abs(profiles.electronTemperature.value - profilesPrev.electronTemperature.value)
-        let maxChangeTe = changeTe.max().item(Float.self)
-        let rateTe = maxChangeTe / dtPrev
-
         let changeNe = abs(profiles.electronDensity.value - profilesPrev.electronDensity.value)
-        let maxChangeNe = changeNe.max().item(Float.self)
-        let rateNe = maxChangeNe / dtPrev
+
+        let changes = MLX.stacked([
+            changeTi.max(),
+            changeTe.max(),
+            changeNe.max()
+        ], axis: 0).asArray(Float.self)
 
         // Compute maximum rate
-        let maxRate = max(rateTi, rateTe, rateNe)
+        let maxRate = max(changes[0], changes[1], changes[2]) / dtPrev
 
         // Limit timestep based on maximum allowed change
         if maxRate > 1e-10 {

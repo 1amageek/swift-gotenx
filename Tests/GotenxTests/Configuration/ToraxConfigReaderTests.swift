@@ -16,7 +16,7 @@ struct GotenxConfigReaderTests {
     @Test("Load minimal configuration from JSON")
     func testLoadMinimalConfig() async throws {
         let configPath = try createTestConfig(nCells: 100)
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let reader = try await GotenxConfigReader.create(
             jsonPath: configPath,
@@ -39,7 +39,7 @@ struct GotenxConfigReaderTests {
             majorRadius: 6.2,
             minorRadius: 2.0
         )
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let reader = try await GotenxConfigReader.create(
             jsonPath: configPath,
@@ -58,7 +58,7 @@ struct GotenxConfigReaderTests {
     @Test("CLI overrides take precedence over JSON")
     func testCLIOverrides() async throws {
         let configPath = try createTestConfig(nCells: 100)
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // Override mesh cells
         let cliOverrides = [
@@ -81,7 +81,7 @@ struct GotenxConfigReaderTests {
     @Test("CLI overrides with nested keys")
     func testNestedCLIOverrides() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let cliOverrides = [
             "runtime.static.mesh.majorRadius": "7.0",
@@ -106,7 +106,7 @@ struct GotenxConfigReaderTests {
     @Test("Environment variables override JSON but not CLI")
     func testEnvironmentVariables() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // Set environment variable
         setenv("GOTENX_MESH_NCELLS", "150", 1)
@@ -146,7 +146,7 @@ struct GotenxConfigReaderTests {
     @Test("Malformed configuration values throw validation errors")
     func testMalformedConfiguration() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // Try to set invalid values
         let cliOverrides = [
@@ -174,7 +174,7 @@ struct GotenxConfigReaderTests {
             majorRadius: 6.2,
             minorRadius: 2.0
         )
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let reader = try await GotenxConfigReader.create(
             jsonPath: configPath,
@@ -214,7 +214,7 @@ struct GotenxConfigReaderTests {
     @Test("Verify complete override priority: CLI > Env > JSON > Default")
     func testOverridePriority() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // Set environment variable
         setenv("GOTENX_TIME_END", "3.0", 1)

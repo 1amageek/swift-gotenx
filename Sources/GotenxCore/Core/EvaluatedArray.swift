@@ -26,8 +26,8 @@ public struct EvaluatedArray: @unchecked Sendable {
     /// - Parameter arrays: Array of lazy MLXArrays to evaluate
     /// - Returns: Array of EvaluatedArrays
     public static func evaluatingBatch(_ arrays: [MLXArray]) -> [EvaluatedArray] {
-        // Force evaluation of all arrays
-        arrays.forEach { eval($0) }
+        // Force all arrays in one MLX evaluation pass.
+        eval(arrays)
         return arrays.map { EvaluatedArray(preEvaluated: $0) }
     }
 

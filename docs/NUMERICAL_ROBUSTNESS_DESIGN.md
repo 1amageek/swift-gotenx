@@ -1485,7 +1485,12 @@ guard isfinite(residualTrial).all().item() else { continue }
 **Acceptance Test**:
 ```bash
 # Original crash config (Te = 0)
-swift test --filter testOriginalCrashScenario  # Should pass
+perl -e 'alarm shift; exec @ARGV' 120 xcodebuild test \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug \
+  -derivedDataPath /tmp/Gotenx-Package-Xcodebuild-DerivedData \
+  -only-testing:GotenxTests/testOriginalCrashScenario
 .build/debug/GotenxCLI run --config crash_config.json  # Should start (not crash)
 ```
 
@@ -1500,7 +1505,12 @@ swift test --filter testOriginalCrashScenario  # Should pass
 
 **Acceptance Test**:
 ```bash
-swift test --filter RobustnessIntegrationTests  # All pass
+perl -e 'alarm shift; exec @ARGV' 300 xcodebuild test \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug \
+  -derivedDataPath /tmp/Gotenx-Package-Xcodebuild-DerivedData \
+  -only-testing:GotenxTests/RobustnessIntegrationTests
 .build/debug/GotenxCLI run --config iter_like.json --end 0.1  # Completes 100 steps
 ```
 
@@ -1516,7 +1526,12 @@ swift test --filter RobustnessIntegrationTests  # All pass
 
 **Acceptance Test**:
 ```bash
-swift test --filter NumericalRobustnessTests  # All edge cases covered
+perl -e 'alarm shift; exec @ARGV' 300 xcodebuild test \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug \
+  -derivedDataPath /tmp/Gotenx-Package-Xcodebuild-DerivedData \
+  -only-testing:GotenxTests/NumericalRobustnessTests
 # Performance regression test
 time .build/release/GotenxCLI run --config benchmark.json  # < 5% slowdown
 ```

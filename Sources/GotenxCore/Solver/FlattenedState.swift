@@ -96,8 +96,7 @@ public struct FlattenedState: Sendable {
     /// - Parameter profiles: Core profiles to flatten
     /// - Throws: FlattenedStateError if profiles have inconsistent shapes
     public init(profiles: CoreProfiles) throws {
-        // ✅ FIX: Validate all profiles have same shape with detailed error reporting
-        // Capture all shapes BEFORE using any as the reference
+        // Capture all shapes before using any profile as the reference.
         let shapes = (
             Ti: profiles.ionTemperature.shape[0],
             Te: profiles.electronTemperature.shape[0],
@@ -202,8 +201,8 @@ public struct FlattenedState: Sendable {
     /// - Parameter reference: Reference state for normalization
     /// - Returns: Scaled state with values normalized by reference
     public func scaled(by reference: FlattenedState) -> FlattenedState {
-        // ✅ CRITICAL FIX: Validate layout compatibility before scaling
-        // Prevents silent broadcasting errors that can cause solver divergence
+        // Validate layout compatibility before scaling.
+        // This prevents silent broadcasting errors that can cause solver divergence.
         precondition(reference.layout == layout,
             """
             Layout mismatch in scaled(by:):
@@ -212,8 +211,8 @@ public struct FlattenedState: Sendable {
             This indicates a programming error. Ensure both states use the same mesh.
             """)
 
-        // ✅ GPU element-wise division (no CPU transfer)
-        // Add small epsilon to prevent division by zero
+        // Perform element-wise division on the active MLX backend.
+        // Add a small epsilon to prevent division by zero.
         let scaledValues = values.value / (reference.values.value + 1e-10)
         eval(scaledValues)
 
@@ -248,8 +247,8 @@ public struct FlattenedState: Sendable {
     /// - Parameter reference: Reference state used for original scaling
     /// - Returns: Unscaled state in physical units
     public func unscaled(by reference: FlattenedState) -> FlattenedState {
-        // ✅ CRITICAL FIX: Validate layout compatibility before unscaling
-        // Prevents silent broadcasting errors that can cause solver divergence
+        // Validate layout compatibility before unscaling.
+        // This prevents silent broadcasting errors that can cause solver divergence.
         precondition(reference.layout == layout,
             """
             Layout mismatch in unscaled(by:):
@@ -258,8 +257,8 @@ public struct FlattenedState: Sendable {
             This indicates a programming error. Ensure both states use the same mesh.
             """)
 
-        // ✅ GPU element-wise multiplication (no CPU transfer)
-        // Must use (reference + ε) to match scaling formula
+        // Perform element-wise multiplication on the active MLX backend.
+        // Use reference plus epsilon to match the scaling formula.
         let unscaledValues = values.value * (reference.values.value + 1e-10)
         eval(unscaledValues)
 
@@ -282,7 +281,7 @@ public struct FlattenedState: Sendable {
     /// - Parameter minScale: Minimum scaling factor (default: 1e-10)
     /// - Returns: Scaling reference state with safe normalization values
     public func asScalingReference(minScale: Float = 1e-10) -> FlattenedState {
-        // ✅ GPU operations: abs() and maximum()
+        // Use element-wise MLX operations to keep the data on the active backend.
         let absValues = abs(values.value)
         let safeScales = maximum(absValues, MLXArray(minScale))
         eval(safeScales)
@@ -350,7 +349,8 @@ public struct FlattenedState: Sendable {
 /// - Returns: Jacobian matrix (n × n)
 public func computeJacobianViaVJP(
     _ residualFn: @escaping (MLXArray) -> MLXArray,
-    _ x: MLXArray
+    _ x: MLXArray,
+    basis: MLXArray? = nil
 ) -> MLXArray {
     let n = x.shape[0]
 
@@ -368,7 +368,7 @@ public func computeJacobianViaVJP(
         return [grads[0]]
     }
 
-    let identity = MLXArray.eye(n)
+    let identity = basis ?? MLXArray.eye(n)
     let rows = vmap(vjpRow, inAxes: [0], outAxes: [0])([identity])[0]
     eval(rows)
     return rows
@@ -458,7 +458,7 @@ public func computeJacobianViaVJPBatched(
                 cotangents: [cotangent]
             )
 
-            // ✅ Force evaluation to prevent graph accumulation
+            // Force evaluation to prevent graph accumulation.
             eval(vjpResult[0])
 
             jacobianRows.append(vjpResult[0])

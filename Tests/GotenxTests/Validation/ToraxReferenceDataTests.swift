@@ -16,7 +16,7 @@ struct ToraxReferenceDataTests {
         let filePath = tempDir.appendingPathComponent("mock_torax_test.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         // Create mock TORAX file
         let (nTime, nRho) = try createMockToraxFile(path: filePath)
@@ -51,7 +51,7 @@ struct ToraxReferenceDataTests {
         }
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         print("✅ Successfully loaded mock TORAX data:")
         print("   Time points: \(data.time.count)")
@@ -68,7 +68,7 @@ struct ToraxReferenceDataTests {
         let filePath = tempDir.appendingPathComponent("mock_torax_no_psi.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         try createMockToraxFile(path: filePath, includePsi: false)
 
@@ -79,7 +79,7 @@ struct ToraxReferenceDataTests {
         #expect(data.psi == nil, "psi should be nil when not present in file")
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         print("✅ Successfully loaded TORAX data without psi")
     }
@@ -98,7 +98,7 @@ struct ToraxReferenceDataTests {
         let filePath = tempDir.appendingPathComponent("mock_torax_invalid_dims.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         try createMockToraxFile(path: filePath, nRho: 5)
 
@@ -107,7 +107,7 @@ struct ToraxReferenceDataTests {
         }
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
     }
 
     @Test("Time utilities: findTimeIndex")

@@ -1,11 +1,5 @@
 import MLX
 import Foundation
-
-// FusionSurrogates is a macOS-only dependency (see Package.swift), and this whole
-// model is gated behind `#if os(macOS)` at its only call site (TransportModelFactory).
-// Guard the import and the type identically so the non-macOS (iOS / visionOS) builds
-// the package declares do not fail on the unconditional import.
-#if os(macOS)
 import FusionSurrogates
 
 // MARK: - QLKNN Transport Model
@@ -140,18 +134,15 @@ public struct QLKNNTransportModel: TransportModel {
         let chiElectronClamped = maximum(chiElectron, MLXArray(minChi))
         let particleDiffusivityClamped = maximum(particleDiffusivity, MLXArray(minChi))
 
-        // Evaluate all results
-        eval(chiIonClamped, chiElectronClamped, particleDiffusivityClamped)
-
         // No convection velocity from QLKNN (set to zero)
         let nCells = radii.shape[0]
         let convectionVelocity = MLXArray.zeros([nCells])
 
         return TransportCoefficients(
-            chiIon: EvaluatedArray(evaluating: chiIonClamped),
-            chiElectron: EvaluatedArray(evaluating: chiElectronClamped),
-            particleDiffusivity: EvaluatedArray(evaluating: particleDiffusivityClamped),
-            convectionVelocity: EvaluatedArray(evaluating: convectionVelocity)
+            evaluatingChiIon: chiIonClamped,
+            chiElectron: chiElectronClamped,
+            particleDiffusivity: particleDiffusivityClamped,
+            convectionVelocity: convectionVelocity
         )
     }
 
@@ -338,5 +329,3 @@ public struct QLKNNTransportModel: TransportModel {
         return pfe_total * chiGB
     }
 }
-
-#endif  // os(macOS)

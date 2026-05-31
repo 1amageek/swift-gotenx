@@ -141,11 +141,7 @@ public struct DensityTransitionModel: TransportModel {
     private func transitionWeight(density: MLXArray) -> MLXArray {
         // Sigmoid transition centered at n_trans with width Δn
         let delta_n = (density - transitionDensity) / transitionWidth
-        let weight = 1.0 / (1.0 + exp(-delta_n))
-
-        // Force evaluation (critical for MLX)
-        eval(weight)
-        return weight
+        return 1.0 / (1.0 + exp(-delta_n))
     }
 
     /// Blend ITG and RI coefficients using transition weight
@@ -168,28 +164,24 @@ public struct DensityTransitionModel: TransportModel {
         // Blend ion heat diffusivity
         let chiIon_blend = (1.0 - alpha) * lowDensity.chiIon.value
                          + alpha * highDensity.chiIon.value
-        eval(chiIon_blend)
 
         // Blend electron heat diffusivity
         let chiElectron_blend = (1.0 - alpha) * lowDensity.chiElectron.value
                               + alpha * highDensity.chiElectron.value
-        eval(chiElectron_blend)
 
         // Blend particle diffusivity
         let diffusivity_blend = (1.0 - alpha) * lowDensity.particleDiffusivity.value
                               + alpha * highDensity.particleDiffusivity.value
-        eval(diffusivity_blend)
 
         // Blend convection velocity
         let convection_blend = (1.0 - alpha) * lowDensity.convectionVelocity.value
                              + alpha * highDensity.convectionVelocity.value
-        eval(convection_blend)
 
         return TransportCoefficients(
-            chiIon: EvaluatedArray(evaluating: chiIon_blend),
-            chiElectron: EvaluatedArray(evaluating: chiElectron_blend),
-            particleDiffusivity: EvaluatedArray(evaluating: diffusivity_blend),
-            convectionVelocity: EvaluatedArray(evaluating: convection_blend)
+            evaluatingChiIon: chiIon_blend,
+            chiElectron: chiElectron_blend,
+            particleDiffusivity: diffusivity_blend,
+            convectionVelocity: convection_blend
         )
     }
 }

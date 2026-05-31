@@ -193,7 +193,13 @@ public struct CheckpointMetadata: Codable {
  import SwiftNetCDF
 
  let file = try NetCDF.open(path: path, mode: .read)
- defer { try? file.close() }
+ defer {
+     do {
+         try file.close()
+     } catch {
+         assertionFailure("Failed to close NetCDF file: \(error)")
+     }
+ }
 
  // Read configuration
  let configJSON = try file.getAttribute("configuration", String.self)

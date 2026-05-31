@@ -26,7 +26,7 @@ struct NetCDFCompressionTests {
         let filePath = tempDir.appendingPathComponent("imas_core_profiles.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         // Create NetCDF-4 file
         let file = try NetCDF.create(path: filePath, overwriteExisting: true)
@@ -143,8 +143,8 @@ struct NetCDFCompressionTests {
         let compressedPath = tempDir.appendingPathComponent("test_compressed.nc").path
 
         // Clean up any existing files
-        try? FileManager.default.removeItem(atPath: uncompressedPath)
-        try? FileManager.default.removeItem(atPath: compressedPath)
+        removeTestItemIfExists(atPath: uncompressedPath)
+        removeTestItemIfExists(atPath: compressedPath)
 
         // Generate test data (4 variables × 1000 time × 100 rho = 400,000 floats per variable)
         // This simulates a realistic TORAX run (1000+ timesteps common for 2s simulation)
@@ -273,9 +273,9 @@ struct NetCDFCompressionTests {
         let multiSlicePath = tempDir.appendingPathComponent("test_chunk_multislice.nc").path
         let fullTimePath = tempDir.appendingPathComponent("test_chunk_fulltime.nc").path
 
-        try? FileManager.default.removeItem(atPath: timeSlicePath)
-        try? FileManager.default.removeItem(atPath: multiSlicePath)
-        try? FileManager.default.removeItem(atPath: fullTimePath)
+        removeTestItemIfExists(atPath: timeSlicePath)
+        removeTestItemIfExists(atPath: multiSlicePath)
+        removeTestItemIfExists(atPath: fullTimePath)
 
         let nTime = 100
         let nRho = 100

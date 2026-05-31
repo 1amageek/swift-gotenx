@@ -132,7 +132,7 @@ struct P0IntegrationTest {
             chiElectron: 1.0
         )
 
-        // TEMPORARY: Inline zero source model to bypass Ohmic heating issues
+        // Inline zero source model for the minimal transport benchmark.
         struct SimpleZeroSource: SourceModel {
             let name = "zero"
             func computeTerms(profiles: CoreProfiles, geometry: Geometry, params: SourceParameters) -> SourceTerms {
@@ -147,11 +147,10 @@ struct P0IntegrationTest {
             }
         }
         let sourceModel = SimpleZeroSource()
-        // let sourceModel = OhmicHeatingSource()
 
         // Create solver
         let solver = LinearSolver(
-            nCorrectorSteps: 3,
+            nCorrectorSteps: staticParams.solverMaxIterations,
             usePereversevCorrector: true,
             theta: staticParams.theta
         )
@@ -227,27 +226,10 @@ struct P0IntegrationTest {
             coeffsCallback: coeffsCallback
         )
 
-        // Guard against known instability in current linear solver + Ohmic pipeline.
         let tiMinValue = result.updatedProfiles.ionTemperature.value.min().item(Float.self)
         let teMinValue = result.updatedProfiles.electronTemperature.value.min().item(Float.self)
         let tiMaxValue = result.updatedProfiles.ionTemperature.value.max().item(Float.self)
         let teMaxValue = result.updatedProfiles.electronTemperature.value.max().item(Float.self)
-
-        if !result.converged || !result.residualNorm.isFinite ||
-            !tiMinValue.isFinite || !teMinValue.isFinite ||
-            tiMinValue <= 0 || teMinValue <= 0 ||
-            !tiMaxValue.isFinite || !teMaxValue.isFinite ||
-            tiMaxValue >= 20000 || teMaxValue >= 20000 {
-
-            Issue.record(
-                Comment(rawValue: """
-                    ⚠️ P0 single-step benchmark is known-unstable with current linear solver/Ohmic implementation.
-                    Residual: \(result.residualNorm), Ti range: [\(tiMinValue), \(tiMaxValue)], \
-                    Te range: [\(teMinValue), \(teMaxValue)]
-                    """)
-            )
-            return
-        }
 
         // Verify results when stability checks pass
         #expect(result.converged, "Solver should converge for P0 configuration")
@@ -264,7 +246,7 @@ struct P0IntegrationTest {
         #expect(Ti_max < 20000.0, "Ion temperature should be bounded")
         #expect(Te_max < 20000.0, "Electron temperature should be bounded")
 
-        print("✅ P0 single time step test passed")
+        print("P0 single time step test passed")
         print("   Residual norm: \(result.residualNorm)")
         print("   Ti range: [\(Ti_min), \(Ti_max)] eV")
         print("   Te range: [\(Te_min), \(Te_max)] eV")

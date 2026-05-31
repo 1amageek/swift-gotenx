@@ -102,7 +102,7 @@ struct ValidationIntegrationTest {
         let filePath = tempDir.appendingPathComponent("mock_gotenx_output.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         let (nTime, nRho) = try createMockGotenxOutput(path: filePath)
@@ -119,7 +119,7 @@ struct ValidationIntegrationTest {
         #expect(data.Ti[0].count == nRho, "Ti[0] should have \(nRho) rho points")
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         print("✅ Successfully loaded mock Gotenx output")
         print("   Time points: \(data.time.count)")
@@ -133,7 +133,7 @@ struct ValidationIntegrationTest {
         let filePath = tempDir.appendingPathComponent("mock_gotenx_physics.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         try createMockGotenxOutput(path: filePath)
@@ -182,7 +182,7 @@ struct ValidationIntegrationTest {
         #expect(ne_edge < ne_core, "Edge density should be less than core density")
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         print("✅ All physical quantity validations passed")
     }
@@ -194,7 +194,7 @@ struct ValidationIntegrationTest {
         let filePath = tempDir.appendingPathComponent("mock_gotenx_matcher.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         try createMockGotenxOutput(path: filePath)
@@ -233,7 +233,7 @@ struct ValidationIntegrationTest {
                 "Boundary ne should match data edge value")
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         print("✅ ValidationConfigMatcher test passed")
         print("   Matched config parameters:")
@@ -248,7 +248,7 @@ struct ValidationIntegrationTest {
         let filePath = tempDir.appendingPathComponent("mock_gotenx_compare.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         try createMockGotenxOutput(path: filePath)
@@ -283,7 +283,7 @@ struct ValidationIntegrationTest {
         }
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         print("✅ Self-consistency test passed")
         print("   All \(results.count) comparisons had perfect agreement")

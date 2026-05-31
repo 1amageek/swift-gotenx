@@ -20,7 +20,7 @@ struct NetCDFPoCTests {
         let filePath = tempDir.appendingPathComponent("poc_test.nc").path
 
         // Clean up any existing file
-        try? FileManager.default.removeItem(atPath: filePath)
+        removeTestItemIfExists(atPath: filePath)
 
         // Create NetCDF file
         let file = try NetCDF.create(path: filePath, overwriteExisting: true)

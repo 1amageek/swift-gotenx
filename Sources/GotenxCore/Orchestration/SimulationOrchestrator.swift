@@ -93,7 +93,6 @@ public actor SimulationOrchestrator {
         self.samplingConfig = samplingConfig
         self.adaptiveConfig = adaptiveConfig
 
-        // 🐛 DEBUG: Configuration values received
         logger.debug("AdaptiveTimestepConfig received", metadata: [
             "minDt": "\(adaptiveConfig.minDt?.description ?? "nil")",
             "minDtFraction": "\(adaptiveConfig.minDtFraction?.description ?? "nil")",
@@ -448,8 +447,7 @@ public actor SimulationOrchestrator {
                 dr: staticParams.mesh.dr
             )
 
-            // ✅ CRITICAL: Enforce dt growth cap to prevent Newton solver instability
-            // Limits dt increase to maxTimestepGrowth per step (default 1.2)
+            // Enforce the growth cap to prevent Newton solver instability.
             // This prevents aggressive dt jumps that cause:
             // - Jacobian condition number explosion (κ > 1e6)
             // - Linear solver accuracy degradation (errors > 1e-2)
@@ -469,14 +467,12 @@ public actor SimulationOrchestrator {
 
             dt = cappedDt
 
-            // 🐛 DEBUG: Adaptive dt
             if state.step < 5 {
                 logger.debug("Adaptive dt calculated", metadata: ["dt": "\(dt)s"])
             }
         } else {
             // First step: use configured timestep with safety lower bound
-            // ✅ FIXED: Use dynamicParams.dt instead of hardcoded value
-            dt = max(dynamicParams.dt, 1e-5)  // Enforce minimum for numerical stability
+            dt = max(dynamicParams.dt, 1e-5)
             logger.debug("First step dt", metadata: ["dt": "\(dt)s", "configured": "\(dynamicParams.dt)s"])
         }
 

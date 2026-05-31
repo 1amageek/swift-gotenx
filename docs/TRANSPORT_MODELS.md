@@ -140,10 +140,10 @@ Neural network surrogate for QuaLiKiz gyrokinetic code:
 
 ### Platform Requirements
 
-**QLKNN is macOS-only** due to the `FusionSurrogates` package dependency.
+swift-Gotenx targets macOS 26.4 and Metal 4 capable Apple Silicon. QLKNN is included by default.
 
-- ✅ macOS 14.0+ (Apple Silicon or Intel)
-- ❌ iOS (not supported)
+- ✅ macOS 26.4+ on Metal 4 capable Apple Silicon
+- ❌ iOS/visionOS (not targeted)
 - ❌ Linux (not supported)
 
 ### Fallback Behavior

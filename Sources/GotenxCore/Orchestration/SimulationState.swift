@@ -301,9 +301,6 @@ extension CoreProfiles {
         let neArray = electronDensity.value.asArray(Float.self)
         let psiArray = poloidalFlux.value.asArray(Float.self)
 
-        // 🐛 DEBUG: Log when SerializableProfiles is created
-        print("[DEBUG-toSerializable] Creating SerializableProfiles: Ti=\(tiArray.first ?? -1)...\(tiArray.last ?? -1) eV, ne=\(neArray.first ?? -1)...\(neArray.last ?? -1) m^-3, count=\(tiArray.count)")
-
         return SerializableProfiles(
             ionTemperature: tiArray,
             electronTemperature: teArray,

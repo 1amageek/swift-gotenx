@@ -49,6 +49,8 @@ public actor SimulationRunner: SimulationRunnable {
         sourceModels: [any SourceModel],
         mhdModels: [any MHDModel]? = nil
     ) async throws {
+        let metalDevice = try MetalAccelerationPolicy.requireMetal4Device()
+
         // Create static runtime parameters
         let staticParams = try config.runtime.static.toRuntimeParams()
 
@@ -82,14 +84,15 @@ public actor SimulationRunner: SimulationRunnable {
             transport: transportModel,
             sources: sourceModels,
             mhdModels: mhdModelsToUse,
-            samplingConfig: .realTimePlotting,  // ✅ Enable live plotting for real-time chart updates
-            adaptiveConfig: adaptiveConfig  // ✅ CRITICAL: Pass adaptive config for dt control
+            samplingConfig: .realTimePlotting,
+            adaptiveConfig: adaptiveConfig
         )
 
         print("✓ Simulation initialized")
         print("  Mesh: \(staticParams.mesh.nCells) cells")
         print("  Solver: \(staticParams.solverType)")
         print("  Transport: \(config.runtime.dynamic.transport.modelType)")
+        print("  Metal: \(metalDevice.name) (Metal 4)")
         if !mhdModelsToUse.isEmpty {
             print("  MHD models: \(mhdModelsToUse.count) enabled")
         }
@@ -123,43 +126,31 @@ public actor SimulationRunner: SimulationRunnable {
         // Start background task for progress monitoring
         let progressTask: Task<Void, Never>? = if let callback = progressCallback {
             Task {
-                print("[DEBUG] progressTask started")
                 var iterationCount = 0
                 while !Task.isCancelled {
                     iterationCount += 1
 
-                    // 🐛 DEBUG: Before getProgress()
-                    if iterationCount <= 5 || iterationCount % 10 == 0 {
-                        print("[DEBUG] progressTask iteration \(iterationCount): calling getProgress()")
-                    }
-
                     let progress = await orchestrator.getProgress()
-
-                    // 🐛 DEBUG: After getProgress()
-                    if iterationCount <= 5 || iterationCount % 10 == 0 {
-                        print("[DEBUG] progressTask: got progress, time=\(progress.currentTime)s")
-                    }
 
                     let fraction = progress.currentTime / endTime
                     callback(fraction, progress)
 
                     // Update every 0.1 seconds
-                    try? await Task.sleep(for: .milliseconds(100))
-
-                    // Stop when simulation completes OR if no progress is being made
-                    // (prevents infinite loop on errors)
-                    if progress.currentTime >= endTime {
-                        print("[DEBUG] progressTask: simulation complete, exiting")
+                    do {
+                        try await Task.sleep(for: .milliseconds(100))
+                    } catch {
                         break
                     }
 
-                    // ✅ NEW: Stop if simulation has stalled (likely due to error)
+                    // Stop when simulation completes or if no progress is being made.
+                    if progress.currentTime >= endTime {
+                        break
+                    }
+
                     if iterationCount > 50 && progress.totalSteps == 0 {
-                        print("[DEBUG] progressTask: simulation stalled (no progress after 50 iterations), exiting")
                         break
                     }
                 }
-                print("[DEBUG] progressTask ended")
             }
         } else {
             nil
@@ -260,11 +251,6 @@ public actor SimulationRunner: SimulationRunnable {
             ne[i] = profileConditions.electronDensity.evaluate(at: rNorm[i])
         }
 
-        // 🐛 DEBUG: Print initial profile values before validation
-        print("[INIT-PROFILES] Ti range: [\(ti.min() ?? Float.nan), \(ti.max() ?? Float.nan)] eV")
-        print("[INIT-PROFILES] Te range: [\(te.min() ?? Float.nan), \(te.max() ?? Float.nan)] eV")
-        print("[INIT-PROFILES] ne range: [\(ne.min() ?? Float.nan), \(ne.max() ?? Float.nan)] m⁻³")
-
         // Phase 1a: Check for missing electron temperature (Sprint 1 robustness)
         // If Te is zero/missing, use physically sound fallback Te = Ti
         let te_max = te.max() ?? 0.0
@@ -273,8 +259,7 @@ public actor SimulationRunner: SimulationRunnable {
             te = ti
         }
 
-        // ✅ Apply density floor to prevent negative/zero densities during solver iteration
-        // (consistent with Block1DCoeffsBuilder's ne_floor = 1e18)
+        // Apply the same density floor used by the coefficient builder.
         let ne_floor: Float = 1e18
         for i in 0..<nCells {
             ne[i] = max(ne[i], ne_floor)

@@ -372,10 +372,10 @@ public actor GotenxConfigReader {
         // Transport-specific parameters (optional)
         var parameters: [String: Float] = [:]
 
-        if let chiIon = try? await configReader.fetchDouble(forKey: "runtime.dynamic.transport.chiIon") {
+        if let chiIon = try await configReader.fetchDouble(forKey: "runtime.dynamic.transport.chiIon") {
             parameters["chiIon"] = Float(chiIon)
         }
-        if let chiElectron = try? await configReader.fetchDouble(forKey: "runtime.dynamic.transport.chiElectron") {
+        if let chiElectron = try await configReader.fetchDouble(forKey: "runtime.dynamic.transport.chiElectron") {
             parameters["chiElectron"] = Float(chiElectron)
         }
 
@@ -470,11 +470,11 @@ public actor GotenxConfigReader {
             default: false
         )
 
-        let filename = try? await configReader.fetchString(
+        let filename = try await configReader.fetchString(
             forKey: "runtime.dynamic.restart.filename"
         )
 
-        let time = try? await configReader.fetchDouble(
+        let time = try await configReader.fetchDouble(
             forKey: "runtime.dynamic.restart.time"
         )
 
@@ -548,7 +548,7 @@ public actor GotenxConfigReader {
     // MARK: - Output Configuration
 
     private func fetchOutputConfig() async throws -> OutputConfiguration {
-        let saveInterval = try? await configReader.fetchDouble(
+        let saveInterval = try await configReader.fetchDouble(
             forKey: "output.saveInterval"
         )
 

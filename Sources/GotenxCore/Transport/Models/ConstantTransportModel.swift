@@ -66,10 +66,10 @@ public struct ConstantTransportModel: TransportModel {
 
         // Create constant arrays
         return TransportCoefficients(
-            chiIon: .full([nCells], value: chiIonValue),
-            chiElectron: .full([nCells], value: chiElectronValue),
-            particleDiffusivity: .full([nCells], value: particleDiffusivityValue),
-            convectionVelocity: .full([nCells], value: convectionVelocityValue)
+            evaluatingChiIon: MLXArray.full([nCells], values: MLXArray(chiIonValue)),
+            chiElectron: MLXArray.full([nCells], values: MLXArray(chiElectronValue)),
+            particleDiffusivity: MLXArray.full([nCells], values: MLXArray(particleDiffusivityValue)),
+            convectionVelocity: MLXArray.full([nCells], values: MLXArray(convectionVelocityValue))
         )
     }
 }

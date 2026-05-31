@@ -102,7 +102,7 @@ struct ConfigurationPriorityTests {
     func testCLIOverridesJSON() async throws {
         // Setup: JSON has nCells = 100
         let configPath = try createTestConfig(nCells: 100)
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // CLI override: nCells = 200
         let cliOverrides = [
@@ -124,7 +124,7 @@ struct ConfigurationPriorityTests {
     func testEnvironmentOverridesJSON() async throws {
         // Setup: JSON has nCells = 100
         let configPath = try createTestConfig(nCells: 100)
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // Environment: nCells = 150
         setenv("runtime.static.mesh.nCells", "150", 1)
@@ -163,7 +163,7 @@ struct ConfigurationPriorityTests {
     @Test("Multiple CLI overrides all apply")
     func testMultipleCLIOverrides() async throws {
         let configPath = try createTestConfig(nCells: 100)
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let cliOverrides = [
             "runtime.static.mesh.nCells": "250",
@@ -189,7 +189,7 @@ struct ConfigurationPriorityTests {
     @Test("JSON values used when no overrides present")
     func testJSONUsedWithoutOverrides() async throws {
         let configPath = try createTestConfig(nCells: 175)
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let reader = try await GotenxConfigReader.create(
             jsonPath: configPath,
@@ -207,7 +207,7 @@ struct ConfigurationPriorityTests {
     @Test("Double to Float conversion is explicit and safe")
     func testDoubleToFloatConversion() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let cliOverrides = [
             "runtime.static.mesh.majorRadius": "6.23456789",  // High precision
@@ -231,7 +231,7 @@ struct ConfigurationPriorityTests {
     @Test("Optional fields return nil when not present")
     func testOptionalFieldsHandling() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let reader = try await GotenxConfigReader.create(
             jsonPath: configPath,
@@ -250,7 +250,7 @@ struct ConfigurationPriorityTests {
     @Test("Optional CLI overrides populate nil fields")
     func testOptionalCLIOverrides() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let cliOverrides = [
             "output.saveInterval": "0.05",
@@ -276,7 +276,7 @@ struct ConfigurationPriorityTests {
     @Test("Invalid enum values throw ConfigurationError")
     func testEnumValidation() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // Try invalid geometry type
         let cliOverrides = [
@@ -297,7 +297,7 @@ struct ConfigurationPriorityTests {
     @Test("Valid enum values are parsed correctly")
     func testValidEnumParsing() async throws {
         let configPath = try createTestConfig()
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         let cliOverrides = [
             "output.format": "netcdf"
@@ -322,7 +322,7 @@ struct ConfigurationPriorityTests {
         // where providers were added in the wrong order
 
         let configPath = try createTestConfig(nCells: 100)
-        defer { try? FileManager.default.removeItem(atPath: configPath) }
+        defer { removeTestItemIfExists(atPath: configPath) }
 
         // Simulate the bug scenario:
         // JSON: 100, CLI: 200
@@ -382,7 +382,7 @@ struct ConfigurationPriorityTests {
         """
 
         try minimalJSON.write(to: configPath, atomically: true, encoding: .utf8)
-        defer { try? FileManager.default.removeItem(atPath: configPath.path) }
+        defer { removeTestItemIfExists(atPath: configPath.path) }
 
         let reader = try await GotenxConfigReader.create(
             jsonPath: configPath.path,

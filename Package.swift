@@ -6,9 +6,7 @@ import PackageDescription
 let package = Package(
     name: "swift-gotenx",
     platforms: [
-        .macOS(.v26),
-        .iOS(.v26),
-        .visionOS(.v26)
+        .macOS("26.4")
     ],
     products: [
         // Products define the executables and libraries a package produces, making them visible to other packages.
@@ -42,7 +40,7 @@ let package = Package(
         // SwiftNetCDF: NetCDF file format support for scientific data output
         .package(url: "https://github.com/patrick-zippenfenig/SwiftNetCDF.git", from: "1.2.0"),
 
-        // FusionSurrogates: QLKNN neural network transport model (macOS only)
+        // FusionSurrogates: QLKNN neural network transport model
         .package(url: "https://github.com/1amageek/swift-fusion-surrogates.git", branch: "main"),
 
         // Swift Log: Unified logging API
@@ -62,12 +60,13 @@ let package = Package(
                 .product(name: "MLXLinalg", package: "mlx-swift"),
                 .product(name: "Configuration", package: "swift-configuration"),
                 .product(name: "Logging", package: "swift-log"),
-                // FusionSurrogates: Conditional dependency (macOS only)
-                .product(
-                    name: "FusionSurrogates",
-                    package: "swift-fusion-surrogates",
-                    condition: .when(platforms: [.macOS])
-                ),
+                .product(name: "FusionSurrogates", package: "swift-fusion-surrogates"),
+            ],
+            swiftSettings: [
+                .define("GOTENX_METAL4_REQUIRED")
+            ],
+            linkerSettings: [
+                .linkedFramework("Metal")
             ]
         ),
 

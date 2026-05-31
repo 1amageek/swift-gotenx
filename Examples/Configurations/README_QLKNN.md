@@ -12,10 +12,10 @@ QLKNN (QuaLiKiz Neural Network) is a fast surrogate model for the QuaLiKiz turbu
 
 ## Platform Requirements
 
-**QLKNN is macOS-only** due to the `FusionSurrogates` package dependency.
+swift-Gotenx targets macOS 26.4 and Metal 4 capable Apple Silicon. QLKNN is included by default.
 
-- ✅ macOS 14.0+ (Apple Silicon or Intel)
-- ❌ iOS (not supported)
+- ✅ macOS 26.4+ on Metal 4 capable Apple Silicon
+- ❌ iOS/visionOS (not targeted)
 - ❌ Linux (not supported)
 
 ## Configuration Example
@@ -128,11 +128,11 @@ swift package resolve
 swift build
 ```
 
-### "Feature not yet implemented (macOS only)"
+### "swift-gotenx requires a Metal 4 capable device"
 
-**Cause**: Trying to run QLKNN on iOS or non-macOS platform.
+**Cause**: Running below macOS 26.4 or on hardware without Metal 4 support.
 
-**Solution**: Use `bohmGyrobohm` or `constant` transport model instead.
+**Solution**: Run on macOS 26.4+ with a Metal 4 capable Apple Silicon GPU.
 
 ### Very low/zero transport predicted
 

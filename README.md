@@ -5,8 +5,8 @@ A Swift implementation of Google DeepMind's [TORAX](https://github.com/google-de
 ## Highlights
 
 - **Differentiable Transport Solver**: Coupled 1D PDEs for ion/electron temperature and particle density
-- **Apple Silicon Optimized**: MLX-Swift backend with lazy evaluation, JIT compilation, and unified memory
-- **GPU-Accelerated**: All computations on Apple Silicon GPU using Float32 precision
+- **Apple Silicon Optimized**: MLX-Swift backend with lazy evaluation, JIT compilation, unified memory, and a Metal 4 baseline
+- **GPU-Accelerated**: All computations target Metal 4 capable Apple Silicon GPUs using Float32 precision
 - **QLKNN Neural Network**: Fast turbulent transport prediction (4-6 orders of magnitude faster than QuaLiKiz)
 - **Modular Physics Stack**: Protocol-based transport models and source terms
 - **Type-Safe Concurrency**: Swift 6 actors with `EvaluatedArray` wrapper for Sendable MLXArray
@@ -52,14 +52,14 @@ A Swift implementation of Google DeepMind's [TORAX](https://github.com/google-de
 
 ## Prerequisites
 
-- **macOS 15.0+** on Apple Silicon (M1/M2/M3/M4)
-- **Xcode 16.0+** with Swift 6.2 toolchain
+- **macOS 26.4+** on Apple Silicon with Metal 4 support
+- **Xcode 17.0+** with Swift 6.2 toolchain and the macOS 26.4 SDK
 - **Dependencies** (automatically resolved via SwiftPM):
-  - MLX-Swift 0.29.1+
+  - MLX-Swift 0.31.3+
   - Swift Configuration 0.1.1+
   - Swift Argument Parser 1.5.0+
   - SwiftNetCDF 1.2.0+
-  - FusionSurrogates (macOS only, for QLKNN)
+  - FusionSurrogates (for QLKNN)
 
 **Optional**:
 - **ncdump** (part of NetCDF tools) for inspecting NetCDF output
@@ -104,24 +104,28 @@ cat /tmp/gotenx_results/state_history_*.json | jq .
 
 ```bash
 # Run all tests
-swift test
+perl -e 'alarm shift; exec @ARGV' 700 xcodebuild test \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug \
+  -derivedDataPath /tmp/Gotenx-Package-Xcodebuild-DerivedData
 
 # Run specific test suite
-swift test --filter GotenxTests
-swift test --filter GotenxPhysicsTests
-swift test --filter GotenxCLITests
-
-# Verbose output
-swift test -v
+perl -e 'alarm shift; exec @ARGV' 120 xcodebuild test \
+  -scheme swift-gotenx-Package \
+  -destination 'platform=macOS' \
+  -configuration Debug \
+  -derivedDataPath /tmp/Gotenx-Package-Xcodebuild-DerivedData \
+  -only-testing:GotenxTests/MetalAccelerationPolicyTests
+```
 
 ### NetCDF Compression Strategy
 
 - 出力 NetCDF-4 ファイルは DEFLATE レベル 6 / shuffle 有効で書き出します。
 - 時間方向は最大 256 ステップずつまとめてチャンクし（`[min(256, nTime), nCells]`）、空間方向は全セルを 1 チャンクに含めます。
-- 上記設定でテスト用データに対し 51× 以上、NetCDF 既定チャンクでは 61× の圧縮率を確認しています（`swift test --filter NetCDFCompressionTests/testCompressionRatio`）。
-- CLI の `OutputWriter` が生成する NetCDF でも `swift test --filter OutputWriterTests/testNetCDFCompressionRatio` を実行すると約 20〜25× の圧縮率が再現されます（テストログで実測値を表示）。
+- 上記設定でテスト用データに対し 51× 以上、NetCDF 既定チャンクでは 61× の圧縮率を確認しています（`xcodebuild test -only-testing:GotenxTests/NetCDFCompressionTests/testCompressionRatio`）。
+- CLI の `OutputWriter` が生成する NetCDF でも `xcodebuild test -only-testing:GotenxCLITests/OutputWriterTests/testNetCDFCompressionRatio` を実行すると約 20〜25× の圧縮率が再現されます（テストログで実測値を表示）。
 - 時間方向アクセスの局所性を重視する場合は 128/64 ステップといった粒度に落とすか、差分エンコードなどの前処理を併用してください。
-```
 
 ## Repository Structure
 
@@ -248,16 +252,16 @@ Configurations use JSON format with nested structure:
 
 See `examples/Configurations/` for complete examples.
 
-## QLKNN Neural Network Transport (macOS only)
+## QLKNN Neural Network Transport
 
 swift-Gotenx includes **QLKNN** (QuaLiKiz Neural Network), a fast surrogate model for turbulent transport prediction. QLKNN is **4-6 orders of magnitude faster** than the full QuaLiKiz gyrokinetic code while maintaining high accuracy (R² > 0.96).
 
 ### Platform Requirements
 
-⚠️ **QLKNN is macOS-only** due to the `FusionSurrogates` package dependency.
+swift-Gotenx now targets macOS 26.4 and Metal 4 directly. QLKNN is included by default.
 
-- ✅ macOS 14.0+ (Apple Silicon or Intel)
-- ❌ iOS/visionOS (not supported)
+- ✅ macOS 26.4+ on Metal 4 capable Apple Silicon
+- ❌ iOS/visionOS (not targeted)
 - ❌ Linux (not supported)
 
 ### Quick Start with QLKNN
@@ -397,18 +401,11 @@ swift package resolve
 swift build -c release
 ```
 
-#### "Feature not yet implemented (macOS only)"
+#### "swift-gotenx requires a Metal 4 capable device"
 
-**Cause**: Running on iOS or non-macOS platform.
+**Cause**: Running below macOS 26.4 or on hardware without Metal 4 support.
 
-**Solution**: Use `bohmGyrobohm` transport instead:
-```json
-{
-  "transport": {
-    "modelType": "bohmGyrobohm"
-  }
-}
-```
+**Solution**: Run on macOS 26.4+ with a Metal 4 capable Apple Silicon GPU.
 
 #### QLKNN fallback to Bohm-GyroBohm
 
@@ -561,7 +558,7 @@ See `CLAUDE.md` for detailed roadmap aligned with [Google DeepMind's TORAX paper
 ## Contributing
 
 1. Fork the repository and create a feature branch
-2. Run `swift test` before opening a PR
+2. Run `xcodebuild test` before opening a PR
 3. Include documentation/test updates
 4. Follow Swift formatting conventions
 

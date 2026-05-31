@@ -72,6 +72,29 @@ public struct EquationCoeffs: Sendable {
         self.sourceMatCell = sourceMatCell
         self.transientCoeff = transientCoeff
     }
+
+    public init(
+        evaluatingDface dFace: MLXArray,
+        vFace: MLXArray,
+        sourceCell: MLXArray,
+        sourceMatCell: MLXArray,
+        transientCoeff: MLXArray
+    ) {
+        let evaluated = EvaluatedArray.evaluatingBatch([
+            dFace,
+            vFace,
+            sourceCell,
+            sourceMatCell,
+            transientCoeff
+        ])
+        self.init(
+            dFace: evaluated[0],
+            vFace: evaluated[1],
+            sourceCell: evaluated[2],
+            sourceMatCell: evaluated[3],
+            transientCoeff: evaluated[4]
+        )
+    }
 }
 
 // MARK: - Validation

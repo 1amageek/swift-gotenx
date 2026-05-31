@@ -48,7 +48,7 @@ public struct NewtonRaphsonSolver: PDESolver {
 
     public init(
         tolerance: Float = 1e-6,
-        maxIterations: Int = 100,  // ✅ INCREASED: Allow more iterations for ill-conditioned systems
+        maxIterations: Int = 100,
         theta: Float = 1.0,
         linearSolver: HybridLinearSolver = HybridLinearSolver(),
         pereverzevFactor: Float = 0.5
@@ -122,7 +122,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                 coeffsNew: coeffsNew,
                 dt: dt,
                 theta: self.theta,
-                geometry: geometryTplusDt,
+                layout: layout,
                 boundaryConditions: boundaryConditions
             )
 
@@ -154,16 +154,19 @@ public struct NewtonRaphsonSolver: PDESolver {
         var bestTotalResidual: Float = .infinity
         var stagnantIterations = 0
         var residualNorm: Float = 0.0
+        let jacobianBasis = MLXArray.eye(xScaled.values.value.shape[0])
+        eval(jacobianBasis)
 
         for iter in 0..<maxIterations {
             iterations = iter + 1
 
             // Guard against NaN/Inf creeping into the scaled state.
-            let xScaled_min = xScaled.values.value.min(keepDims: false)
-            let xScaled_max = xScaled.values.value.max(keepDims: false)
-            eval(xScaled_min, xScaled_max)
-            let x_min = xScaled_min.item(Float.self)
-            let x_max = xScaled_max.item(Float.self)
+            let xRange = MLX.stacked([
+                xScaled.values.value.min(keepDims: false),
+                xScaled.values.value.max(keepDims: false)
+            ], axis: 0).asArray(Float.self)
+            let x_min = xRange[0]
+            let x_max = xRange[1]
 
             if !x_min.isFinite || !x_max.isFinite {
                 logger.warning("xScaled contains NaN/Inf; stopping iteration", metadata: [
@@ -175,7 +178,7 @@ public struct NewtonRaphsonSolver: PDESolver {
             // Compute residual in scaled space
             let residualScaled = residualFnScaled(xScaled.values.value)
 
-            // ✅ PHASE 1-2: Per-variable residual norm tracking
+            // Track residual norms by variable.
             let residual_Ti = residualScaled[0..<nCells]
             let residual_Te = residualScaled[nCells..<(2*nCells)]
             let residual_ne = residualScaled[(2*nCells)..<(3*nCells)]
@@ -208,8 +211,8 @@ public struct NewtonRaphsonSolver: PDESolver {
                 "psi": "\(String(format: "%.2e", residualNorm_psi))"
             ])
 
-            // ✅ OPTION 2: Per-variable convergence criteria
-            // Keeps Newton direction/Jacobian intact, only changes convergence check
+            // Keep the Newton direction and Jacobian intact; only the convergence
+            // check is variable-specific.
             // Based on NEWTON_DIRECTION_ANALYSIS.md: Ti/Te stagnate, ne improves
             let tolerance_Ti: Float = 10.0   // Relaxed (currently ~5.86)
             let tolerance_Te: Float = 10.0   // Relaxed (currently ~5.86)
@@ -263,7 +266,7 @@ public struct NewtonRaphsonSolver: PDESolver {
             }
 
             if converged {
-                logger.info("✅ All variables converged", metadata: [
+                logger.info("All variables converged", metadata: [
                     "Ti": "\(String(format: "%.2e", residualNorm_Ti))",
                     "Te": "\(String(format: "%.2e", residualNorm_Te))",
                     "ne": "\(String(format: "%.2e", residualNorm_ne))",
@@ -285,46 +288,17 @@ public struct NewtonRaphsonSolver: PDESolver {
                 ])
             }
 
-            // Compute Jacobian via vectorized vjp() in scaled space.
-            // (computeJacobianViaVJP materializes the result internally.)
-            let jacobianScaled = computeJacobianViaVJP(residualFnScaled, xScaled.values.value)
+            let jacobianScaled = computeJacobianViaVJP(
+                residualFnScaled,
+                xScaled.values.value,
+                basis: jacobianBasis
+            )
 
-
-            // ⚠️ PRECONDITIONER: SUSPENDED - See PRECONDITIONER_SUSPENDED_REVIEW.md
-            //
-            // The diagonal block-based preconditioner implemented here has been SUSPENDED
-            // due to critical issues identified in code review:
-            //
-            // 1. DOUBLE SCALING RISK:
-            //    - residualScaled is already scaled by referenceState (line 186)
-            //    - jacobianScaled inherits this scaling via VJP
-            //    - Adding P-based preconditioning creates double scaling
-            //
-            // 2. MISIDENTIFIED ROOT CAUSE:
-            //    - 2700× Jacobian scale difference is physically natural
-            //      (diffusion coefficients 10×, time-scale 10³)
-            //    - Real bottleneck: Line search α stuck at 0.25
-            //    - Newton direction shrinks to 1e-7
-            //
-            // 3. PREMATURE IMPLEMENTATION:
-            //    - Should first investigate WHY α=1.0 fails after iter=0
-            //    - Should verify Newton direction validity
-            //    - Should check line search/damping settings
-            //
-            // NEXT STEPS (see PRECONDITIONER_SUSPENDED_REVIEW.md):
-            // 1. Investigate line search behavior
-            // 2. Check Newton direction validity
-            // 3. Test lightweight column-norm preconditioning IF needed
-            //
-            // The preconditioner code below is kept for reference but INACTIVE.
-
-            // Solve linear system: J * Δx = -R using hybrid solver
             let deltaScaled: MLXArray
             do {
                 deltaScaled = try linearSolver.solve(jacobianScaled, -residualScaled)
             } catch {
                 logger.error("Linear solver failed", metadata: ["iter": "\(iter)", "error": "\(error)"])
-                // Return partial solution (unscale before returning)
                 let finalPhysical = xScaled.unscaled(by: referenceState)
                 let finalProfiles = finalPhysical.toCoreProfiles()
                 return SolverResult(
@@ -339,17 +313,10 @@ public struct NewtonRaphsonSolver: PDESolver {
                 )
             }
 
-            // ✅ PHASE 1-1: Newton direction validation, fused into ONE GPU→CPU sync.
-            //   (1) Linear solver accuracy: ||J*Δ + R|| / ||R||
-            //   (2) Merit descent:          -R·(J*Δ) > 0
-            //
-            // For non-symmetric Jacobians, Δ·(-R) is not a valid descent test.
-            // The residual-norm merit function φ = 1/2||R||² has directional
-            // derivative RᵀJΔ, which is negative for an exact Newton step.
             let jacobianDelta = jacobianScaled.matmul(deltaScaled)
-            let linear_residual = jacobianDelta + residualScaled
+            let linearResidual = jacobianDelta + residualScaled
             let dirChecks = MLX.stacked([
-                MLX.norm(linear_residual),
+                MLX.norm(linearResidual),
                 MLX.norm(residualScaled),
                 -(residualScaled * jacobianDelta).sum()
             ], axis: 0).asArray(Float.self)
@@ -364,7 +331,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                 "meritDescent": "\(String(format: "%.2e", merit_descent))"
             ])
 
-            // ✅ CRITICAL: Early termination only when the Newton direction is truly
+            // Terminate early only when the Newton direction is truly
             // unusable. This is an *inexact* Newton method: the linear system only has
             // to be solved accurately enough that the direction still reduces the
             // residual. Inexact/Newton-Krylov theory uses a forcing term η (here 0.5):
@@ -375,7 +342,6 @@ public struct NewtonRaphsonSolver: PDESolver {
             // direction, and the descent check and line search below are the real
             // safeguards — a step is taken only if it actually decreases the residual.
             let linearErrorThreshold: Float = 0.5
-
             if linear_error > linearErrorThreshold {
                 logger.error("Linear solver error too high - aborting", metadata: [
                     "linearError": "\(String(format: "%.2e", linear_error))",
@@ -428,7 +394,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                 residualFn: residualFnScaled,
                 x: xScaled.values.value,
                 delta: deltaScaled,
-                residual: residualScaled,
+                initialNorm: residualNorm,
                 maxAlpha: 1.0
             )
 
@@ -522,13 +488,9 @@ public struct NewtonRaphsonSolver: PDESolver {
         coeffsNew: Block1DCoeffs,
         dt: Float,
         theta: Float,
-        geometry: Geometry,
+        layout: FlattenedState.StateLayout,
         boundaryConditions: BoundaryConditions
     ) -> MLXArray {
-        let nCells = geometry.nCells
-        // nCells is guaranteed valid (from Geometry), so try! is safe here
-        let layout = try! FlattenedState.StateLayout(nCells: nCells)
-
         // Unflatten state vectors
         let Ti_old = xOld[layout.tiRange]
         let Te_old = xOld[layout.teRange]
@@ -540,7 +502,7 @@ public struct NewtonRaphsonSolver: PDESolver {
         let ne_new = xNew[layout.neRange]
         let psi_new = xNew[layout.psiRange]
 
-        // Get transient coefficients (CRITICAL FIX #1)
+        // Get transient coefficients.
         // These multiply the time derivative term: transientCoeff * ∂u/∂t
         let transientCoeff_Ti = coeffsNew.ionCoeffs.transientCoeff.value        // n_e for Ti
         let transientCoeff_Te = coeffsNew.electronCoeffs.transientCoeff.value   // n_e for Te
@@ -562,28 +524,28 @@ public struct NewtonRaphsonSolver: PDESolver {
         let electronCoeffsNew = pereverzevAugmented(coeffsNew.electronCoeffs, u: Te_new, geometry: coeffsNew.geometry)
         let densityCoeffsNew = pereverzevAugmented(coeffsNew.densityCoeffs, u: ne_new, geometry: coeffsNew.geometry)
 
-        let f_Ti_new = applySpatialOperatorVectorized(
+        let f_Ti_new = applySpatialOperator1D(
             u: Ti_new,
             coeffs: ionCoeffsNew,
             geometry: coeffsNew.geometry,
             boundaryCondition: boundaryConditions.ionTemperature
         )
 
-        let f_Te_new = applySpatialOperatorVectorized(
+        let f_Te_new = applySpatialOperator1D(
             u: Te_new,
             coeffs: electronCoeffsNew,
             geometry: coeffsNew.geometry,
             boundaryCondition: boundaryConditions.electronTemperature
         )
 
-        let f_ne_new = applySpatialOperatorVectorized(
+        let f_ne_new = applySpatialOperator1D(
             u: ne_new,
             coeffs: densityCoeffsNew,
             geometry: coeffsNew.geometry,
             boundaryCondition: boundaryConditions.electronDensity
         )
 
-        let f_psi_new = applySpatialOperatorVectorized(
+        let f_psi_new = applySpatialOperator1D(
             u: psi_new,
             coeffs: coeffsNew.fluxCoeffs,
             geometry: coeffsNew.geometry,
@@ -591,28 +553,28 @@ public struct NewtonRaphsonSolver: PDESolver {
         )
 
         // Spatial operators at old time - with boundary conditions
-        let f_Ti_old = applySpatialOperatorVectorized(
+        let f_Ti_old = applySpatialOperator1D(
             u: Ti_old,
             coeffs: coeffsOld.ionCoeffs,
             geometry: coeffsOld.geometry,
             boundaryCondition: boundaryConditions.ionTemperature
         )
 
-        let f_Te_old = applySpatialOperatorVectorized(
+        let f_Te_old = applySpatialOperator1D(
             u: Te_old,
             coeffs: coeffsOld.electronCoeffs,
             geometry: coeffsOld.geometry,
             boundaryCondition: boundaryConditions.electronTemperature
         )
 
-        let f_ne_old = applySpatialOperatorVectorized(
+        let f_ne_old = applySpatialOperator1D(
             u: ne_old,
             coeffs: coeffsOld.densityCoeffs,
             geometry: coeffsOld.geometry,
             boundaryCondition: boundaryConditions.electronDensity
         )
 
-        let f_psi_old = applySpatialOperatorVectorized(
+        let f_psi_old = applySpatialOperator1D(
             u: psi_old,
             coeffs: coeffsOld.fluxCoeffs,
             geometry: coeffsOld.geometry,
@@ -625,7 +587,7 @@ public struct NewtonRaphsonSolver: PDESolver {
         let R_ne_raw = dne_dt - theta * f_ne_new - (1.0 - theta) * f_ne_old
         let R_psi_raw = dpsi_dt - theta * f_psi_new - (1.0 - theta) * f_psi_old
 
-        // ✅ FIX: Normalize residuals by dividing by transient coefficients
+        // Normalize residuals by dividing by transient coefficients.
         // This converts the equation from:
         //   n_e ∂T/∂t = RHS  (units: [eV/(m³·s)])
         // to:
@@ -647,179 +609,6 @@ public struct NewtonRaphsonSolver: PDESolver {
         return concatenated([R_Ti, R_Te, R_ne, R_psi], axis: 0)
     }
 
-    /// Apply spatial operator F(u) = ∇·(d∇u) + ∇·(vu) + s + s_mat·u (VECTORIZED - NO LOOPS)
-    ///
-    /// - Parameters:
-    ///   - u: Variable on cells [nCells]
-    ///   - coeffs: Equation coefficients
-    ///   - geometry: Geometric factors
-    ///   - boundaryCondition: Boundary conditions for this variable
-    /// - Returns: F(u) on cells [nCells]
-    private func applySpatialOperatorVectorized(
-        u: MLXArray,
-        coeffs: EquationCoeffs,
-        geometry: GeometricFactors,
-        boundaryCondition: BoundaryCondition
-    ) -> MLXArray {
-        let nCells = u.shape[0]
-
-        // 1. Compute gradient at faces: ∇u = (u[i+1] - u[i]) / dx (VECTORIZED)
-        let u_right = u[1..<nCells]           // [nCells-1]
-        let u_left = u[0..<(nCells-1)]        // [nCells-1]
-        let dx = geometry.cellDistances.value // [nCells-1]
-
-        let gradFace_interior = (u_right - u_left) / (dx + 1e-10)  // [nCells-1]
-
-        // HIGH #5 FIX: Apply boundary conditions correctly
-        let gradFace_left: MLXArray  // [1]
-        switch boundaryCondition.left {
-        case .value(let val):
-            // Dirichlet: compute gradient from boundary value
-            let u_boundary = MLXArray(val)
-            let dx_left = dx[0..<1]  // First cell distance
-            gradFace_left = (u[0..<1] - u_boundary) / (dx_left + 1e-10)
-        case .gradient(let grad):
-            // Neumann: use specified gradient directly
-            gradFace_left = MLXArray([grad])
-        }
-
-        let gradFace_right: MLXArray  // [1]
-        switch boundaryCondition.right {
-        case .value(let val):
-            // Dirichlet: compute gradient from boundary value
-            let u_boundary = MLXArray(val)
-            let dx_right = dx[(nCells-2)..<(nCells-1)]  // Last cell distance
-            gradFace_right = (u_boundary - u[(nCells-1)..<nCells]) / (dx_right + 1e-10)
-        case .gradient(let grad):
-            // Neumann: use specified gradient directly
-            gradFace_right = MLXArray([grad])
-        }
-
-        let gradFace = concatenated([gradFace_left, gradFace_interior, gradFace_right], axis: 0)  // [nFaces]
-
-        // 2. Diffusive flux: F_diff = -d * ∇u (VECTORIZED)
-        let dFace = coeffs.dFace.value         // [nFaces]
-        let diffusiveFlux = -dFace * gradFace  // [nFaces]
-
-        // 3. Convective flux: F_conv = v * u_face (VECTORIZED)
-        let vFace = coeffs.vFace.value         // [nFaces]
-        let u_face = interpolateToFacesVectorized(
-            u,
-            vFace: vFace,
-            dFace: dFace,
-            dx: dx
-        )  // [nFaces]
-        let convectiveFlux = vFace * u_face    // [nFaces]
-
-        // 4. Total flux at faces
-        let totalFlux = diffusiveFlux + convectiveFlux  // [nFaces]
-
-        // 5. Flux divergence with metric tensor: ∇·F = (1/√g) ∂(√g·F)/∂ψ
-        // For non-uniform grids, weight fluxes by Jacobian (√g = g₀)
-        //
-        // Traditional: ∇·F = (F[i+1] - F[i]) / V_cell
-        // Metric tensor: ∇·F = (1/√g_cell) * (√g_face_right * F_right - √g_face_left * F_left) / Δψ
-        //
-        // For uniform grids with g₀=constant, both formulations are equivalent.
-        // For non-uniform grids, metric tensor formulation maintains conservation.
-
-        // Interpolate Jacobian (g₀) to faces
-        let jacobianCells = geometry.jacobian.value  // [nCells]
-        // For faces: use arithmetic average of adjacent cells
-        let jacobianFaces_interior = 0.5 * (jacobianCells[0..<(nCells-1)] + jacobianCells[1..<nCells])  // [nCells-1]
-        // Boundary faces: use adjacent cell value
-        let jacobianFaces = concatenated([
-            jacobianCells[0..<1],           // Left boundary
-            jacobianFaces_interior,         // Interior faces
-            jacobianCells[(nCells-1)..<nCells]  // Right boundary
-        ], axis: 0)  // [nFaces]
-
-        // Weight fluxes by Jacobian: √g·F
-        let weightedFlux = jacobianFaces * totalFlux  // [nFaces]
-
-        // Flux divergence at cells
-        let flux_right = weightedFlux[1..<(nCells + 1)]  // [nCells]
-        let flux_left = weightedFlux[0..<nCells]         // [nCells]
-        let cellDistances = geometry.cellDistances.value  // [nCells-1]
-
-        // Map cellDistances [nCells-1] to per-cell distances [nCells]
-        // For cells[0..nCells-2]: use distance to right neighbor = cellDistances[i]
-        // For cell[nCells-1]: use distance to left neighbor = cellDistances[nCells-2]
-        //
-        // Physical interpretation: each cell's "characteristic length" for flux divergence
-        let dx_padded = concatenated([
-            cellDistances,                                              // [nCells-1] for cells 0..nCells-2
-            cellDistances[(cellDistances.shape[0]-1)..<cellDistances.shape[0]]  // Last distance for cell nCells-1
-        ], axis: 0)  // Total: (nCells-1) + 1 = nCells ✓
-
-        // Final divergence: (1/√g_cell) * ∂(√g·F)/∂ψ
-        let fluxDivergence = (flux_right - flux_left) / ((jacobianCells * dx_padded) + 1e-10)  // [nCells]
-
-        // 6. Source terms (VECTORIZED)
-        let source = coeffs.sourceCell.value           // [nCells]
-        let sourceMatrix = coeffs.sourceMatCell.value  // [nCells]
-
-        // 7. Total spatial operator.
-        // NOTE: deliberately free of any .item()/print diagnostics — this function is
-        // evaluated under the vjp Jacobian transform, and forcing a host read here
-        // corrupts the reverse-mode trace in Debug builds (causing the solve to
-        // diverge). Inspect intermediate values from the caller instead.
-        let F = fluxDivergence + source + sourceMatrix * u  // [nCells]
-
-        return F
-    }
-
-    /// Interpolate cell values to faces using power-law scheme (VECTORIZED - NO LOOPS)
-    ///
-    /// Uses Patankar power-law scheme for convection-diffusion stability:
-    /// - Low Péclet (Pe < 0.1): Central differencing
-    /// - Moderate Péclet (0.1 ≤ Pe ≤ 10): Power-law interpolation
-    /// - High Péclet (Pe > 10): First-order upwinding
-    ///
-    /// - Parameters:
-    ///   - u: Cell values [nCells]
-    ///   - vFace: Convection velocity at faces [m/s], shape [nFaces]
-    ///   - dFace: Diffusion coefficient at faces [m²/s], shape [nFaces]
-    ///   - dx: Cell spacing [m], shape [nCells-1]
-    /// - Returns: Face values [nFaces]
-    private func interpolateToFacesVectorized(
-        _ u: MLXArray,
-        vFace: MLXArray,
-        dFace: MLXArray,
-        dx: MLXArray
-    ) -> MLXArray {
-        // Compute Péclet number: Pe = V·Δx/D
-        let peclet = PowerLawScheme.computePecletNumber(
-            vFace: vFace,
-            dFace: dFace,
-            dx: dx
-        )
-
-        // Power-law weighted interpolation
-        return PowerLawScheme.interpolateToFaces(
-            cellValues: u,
-            peclet: peclet
-        )
-    }
-
-    /// DEPRECATED: Old central-difference implementation
-    /// Left here for reference, should be removed after testing
-    private func interpolateToFacesVectorized_OLD(_ u: MLXArray) -> MLXArray {
-        let nCells = u.shape[0]
-
-        // Central difference for interior faces
-        let u_left = u[0..<(nCells-1)]    // [nCells-1]
-        let u_right = u[1..<nCells]       // [nCells-1]
-        let u_interior = 0.5 * (u_left + u_right)  // [nCells-1]
-
-        // Boundary faces: use adjacent cell value
-        let u_leftBoundary = u[0..<1]                  // [1]
-        let u_rightBoundary = u[(nCells-1)..<nCells]  // [1]
-
-        // Concatenate: [left_boundary, interior_faces, right_boundary]
-        return concatenated([u_leftBoundary, u_interior, u_rightBoundary], axis: 0)  // [nFaces]
-    }
-
     // MARK: - Line Search
 
     /// Backtracking line search for step size selection
@@ -829,26 +618,34 @@ public struct NewtonRaphsonSolver: PDESolver {
         residualFn: (MLXArray) -> MLXArray,
         x: MLXArray,
         delta: MLXArray,
-        residual: MLXArray,
+        initialNorm: Float,
         maxAlpha: Float
     ) -> Float {
-        let initialNorm = sqrt((residual * residual).mean()).item(Float.self)
-
         var alpha = maxAlpha
         let beta: Float = 0.5  // Reduction factor
         let maxIterations = 10
+        let batchSize = 4
+        var checked = 0
 
-        for _ in 0..<maxIterations {
-            let xNew = x + alpha * delta
-            let residualNew = residualFn(xNew)
-            // .item() forces evaluation of residualNew, so no separate eval() needed.
-            let newNorm = sqrt((residualNew * residualNew).mean()).item(Float.self)
+        while checked < maxIterations {
+            var batchAlphas: [Float] = []
+            var batchNorms: [MLXArray] = []
 
-            if newNorm < initialNorm {
-                return alpha
+            while batchAlphas.count < batchSize && checked < maxIterations {
+                let xNew = x + alpha * delta
+                let residualNew = residualFn(xNew)
+                batchAlphas.append(alpha)
+                batchNorms.append(sqrt((residualNew * residualNew).mean()))
+                alpha *= beta
+                checked += 1
             }
 
-            alpha *= beta
+            let norms = MLX.stacked(batchNorms, axis: 0).asArray(Float.self)
+            for index in norms.indices {
+                if norms[index].isFinite && norms[index] < initialNorm {
+                    return batchAlphas[index]
+                }
+            }
         }
 
         // If line search fails, return small step

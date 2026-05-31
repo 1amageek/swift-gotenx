@@ -221,7 +221,7 @@ public struct GeometricFactors: Sendable {
             fatalError("GeometricFactors.from: g2 shape mismatch. Expected \(nFaces) (nFaces), got \(geometry.g2.value.shape[0])")
         }
 
-        // ✅ FIX: Use 1D cylindrical approximation for Jacobian
+        // Use a 1D cylindrical approximation for the Jacobian.
         // In 1D cylindrical coordinates: √g = 2πR₀ (constant)
         // The original implementation used g0 = (R₀ + r)², which varies with r
         // This caused flux divergence to become O(10³⁰), leading to solver failure

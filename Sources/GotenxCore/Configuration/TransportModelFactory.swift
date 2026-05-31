@@ -22,13 +22,7 @@ public struct TransportModelFactory {
             return BohmGyroBohmTransportModel(params: params)
 
         case .qlknn:
-            #if os(macOS)
             return try QLKNNTransportModel(params: params)
-            #else
-            throw ConfigurationError.notImplemented(
-                feature: "QLKNN transport model (macOS only, requires FusionSurrogates)"
-            )
-            #endif
 
         case .densityTransition:
             // Extract parameters with defaults

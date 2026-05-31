@@ -1,4 +1,5 @@
 import Foundation
+import MLX
 
 // MARK: - Transport Coefficients
 
@@ -26,5 +27,25 @@ public struct TransportCoefficients: Sendable, Equatable {
         self.chiElectron = chiElectron
         self.particleDiffusivity = particleDiffusivity
         self.convectionVelocity = convectionVelocity
+    }
+
+    public init(
+        evaluatingChiIon chiIon: MLXArray,
+        chiElectron: MLXArray,
+        particleDiffusivity: MLXArray,
+        convectionVelocity: MLXArray
+    ) {
+        let evaluated = EvaluatedArray.evaluatingBatch([
+            chiIon,
+            chiElectron,
+            particleDiffusivity,
+            convectionVelocity
+        ])
+        self.init(
+            chiIon: evaluated[0],
+            chiElectron: evaluated[1],
+            particleDiffusivity: evaluated[2],
+            convectionVelocity: evaluated[3]
+        )
     }
 }

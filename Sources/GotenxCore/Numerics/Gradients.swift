@@ -28,33 +28,7 @@ public struct GradientComputation {
         variable: MLXArray,
         radii: MLXArray
     ) -> MLXArray {
-        let nCells = variable.shape[0]
-        var gradArray = [Float](repeating: 0.0, count: nCells)
-
-        let varArray = variable.asArray(Float.self)
-        let radiiArray = radii.asArray(Float.self)
-
-        // Forward difference at r=0 (i=0)
-        if nCells > 1 {
-            let dr = radiiArray[1] - radiiArray[0]
-            gradArray[0] = (varArray[1] - varArray[0]) / dr
-        }
-
-        // Central differences for interior points
-        for i in 1..<(nCells - 1) {
-            let dr = radiiArray[i + 1] - radiiArray[i - 1]
-            gradArray[i] = (varArray[i + 1] - varArray[i - 1]) / dr
-        }
-
-        // Backward difference at r=a (i=nCells-1)
-        if nCells > 1 {
-            let dr = radiiArray[nCells - 1] - radiiArray[nCells - 2]
-            gradArray[nCells - 1] = (varArray[nCells - 1] - varArray[nCells - 2]) / dr
-        }
-
-        let grad = MLXArray(gradArray)
-        eval(grad)
-        return grad
+        MLXGradient.radialGradient(field: variable, radii: radii)
     }
 
     /// Compute gradient scale length L = |f| / |∇f|
@@ -85,9 +59,7 @@ public struct GradientComputation {
         let gradVar = computeGradient(variable: variable, radii: radii)
 
         // L = |f| / |∇f|
-        let L = abs(variable) / (abs(gradVar) + epsilon)
-        eval(L)
-        return L
+        return abs(variable) / (abs(gradVar) + epsilon)
     }
 
     /// Compute normalized gradient R/L_n = (R₀/n)(dn/dr)
@@ -111,9 +83,7 @@ public struct GradientComputation {
 
         // R/L = -(R₀/f)(df/dr) = -R₀ × (1/f)(df/dr)
         // Note: Negative sign because L_n typically defined with - sign
-        let R_over_L = -(majorRadius / (variable + epsilon)) * gradVar
-        eval(R_over_L)
-        return R_over_L
+        return -(majorRadius / (variable + epsilon)) * gradVar
     }
 
     /// Compute pressure gradient scale length for RI turbulence
@@ -146,9 +116,7 @@ public struct GradientComputation {
 
         let pressure = n_e * (T_e + T_i) * eV_to_Joule
 
-        // Gradient scale length (eval() called inside computeGradientLength)
-        let L_p = computeGradientLength(variable: pressure, radii: radii, epsilon: epsilon)
-        return L_p
+        return computeGradientLength(variable: pressure, radii: radii, epsilon: epsilon)
     }
 
     /// Compute density gradient scale length
