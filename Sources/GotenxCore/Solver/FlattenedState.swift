@@ -359,17 +359,10 @@ public func computeJacobianViaVJP(
         [residualFn(inputs[0])]
     }
 
-    // Reverse-mode AD per standard-basis cotangent. The previous implementation looped
-    // over the n cotangents, calling vjp() and forcing a GPU→CPU eval() per column —
-    // n synchronous round-trips (~7.2 s for a 400×400 Jacobian). Vectorizing the sweep
-    // with vmap lets MLX batch all n vector-Jacobian products into a single fused
-    // evaluation (~0.5 s, ≈15× faster on the dominant cost).
-    //
-    // NOTE on the final `.T`: empirically (Newton convergence on every scenario — see
-    // EndToEndValidationTest and bench configs) this is the orientation that makes
-    // J·Δ = −R converge; removing it slows or breaks the solve. It exactly reproduces
-    // the original column-loop's `stacked(...).T` convention, so this vmap rewrite is a
-    // behavior-preserving speedup, not a semantics change.
+    // Reverse-mode AD per standard-basis cotangent. For cotangent e_i, vjp returns
+    // the gradient of residual[i] with respect to x, i.e. row i of the Jacobian.
+    // Stacking those rows directly yields J. A transpose here would solve against J^T
+    // for non-symmetric residuals.
     let vjpRow: ([MLXArray]) -> [MLXArray] = { cotangents in
         let (_, grads) = vjp(wrappedFn, primals: [x], cotangents: [cotangents[0]])
         return [grads[0]]
@@ -377,9 +370,8 @@ public func computeJacobianViaVJP(
 
     let identity = MLXArray.eye(n)
     let rows = vmap(vjpRow, inAxes: [0], outAxes: [0])([identity])[0]
-    let jacobian = rows.T
-    eval(jacobian)
-    return jacobian
+    eval(rows)
+    return rows
 }
 
 // MARK: - Error Descriptions

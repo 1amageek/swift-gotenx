@@ -341,22 +341,27 @@ public struct NewtonRaphsonSolver: PDESolver {
 
             // ✅ PHASE 1-1: Newton direction validation, fused into ONE GPU→CPU sync.
             //   (1) Linear solver accuracy: ||J*Δ + R|| / ||R||
-            //   (2) Descent direction:      Δ·(-R) > 0
-            let linear_residual = jacobianScaled.matmul(deltaScaled) + residualScaled
+            //   (2) Merit descent:          -R·(J*Δ) > 0
+            //
+            // For non-symmetric Jacobians, Δ·(-R) is not a valid descent test.
+            // The residual-norm merit function φ = 1/2||R||² has directional
+            // derivative RᵀJΔ, which is negative for an exact Newton step.
+            let jacobianDelta = jacobianScaled.matmul(deltaScaled)
+            let linear_residual = jacobianDelta + residualScaled
             let dirChecks = MLX.stacked([
                 MLX.norm(linear_residual),
                 MLX.norm(residualScaled),
-                (deltaScaled * (-residualScaled)).sum()
+                -(residualScaled * jacobianDelta).sum()
             ], axis: 0).asArray(Float.self)
             let linear_residual_norm = dirChecks[0]
             let residual_norm_val = dirChecks[1]
-            let descent_value = dirChecks[2]
+            let merit_descent = dirChecks[2]
             let linear_error = linear_residual_norm / (residual_norm_val + 1e-20)
 
             logger.debug("Newton direction", metadata: [
                 "iter": "\(iter)",
                 "linearError": "\(String(format: "%.2e", linear_error))",
-                "descent": "\(String(format: "%.2e", descent_value))"
+                "meritDescent": "\(String(format: "%.2e", merit_descent))"
             ])
 
             // ✅ CRITICAL: Early termination only when the Newton direction is truly
@@ -395,9 +400,9 @@ public struct NewtonRaphsonSolver: PDESolver {
                 )
             }
 
-            if descent_value <= 0 {
+            if merit_descent <= 0 {
                 logger.error("Invalid descent direction - aborting", metadata: [
-                    "descentValue": "\(String(format: "%.2e", descent_value))",
+                    "meritDescent": "\(String(format: "%.2e", merit_descent))",
                     "action": "trigger dt retry"
                 ])
 
@@ -412,7 +417,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                     metadata: [
                         "theta": theta,
                         "dt": dt,
-                        "descent_value": descent_value,
+                        "descent_value": merit_descent,
                         "failure_type": 2.0  // 2.0 = invalid_descent_direction
                     ]
                 )

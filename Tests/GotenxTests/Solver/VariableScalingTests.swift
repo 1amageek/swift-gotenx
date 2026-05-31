@@ -185,6 +185,62 @@ struct VariableScalingTests {
 
     // MARK: - Jacobian Consistency Tests
 
+    @Test("VJP Jacobian preserves non-symmetric orientation")
+    func testJacobianOrientationForNonSymmetricResidual() throws {
+        let coefficients = MLXArray(
+            [
+                Float(1.0), Float(2.0), Float(3.0),
+                Float(0.5), Float(-1.0), Float(4.0),
+                Float(7.0), Float(0.0), Float(2.0)
+            ],
+            [3, 3]
+        )
+        let x = MLXArray([Float(0.25), Float(-1.0), Float(2.0)])
+
+        let residualFn: (MLXArray) -> MLXArray = { input in
+            matmul(coefficients, reshaped(input, [3, 1]))[0..., 0]
+        }
+
+        let jacobian = computeJacobianViaVJP(residualFn, x)
+        eval(jacobian)
+
+        let expected: [[Float]] = [
+            [1.0, 2.0, 3.0],
+            [0.5, -1.0, 4.0],
+            [7.0, 0.0, 2.0]
+        ]
+
+        for row in 0..<3 {
+            for column in 0..<3 {
+                let actual = jacobian[row, column].item(Float.self)
+                #expect(
+                    abs(actual - expected[row][column]) < 1e-5,
+                    "Jacobian[\(row), \(column)] = \(actual), expected \(expected[row][column])"
+                )
+            }
+        }
+    }
+
+    @Test("Non-symmetric Newton directions use merit descent")
+    func testNonSymmetricNewtonDirectionUsesMeritDescent() throws {
+        let jacobian = MLXArray(
+            [
+                Float(1.0), Float(10.0),
+                Float(0.0), Float(1.0)
+            ],
+            [2, 2]
+        )
+        let residual = MLXArray([Float(1.0), Float(1.0)])
+
+        let delta = MLX.solve(jacobian, -residual, stream: .cpu)
+        let alignment = (delta * (-residual)).sum().item(Float.self)
+        let meritDescent = -(residual * jacobian.matmul(delta)).sum().item(Float.self)
+
+        #expect(alignment < 0.0, "Legacy alignment check should reject this valid direction")
+        #expect(meritDescent > 0.0, "Merit descent should accept the Newton direction")
+        #expect(abs(meritDescent - 2.0) < 1e-5, "Merit descent should equal ||R||^2")
+    }
+
     @Test("Scaling does not change Jacobian structure")
     func testJacobianConsistency() throws {
         let nCells = 5  // Small for faster test

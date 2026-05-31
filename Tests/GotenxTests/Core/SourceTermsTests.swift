@@ -34,9 +34,43 @@ struct SourceTermsTests {
         #expect(zero.particleSource.shape == [nCells])
         #expect(zero.currentSource.shape == [nCells])
     }
-    
+
+    @Test("Localized exchange-scale heating remains valid")
+    func testLocalizedExchangeScaleHeatingRemainsValid() {
+        let nCells = 10
+        let localizedHeating = EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(2_000.0))))
+        let zero = EvaluatedArray.zeros([nCells])
+
+        let source = SourceTerms(
+            ionHeating: localizedHeating,
+            electronHeating: zero,
+            particleSource: zero,
+            currentSource: zero,
+            metadata: SourceMetadataCollection.empty
+        )
+
+        #expect(source.ionHeating.shape == [nCells])
+    }
+
+    @Test("Localized exchange-scale cooling remains valid")
+    func testLocalizedExchangeScaleCoolingRemainsValid() {
+        let nCells = 10
+        let localizedCooling = EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(-2_000.0))))
+        let zero = EvaluatedArray.zeros([nCells])
+
+        let source = SourceTerms(
+            ionHeating: zero,
+            electronHeating: localizedCooling,
+            particleSource: zero,
+            currentSource: zero,
+            metadata: SourceMetadataCollection.empty
+        )
+
+        #expect(source.electronHeating.shape == [nCells])
+    }
+
     // MARK: - Metadata Addition Tests
-    
+
     @Test("Addition merges metadata from both sources")
     func testAdditionMergesMetadata() {
         let source1 = SourceTerms(

@@ -453,7 +453,7 @@ public actor SimulationOrchestrator {
             // This prevents aggressive dt jumps that cause:
             // - Jacobian condition number explosion (κ > 1e6)
             // - Linear solver accuracy degradation (errors > 1e-2)
-            // - Invalid Newton descent direction (Δ·(-R) < 0)
+            // - Invalid Newton merit descent direction (-R·JΔ < 0)
             let growthCap = adaptiveConfig.maxTimestepGrowth
             let cappedDt = min(rawDt, state.dt * growthCap)
 
@@ -622,32 +622,35 @@ public actor SimulationOrchestrator {
                 break
             }
 
-            // 収束しなかった場合はタイムステップを半分にして再試行
+            // Retry with a smaller timestep when the solver does not converge.
             attempt += 1
-            let nextDt = dtAttempt * 0.5
-
-            // Evaluate retry possibility
-            logger.info("Solver did not converge, evaluating retry", metadata: [
-                "currentDt": "\(dtAttempt)",
-                "nextDt": "\(nextDt)",
-                "minTimestep": "\(timeStepCalculator.minimumTimestep)",
-                "attempt": "\(attempt)",
-                "maxRetries": "\(maxSolverRetries)"
-            ])
-
-            if nextDt < timeStepCalculator.minimumTimestep {
-                // これ以上タイムステップを縮小できないので即時エラー
-                logger.error("Cannot retry: nextDt below minimum", metadata: [
-                    "nextDt": "\(nextDt)",
-                    "minTimestep": "\(timeStepCalculator.minimumTimestep)"
-                ])
+            if attempt > maxSolverRetries {
                 throw SolverError.convergenceFailure(
                     iterations: accumulatedIterations,
                     residualNorm: result.residualNorm
                 )
             }
 
-            if attempt > maxSolverRetries {
+            let minimumTimestep = timeStepCalculator.minimumTimestep
+            let proposedDt = dtAttempt * 0.5
+            let nextDt = max(proposedDt, minimumTimestep)
+
+            // Evaluate retry possibility
+            logger.info("Solver did not converge, evaluating retry", metadata: [
+                "currentDt": "\(dtAttempt)",
+                "proposedDt": "\(proposedDt)",
+                "retryDt": "\(nextDt)",
+                "minTimestep": "\(minimumTimestep)",
+                "attempt": "\(attempt)",
+                "maxRetries": "\(maxSolverRetries)"
+            ])
+
+            if nextDt >= dtAttempt {
+                logger.error("Cannot retry: timestep is already at minimum", metadata: [
+                    "currentDt": "\(dtAttempt)",
+                    "nextDt": "\(nextDt)",
+                    "minTimestep": "\(minimumTimestep)"
+                ])
                 throw SolverError.convergenceFailure(
                     iterations: accumulatedIterations,
                     residualNorm: result.residualNorm

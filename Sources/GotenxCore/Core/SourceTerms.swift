@@ -48,18 +48,17 @@ public struct SourceTerms: Sendable, Equatable {
         precondition(currentSource.shape[0] == nCells,
                     "SourceTerms: current source shape mismatch (expected \(nCells), got \(currentSource.shape[0]))")
 
-        // Validate heating units (should be MW/m³, NOT eV/(m³·s))
-        // Typical ITER values: 0.01 - 1 MW/m³ average
-        // Total ~40 MW over ~1000 m³ volume → ~0.04 MW/m³ average
-        // Allow up to 1000 MW/m³ for localized peaks (10000× safety margin)
-        //
-        // If values are ~1e24, likely returned eV/(m³·s) instead of MW/m³!
-        let maxIonHeating = ionHeating.value.max().item(Float.self)
-        let maxElectronHeating = electronHeating.value.max().item(Float.self)
+        // Validate heating units (should be MW/m³, NOT eV/(m³·s)).
+        // This guard is a unit-conversion sentinel, not a physics limiter:
+        // localized exchange terms can exceed ordinary external-heating densities,
+        // while an already-converted eV/(m³·s) value is typically O(1e24).
+        let heatingUnitSentinel: Float = 1e12
+        let maxIonHeatingMagnitude = abs(ionHeating.value).max().item(Float.self)
+        let maxElectronHeatingMagnitude = abs(electronHeating.value).max().item(Float.self)
 
-        precondition(maxIonHeating < 1000.0,
+        precondition(maxIonHeatingMagnitude < heatingUnitSentinel,
             """
-            SourceTerms: Suspicious ion heating value: \(maxIonHeating) MW/m³
+            SourceTerms: Suspicious ion heating magnitude: \(maxIonHeatingMagnitude) MW/m³
 
             If this value is ~1e24, you likely returned eV/(m³·s) instead of MW/m³!
 
@@ -70,9 +69,9 @@ public struct SourceTerms: Sendable, Equatable {
             Conversion to eV/(m³·s) happens in Block1DCoeffsBuilder, not in physics models.
             """)
 
-        precondition(maxElectronHeating < 1000.0,
+        precondition(maxElectronHeatingMagnitude < heatingUnitSentinel,
             """
-            SourceTerms: Suspicious electron heating value: \(maxElectronHeating) MW/m³
+            SourceTerms: Suspicious electron heating magnitude: \(maxElectronHeatingMagnitude) MW/m³
 
             If this value is ~1e24, you likely returned eV/(m³·s) instead of MW/m³!
 
