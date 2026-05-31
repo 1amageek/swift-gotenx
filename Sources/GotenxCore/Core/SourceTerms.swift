@@ -32,9 +32,11 @@ public struct SourceTerms: Sendable, Equatable {
         electronHeating: EvaluatedArray,
         particleSource: EvaluatedArray,
         currentSource: EvaluatedArray,
-        metadata: SourceMetadataCollection? = nil
+        metadata: SourceMetadataCollection? = nil,
+        validateDebugUnits: Bool = true
     ) {
         #if DEBUG
+        if validateDebugUnits {
         // ═══════════════════════════════════════════════════════════════
         // DEFENSE LAYER: Detect unit errors early (Debug builds only)
         // ═══════════════════════════════════════════════════════════════
@@ -107,6 +109,7 @@ public struct SourceTerms: Sendable, Equatable {
             Typical range: 0.01 - 10 MA/m²
             If value is much larger, check your calculation.
             """)
+        }
         #endif
 
         self.ionHeating = ionHeating
@@ -126,13 +129,18 @@ public struct SourceTerms: Sendable, Equatable {
     }
 
     /// Zero source terms
-    public static func zero(nCells: Int) -> SourceTerms {
+    public static func zero(
+        nCells: Int,
+        metadata: SourceMetadataCollection? = SourceMetadataCollection.empty,
+        validateDebugUnits: Bool = true
+    ) -> SourceTerms {
         SourceTerms(
             ionHeating: .zeros([nCells]),
             electronHeating: .zeros([nCells]),
             particleSource: .zeros([nCells]),
             currentSource: .zeros([nCells]),
-            metadata: SourceMetadataCollection.empty  // Always provide empty metadata
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
         )
     }
 
@@ -140,9 +148,13 @@ public struct SourceTerms: Sendable, Equatable {
     ///
     /// Phase 4a: Merges metadata collections when both are present
     public static func + (lhs: SourceTerms, rhs: SourceTerms) -> SourceTerms {
+        lhs.adding(rhs)
+    }
+
+    public func adding(_ rhs: SourceTerms, validateDebugUnits: Bool = true) -> SourceTerms {
         // Merge metadata collections
         let mergedMetadata: SourceMetadataCollection?
-        switch (lhs.metadata, rhs.metadata) {
+        switch (metadata, rhs.metadata) {
         case (let lm?, let rm?):
             mergedMetadata = SourceMetadataCollection(entries: lm.entries + rm.entries)
         case (let lm?, nil):
@@ -154,11 +166,12 @@ public struct SourceTerms: Sendable, Equatable {
         }
 
         return SourceTerms(
-            ionHeating: EvaluatedArray(evaluating: lhs.ionHeating.value + rhs.ionHeating.value),
-            electronHeating: EvaluatedArray(evaluating: lhs.electronHeating.value + rhs.electronHeating.value),
-            particleSource: EvaluatedArray(evaluating: lhs.particleSource.value + rhs.particleSource.value),
-            currentSource: EvaluatedArray(evaluating: lhs.currentSource.value + rhs.currentSource.value),
-            metadata: mergedMetadata
+            ionHeating: EvaluatedArray(evaluating: ionHeating.value + rhs.ionHeating.value),
+            electronHeating: EvaluatedArray(evaluating: electronHeating.value + rhs.electronHeating.value),
+            particleSource: EvaluatedArray(evaluating: particleSource.value + rhs.particleSource.value),
+            currentSource: EvaluatedArray(evaluating: currentSource.value + rhs.currentSource.value),
+            metadata: mergedMetadata,
+            validateDebugUnits: validateDebugUnits
         )
     }
 }

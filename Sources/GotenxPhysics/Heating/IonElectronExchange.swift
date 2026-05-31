@@ -237,4 +237,42 @@ extension IonElectronExchange {
             metadata: mergedMetadata
         )
     }
+
+    public func applyToSourcesForSolver(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles
+    ) throws -> SourceTerms {
+        let qIEWatts = computeForSolver(
+            ne: profiles.electronDensity.value,
+            Te: profiles.electronTemperature.value,
+            Ti: profiles.ionTemperature.value
+        )
+        let qIE = PhysicsConstants.wattsToMegawatts(qIEWatts)
+
+        return SourceTerms(
+            ionHeating: EvaluatedArray(
+                evaluating: sources.ionHeating.value + qIE
+            ),
+            electronHeating: EvaluatedArray(
+                evaluating: sources.electronHeating.value - qIE
+            ),
+            particleSource: sources.particleSource,
+            currentSource: sources.currentSource,
+            metadata: sources.metadata,
+            validateDebugUnits: false
+        )
+    }
+
+    private func computeForSolver(
+        ne: MLXArray,
+        Te: MLXArray,
+        Ti: MLXArray
+    ) -> MLXArray {
+        let lnLambdaRaw = Float(24.0) - log(sqrt(ne / Float(1e6)) / Te)
+        let lnLambda = PhysicsValidation.clampCoulombLog(lnLambdaRaw)
+        let nuEI = PhysicsConstants.collisionFrequencyPrefactor * ne * Zeff * lnLambda / pow(Te, Float(1.5))
+        let mi = PhysicsConstants.amuToKg(ionMass)
+
+        return (Float(3.0) / Float(2.0)) * (me / mi) * ne * nuEI * kB * (Te - Ti)
+    }
 }

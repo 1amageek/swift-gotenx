@@ -54,6 +54,31 @@ public struct OhmicHeatingSource: SourceModel {
             return emptySourceTerms
         }
     }
+
+    public func computeTermsForSolver(
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        params: SourceParameters
+    ) -> SourceTerms {
+        let nCells = profiles.ionTemperature.shape[0]
+        let emptySourceTerms = SourceTerms.zero(
+            nCells: nCells,
+            metadata: nil,
+            validateDebugUnits: false
+        )
+
+        do {
+            return try model.applyToSourcesForSolver(
+                emptySourceTerms,
+                profiles: profiles,
+                geometry: geometry,
+                plasmaCurrentDensity: nil
+            )
+        } catch {
+            print("Warning: Ohmic heating solver computation failed: \(error)")
+            return emptySourceTerms
+        }
+    }
 }
 
 // MARK: - Fusion Power Source
@@ -121,6 +146,7 @@ public struct FusionPowerSource: SourceModel {
             return emptySourceTerms
         }
     }
+
 }
 
 // MARK: - Ion-Electron Exchange Source
@@ -171,6 +197,30 @@ public struct IonElectronExchangeSource: SourceModel {
             return emptySourceTerms
         }
     }
+
+    public func computeTermsForSolver(
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        params: SourceParameters
+    ) -> SourceTerms {
+        let nCells = profiles.ionTemperature.shape[0]
+        let emptySourceTerms = SourceTerms.zero(
+            nCells: nCells,
+            metadata: nil,
+            validateDebugUnits: false
+        )
+        let safeProfiles = profiles.withElectronDensityClamped()
+
+        do {
+            return try model.applyToSourcesForSolver(
+                emptySourceTerms,
+                profiles: safeProfiles
+            )
+        } catch {
+            print("Warning: Ion-electron exchange solver computation failed: \(error)")
+            return emptySourceTerms
+        }
+    }
 }
 
 // MARK: - Bremsstrahlung Source
@@ -218,6 +268,30 @@ public struct BremsstrahlungSource: SourceModel {
             return sourceTerms
         } catch {
             print("⚠️  Warning: Bremsstrahlung computation failed: \(error)")
+            return emptySourceTerms
+        }
+    }
+
+    public func computeTermsForSolver(
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        params: SourceParameters
+    ) -> SourceTerms {
+        let nCells = profiles.ionTemperature.shape[0]
+        let emptySourceTerms = SourceTerms.zero(
+            nCells: nCells,
+            metadata: nil,
+            validateDebugUnits: false
+        )
+        let safeProfiles = profiles.withElectronDensityClamped()
+
+        do {
+            return try model.applyToSourcesForSolver(
+                emptySourceTerms,
+                profiles: safeProfiles
+            )
+        } catch {
+            print("Warning: Bremsstrahlung solver computation failed: \(error)")
             return emptySourceTerms
         }
     }

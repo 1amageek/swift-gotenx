@@ -552,40 +552,53 @@ public struct NewtonRaphsonSolver: PDESolver {
             boundaryCondition: boundaryConditions.poloidalFlux
         )
 
-        // Spatial operators at old time - with boundary conditions
-        let f_Ti_old = applySpatialOperator1D(
-            u: Ti_old,
-            coeffs: coeffsOld.ionCoeffs,
-            geometry: coeffsOld.geometry,
-            boundaryCondition: boundaryConditions.ionTemperature
-        )
+        let R_Ti_raw: MLXArray
+        let R_Te_raw: MLXArray
+        let R_ne_raw: MLXArray
+        let R_psi_raw: MLXArray
 
-        let f_Te_old = applySpatialOperator1D(
-            u: Te_old,
-            coeffs: coeffsOld.electronCoeffs,
-            geometry: coeffsOld.geometry,
-            boundaryCondition: boundaryConditions.electronTemperature
-        )
+        let oneMinusTheta = 1.0 - theta
+        if oneMinusTheta == 0.0 {
+            // Backward Euler has no old-time spatial contribution. Avoid building
+            // the old operator graph inside every residual and VJP evaluation.
+            R_Ti_raw = dTi_dt - f_Ti_new
+            R_Te_raw = dTe_dt - f_Te_new
+            R_ne_raw = dne_dt - f_ne_new
+            R_psi_raw = dpsi_dt - f_psi_new
+        } else {
+            let f_Ti_old = applySpatialOperator1D(
+                u: Ti_old,
+                coeffs: coeffsOld.ionCoeffs,
+                geometry: coeffsOld.geometry,
+                boundaryCondition: boundaryConditions.ionTemperature
+            )
 
-        let f_ne_old = applySpatialOperator1D(
-            u: ne_old,
-            coeffs: coeffsOld.densityCoeffs,
-            geometry: coeffsOld.geometry,
-            boundaryCondition: boundaryConditions.electronDensity
-        )
+            let f_Te_old = applySpatialOperator1D(
+                u: Te_old,
+                coeffs: coeffsOld.electronCoeffs,
+                geometry: coeffsOld.geometry,
+                boundaryCondition: boundaryConditions.electronTemperature
+            )
 
-        let f_psi_old = applySpatialOperator1D(
-            u: psi_old,
-            coeffs: coeffsOld.fluxCoeffs,
-            geometry: coeffsOld.geometry,
-            boundaryCondition: boundaryConditions.poloidalFlux
-        )
+            let f_ne_old = applySpatialOperator1D(
+                u: ne_old,
+                coeffs: coeffsOld.densityCoeffs,
+                geometry: coeffsOld.geometry,
+                boundaryCondition: boundaryConditions.electronDensity
+            )
 
-        // Residuals: R = dψ/dt - θ*f(ψ_new) - (1-θ)*f(ψ_old)
-        let R_Ti_raw = dTi_dt - theta * f_Ti_new - (1.0 - theta) * f_Ti_old
-        let R_Te_raw = dTe_dt - theta * f_Te_new - (1.0 - theta) * f_Te_old
-        let R_ne_raw = dne_dt - theta * f_ne_new - (1.0 - theta) * f_ne_old
-        let R_psi_raw = dpsi_dt - theta * f_psi_new - (1.0 - theta) * f_psi_old
+            let f_psi_old = applySpatialOperator1D(
+                u: psi_old,
+                coeffs: coeffsOld.fluxCoeffs,
+                geometry: coeffsOld.geometry,
+                boundaryCondition: boundaryConditions.poloidalFlux
+            )
+
+            R_Ti_raw = dTi_dt - theta * f_Ti_new - oneMinusTheta * f_Ti_old
+            R_Te_raw = dTe_dt - theta * f_Te_new - oneMinusTheta * f_Te_old
+            R_ne_raw = dne_dt - theta * f_ne_new - oneMinusTheta * f_ne_old
+            R_psi_raw = dpsi_dt - theta * f_psi_new - oneMinusTheta * f_psi_old
+        }
 
         // Normalize residuals by dividing by transient coefficients.
         // This converts the equation from:
@@ -621,11 +634,21 @@ public struct NewtonRaphsonSolver: PDESolver {
         initialNorm: Float,
         maxAlpha: Float
     ) -> Float {
-        var alpha = maxAlpha
         let beta: Float = 0.5  // Reduction factor
         let maxIterations = 10
         let batchSize = 4
-        var checked = 0
+        var alpha = maxAlpha
+
+        // Most stabilized Newton steps accept alpha=1. Check it before the
+        // batched fallback so successful steps do not compute unused residuals.
+        let firstResidual = residualFn(x + alpha * delta)
+        let firstNorm = sqrt((firstResidual * firstResidual).mean()).item(Float.self)
+        if firstNorm.isFinite && firstNorm < initialNorm {
+            return alpha
+        }
+
+        alpha *= beta
+        var checked = 1
 
         while checked < maxIterations {
             var batchAlphas: [Float] = []

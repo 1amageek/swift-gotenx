@@ -20,6 +20,17 @@ public protocol SourceModel: PhysicsComponent, Sendable {
         params: SourceParameters
     ) -> SourceTerms
 
+    /// Compute source terms for solver residual evaluation.
+    ///
+    /// This path is called repeatedly inside Newton iterations and AD transforms.
+    /// Implementations should return differentiable arrays only and avoid metadata
+    /// integration or host-side scalar reads.
+    func computeTermsForSolver(
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        params: SourceParameters
+    ) -> SourceTerms
+
     /// Phase 4a: Compute source terms with metadata (optional)
     ///
     /// Models that implement this method enable accurate power balance tracking.
@@ -40,6 +51,14 @@ public protocol SourceModel: PhysicsComponent, Sendable {
 // MARK: - Default Implementation (Phase 3 Compatibility)
 
 extension SourceModel {
+    public func computeTermsForSolver(
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        params: SourceParameters
+    ) -> SourceTerms {
+        computeTerms(profiles: profiles, geometry: geometry, params: params)
+    }
+
     /// Default implementation: calls `computeTerms()` without metadata
     ///
     /// Phase 3 models automatically get this fallback behavior.

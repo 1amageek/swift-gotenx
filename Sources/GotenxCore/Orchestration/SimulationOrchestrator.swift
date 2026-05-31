@@ -552,14 +552,20 @@ public actor SimulationOrchestrator {
                 params: dynamicParams.transportParams
             )
 
-            let sourceTerms = sources.reduce(into: SourceTerms.zero(nCells: staticParams.mesh.nCells)) { total, model in
+            let sourceTerms = sources.reduce(
+                into: SourceTerms.zero(
+                    nCells: staticParams.mesh.nCells,
+                    metadata: nil,
+                    validateDebugUnits: false
+                )
+            ) { total, model in
                 if let params = dynamicParams.sourceParams[model.name] {
-                    let contribution = model.computeTerms(
+                    let contribution = model.computeTermsForSolver(
                         profiles: profiles,
                         geometry: geo,
                         params: params
                     )
-                    total = total + contribution
+                    total = total.adding(contribution, validateDebugUnits: false)
                 }
             }
 

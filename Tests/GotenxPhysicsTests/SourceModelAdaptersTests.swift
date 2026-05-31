@@ -36,6 +36,10 @@ struct SourceModelAdaptersTests {
         )
         return Geometry(config: meshConfig)
     }
+
+    func expectClose(_ lhs: MLXArray, _ rhs: MLXArray, name: String) {
+        #expect(allClose(lhs, rhs).item(Bool.self), "\(name) should match")
+    }
     
     // MARK: - Ohmic Heating Source Tests
     
@@ -69,6 +73,23 @@ struct SourceModelAdaptersTests {
         // Ohmic heating goes to electrons only
         #expect(ohmicMetadata?.ionPower == 0, "Ion power should be 0")
         #expect(ohmicMetadata?.electronPower != 0, "Electron power should be non-zero")
+    }
+
+    @Test("Ohmic heating solver terms match diagnostic terms without metadata")
+    func testOhmicHeatingSolverTermsMatchDiagnosticTerms() throws {
+        let source = OhmicHeatingSource()
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let params = SourceParameters(modelType: "ohmic_heating")
+
+        let diagnostic = source.computeTerms(profiles: profiles, geometry: geometry, params: params)
+        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, params: params)
+
+        expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
+        expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
+        expectClose(solver.particleSource.value, diagnostic.particleSource.value, name: "particle source")
+        expectClose(solver.currentSource.value, diagnostic.currentSource.value, name: "current source")
+        #expect(solver.metadata == nil, "Solver terms should skip diagnostic metadata")
     }
     
     // MARK: - Bremsstrahlung Source Tests
@@ -104,6 +125,23 @@ struct SourceModelAdaptersTests {
             #expect(electronPower <= 0, "Electron power should be negative (loss)")
         }
     }
+
+    @Test("Bremsstrahlung solver terms match diagnostic terms without metadata")
+    func testBremsstrahlungSolverTermsMatchDiagnosticTerms() throws {
+        let source = BremsstrahlungSource()
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let params = SourceParameters(modelType: "bremsstrahlung")
+
+        let diagnostic = source.computeTerms(profiles: profiles, geometry: geometry, params: params)
+        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, params: params)
+
+        expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
+        expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
+        expectClose(solver.particleSource.value, diagnostic.particleSource.value, name: "particle source")
+        expectClose(solver.currentSource.value, diagnostic.currentSource.value, name: "current source")
+        #expect(solver.metadata == nil, "Solver terms should skip diagnostic metadata")
+    }
     
     // MARK: - Ion-Electron Exchange Source Tests
     
@@ -138,6 +176,23 @@ struct SourceModelAdaptersTests {
             let totalPower = meta.ionPower + meta.electronPower
             #expect(abs(totalPower) < 1e-3, "Energy should be conserved (total ~0)")
         }
+    }
+
+    @Test("Ion-electron exchange solver terms match diagnostic terms without metadata")
+    func testIonElectronExchangeSolverTermsMatchDiagnosticTerms() throws {
+        let source = IonElectronExchangeSource()
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let params = SourceParameters(modelType: "ion_electron_exchange")
+
+        let diagnostic = source.computeTerms(profiles: profiles, geometry: geometry, params: params)
+        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, params: params)
+
+        expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
+        expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
+        expectClose(solver.particleSource.value, diagnostic.particleSource.value, name: "particle source")
+        expectClose(solver.currentSource.value, diagnostic.currentSource.value, name: "current source")
+        #expect(solver.metadata == nil, "Solver terms should skip diagnostic metadata")
     }
     
     // MARK: - Fusion Power Source Tests

@@ -281,6 +281,41 @@ extension OhmicHeating {
         )
     }
 
+    public func applyToSourcesForSolver(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        plasmaCurrentDensity: MLXArray? = nil
+    ) throws -> SourceTerms {
+        let jParallel: MLXArray
+        if let providedCurrent = plasmaCurrentDensity {
+            jParallel = providedCurrent
+        } else {
+            jParallel = computeParallelCurrentFromProfilesForSolver(
+                profiles: profiles,
+                geometry: geometry
+            )
+        }
+
+        let qOhmWatts = computeForSolver(
+            Te: profiles.electronTemperature.value,
+            jParallel: jParallel,
+            geometry: geometry
+        )
+        let qOhm = PhysicsConstants.wattsToMegawatts(qOhmWatts)
+
+        return SourceTerms(
+            ionHeating: sources.ionHeating,
+            electronHeating: EvaluatedArray(
+                evaluating: sources.electronHeating.value + qOhm
+            ),
+            particleSource: sources.particleSource,
+            currentSource: sources.currentSource,
+            metadata: sources.metadata,
+            validateDebugUnits: false
+        )
+    }
+
     /// Compute parallel current density from plasma profiles (CRITICAL FIX #1)
     ///
     /// Implements simplified current density model:
@@ -358,5 +393,59 @@ extension OhmicHeating {
         let j_parallel = grad_psi / (mu0 * R0)
 
         return j_parallel
+    }
+
+    private func computeForSolver(
+        Te: MLXArray,
+        jParallel: MLXArray,
+        geometry: Geometry
+    ) -> MLXArray {
+        let etaSpitzer = PhysicsConstants.spitzerPrefactor * Zeff * lnLambda / pow(Te, 1.5)
+
+        let eta: MLXArray
+        if useNeoclassical {
+            let geomFactors = GeometricFactors.from(geometry: geometry)
+            let epsilon = geomFactors.rCell.value / geometry.majorRadius
+            eta = etaSpitzer * (1.0 + pow(epsilon, 1.5))
+        } else {
+            eta = etaSpitzer
+        }
+
+        return eta * jParallel * jParallel
+    }
+
+    private func computeParallelCurrentFromProfilesForSolver(
+        profiles: CoreProfiles,
+        geometry: Geometry
+    ) -> MLXArray {
+        let psi = profiles.poloidalFlux.value
+        let nCells = psi.shape[0]
+
+        guard nCells >= 3 else {
+            return MLXArray.zeros([nCells])
+        }
+
+        let geomFactors = GeometricFactors.from(geometry: geometry)
+        let rCell = geomFactors.rCell.value
+
+        let drInterior = rCell[2..<nCells] - rCell[0..<(nCells - 2)]
+        let dpsiInterior = psi[2..<nCells] - psi[0..<(nCells - 2)]
+        let gradPsiInterior = dpsiInterior / (drInterior + 1e-10)
+
+        let drLeft = rCell[1] - rCell[0]
+        let dpsiLeft = psi[1] - psi[0]
+        let gradPsiLeft = dpsiLeft / (drLeft + 1e-10)
+
+        let drRight = rCell[nCells - 1] - rCell[nCells - 2]
+        let dpsiRight = psi[nCells - 1] - psi[nCells - 2]
+        let gradPsiRight = dpsiRight / (drRight + 1e-10)
+
+        let gradPsi = concatenated([
+            gradPsiLeft.reshaped([1]),
+            gradPsiInterior,
+            gradPsiRight.reshaped([1])
+        ], axis: 0)
+
+        return gradPsi / (PhysicsConstants.mu0 * geometry.majorRadius)
     }
 }

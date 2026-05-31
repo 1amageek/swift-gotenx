@@ -222,6 +222,41 @@ extension Bremsstrahlung {
             metadata: mergedMetadata
         )
     }
+
+    public func applyToSourcesForSolver(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles
+    ) throws -> SourceTerms {
+        let pBremsWatts = computeForSolver(
+            ne: profiles.electronDensity.value,
+            Te: profiles.electronTemperature.value
+        )
+        let pBrems = PhysicsConstants.wattsToMegawatts(pBremsWatts)
+
+        return SourceTerms(
+            ionHeating: sources.ionHeating,
+            electronHeating: EvaluatedArray(
+                evaluating: sources.electronHeating.value + pBrems
+            ),
+            particleSource: sources.particleSource,
+            currentSource: sources.currentSource,
+            metadata: sources.metadata,
+            validateDebugUnits: false
+        )
+    }
+
+    private func computeForSolver(ne: MLXArray, Te: MLXArray) -> MLXArray {
+        var fRel = MLXArray.zeros(like: Te)
+
+        if includeRelativistic {
+            let mask = MLX.greater(Te, Float(1000.0))
+            let maskFloat = mask.asType(.float32)
+            let relativisticFactor = (Te / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
+            fRel = maskFloat * relativisticFactor
+        }
+
+        return -C_brems * ne * sqrt(Te) * ne * Zeff * (Float(1.0) + fRel)
+    }
 }
 
 // MARK: - Diagnostic Output
