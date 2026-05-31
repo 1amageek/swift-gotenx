@@ -346,6 +346,16 @@ public struct ConfigurationValidator {
         dt: Float,
         cellSpacing: Float
     ) throws {
+        // Only the constant-transport model carries chi as explicit configuration
+        // parameters. Self-computing models (Bohm-GyroBohm, QLKNN, density-transition)
+        // derive transport coefficients at runtime, so a static CFL check from config
+        // parameters does not apply — runtime adaptive timestepping handles stability.
+        // (Previously this validation unconditionally required chi_ion/chi_electron,
+        // contradicting its own suggestion to "use a model that computes it".)
+        guard transport.modelType == .constant else {
+            return
+        }
+
         // Use optional API - explicit missing value handling
         guard let chiIon = transport.parameter("chi_ion") else {
             throw ConfigurationValidationError.missingRequiredParameter(

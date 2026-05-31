@@ -31,7 +31,7 @@ let package = Package(
     ],
     dependencies: [
         // MLX-Swift: Array framework for machine learning on Apple Silicon
-        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.29.1"),
+        .package(url: "https://github.com/ml-explore/mlx-swift", from: "0.31.3"),
 
         // Swift Configuration: Configuration management
         .package(url: "https://github.com/apple/swift-configuration", from: "0.1.1"),
@@ -44,6 +44,9 @@ let package = Package(
 
         // FusionSurrogates: QLKNN neural network transport model (macOS only)
         .package(url: "https://github.com/1amageek/swift-fusion-surrogates.git", branch: "main"),
+
+        // Swift Log: Unified logging API
+        .package(url: "https://github.com/apple/swift-log.git", from: "1.6.1"),
     ],
     targets: [
         // Targets are the basic building blocks of a package, defining a module or a test suite.
@@ -58,6 +61,7 @@ let package = Package(
                 .product(name: "MLXFFT", package: "mlx-swift"),
                 .product(name: "MLXLinalg", package: "mlx-swift"),
                 .product(name: "Configuration", package: "swift-configuration"),
+                .product(name: "Logging", package: "swift-log"),
                 // FusionSurrogates: Conditional dependency (macOS only)
                 .product(
                     name: "FusionSurrogates",
@@ -93,6 +97,7 @@ let package = Package(
                 "GotenxUI",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "SwiftNetCDF", package: "SwiftNetCDF"),
+                .product(name: "Logging", package: "swift-log"),
             ]
         ),
 

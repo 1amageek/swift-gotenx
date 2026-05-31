@@ -1,7 +1,11 @@
 import Foundation
 import MLX
+import Logging
 
 // MARK: - Hybrid Linear Solver
+
+// Logger for the hybrid linear solver
+private let logger = Logger(label: "com.gotenx.core.linear")
 
 /// Iterative linear solver with row normalization preconditioning
 ///
@@ -62,28 +66,53 @@ public struct HybridLinearSolver: Sendable {
     /// - Returns: Solution x [n]
     /// - Throws: SolverError if solution fails to converge
     public func solve(_ A: MLXArray, _ b: MLXArray, usePreconditioner: Bool = true) throws -> MLXArray {
-        // Try direct solver first (MLX.solve on CPU)
-        do {
-            print("[HybridLinearSolver] Attempting direct solver (MLX.solve on CPU)...")
-            let x = MLX.solve(A, b, stream: .cpu)
-            eval(x)
+        // Direct solve with two-sided equilibration + iterative refinement.
+        //
+        // The coupled-transport Jacobian becomes badly scaled and ill-conditioned
+        // once stiff source-term derivatives appear (single entries reaching ~10¹¹,
+        // κ ≈ 10⁵). In Float32 a raw LU solve then loses ~2 digits, leaving
+        // ||A·x − b||/||b|| of a few percent and an unusable Newton direction.
+        //
+        // 1. Symmetric equilibration `Â = Dr·A·Dc` (Dr=1/√rowNorm, Dc=1/√colNorm)
+        //    brings every row and column to ~unit norm, collapsing κ to O(1). The
+        //    scaling norms are floored relative to the largest norm so genuinely
+        //    decoupled (near-zero) rows/columns — e.g. a non-evolved channel — are
+        //    never amplified.
+        // 2. Iterative refinement on the *equilibrated* system drives Â·y → Dr·b to
+        //    near machine precision; because x = Dc·y, the recovered x solves the
+        //    original A·x = b accurately. For an already well-conditioned system this
+        //    is a no-op, so it cannot perturb steps that were converging.
+        let n = A.shape[0]
+        let rowNorms = MLX.norm(A, ord: 2, axis: 1, keepDims: false)
+        let colNorms = MLX.norm(A, ord: 2, axis: 0, keepDims: false)
+        let rowFloor = rowNorms.max() * 1e-6
+        let colFloor = colNorms.max() * 1e-6
+        let dr = 1.0 / sqrt(maximum(rowNorms, rowFloor))
+        let dc = 1.0 / sqrt(maximum(colNorms, colFloor))
 
-            // Verify solution is valid
-            let xMin = x.min(keepDims: false).item(Float.self)
-            let xMax = x.max(keepDims: false).item(Float.self)
+        let aEq = dr.reshaped([n, 1]) * A * dc.reshaped([1, n])
+        let bEq = dr * b
 
-            if xMin.isFinite && xMax.isFinite {
-                print("[HybridLinearSolver] ✅ Direct solver succeeded: x range=[\(String(format: "%.2e", xMin)), \(String(format: "%.2e", xMax))]")
-                return x
-            } else {
-                print("[HybridLinearSolver] ⚠️  Direct solver returned inf/nan, falling back to iterative")
-            }
-        } catch {
-            print("[HybridLinearSolver] ⚠️  Direct solver failed (\(error)), falling back to iterative")
+        var y = MLX.solve(aEq, bEq, stream: .cpu)
+        for _ in 0..<2 {
+            let residual = bEq - aEq.matmul(y)
+            y = y + MLX.solve(aEq, residual, stream: .cpu)
         }
+        let x = dc * y
+
+        // Verify solution is valid (.item() forces evaluation of x).
+        let xMin = x.min(keepDims: false).item(Float.self)
+        let xMax = x.max(keepDims: false).item(Float.self)
+
+        if xMin.isFinite && xMax.isFinite {
+            return x
+        }
+        logger.warning("Direct solver returned inf/nan, falling back to iterative")
 
         // Fallback: iterative solver
-        print("[HybridLinearSolver] Using iterative solver with \(usePreconditioner ? "row normalization preconditioning" : "no preconditioning")")
+        logger.debug("Using iterative solver", metadata: [
+            "preconditioner": "\(usePreconditioner ? "row-normalization" : "none")"
+        ])
 
         if usePreconditioner {
             return try solveWithPreconditioning(A, b)

@@ -80,6 +80,38 @@ extension CoreProfiles {
             poloidalFlux: poloidalFlux
         )
     }
+
+    /// Floor temperatures and density to physical minima for use in source/transport
+    /// coefficient evaluation.
+    ///
+    /// Many source terms (ohmic ∝ T_e^-1.5, Bremsstrahlung ∝ √T_e, ion–electron
+    /// exchange ∝ T_e^-1.5) and their derivatives blow up — or become NaN — as a
+    /// temperature transiently overshoots toward or below zero during a Newton
+    /// iteration. Flooring the temperatures that feed the coefficient evaluation
+    /// keeps those derivatives bounded (so the Jacobian stays well-conditioned)
+    /// without affecting the time-derivative term of the residual, which continues to
+    /// use the un-floored state and so still drives the solution to the true value.
+    /// The floors sit far below any physical plasma temperature/density, so they are
+    /// inactive at convergence.
+    ///
+    /// - Parameters:
+    ///   - temperatureMin: Minimum allowed temperature [eV]
+    ///   - densityMin: Minimum allowed density [m^-3]
+    public func withPhysicalFloors(
+        temperatureMin: Float = 1.0,
+        densityMin: Float = 1e18
+    ) -> CoreProfiles {
+        let clampedTi = maximum(ionTemperature.value, MLXArray(temperatureMin))
+        let clampedTe = maximum(electronTemperature.value, MLXArray(temperatureMin))
+        let clampedNe = maximum(electronDensity.value, MLXArray(densityMin))
+
+        return CoreProfiles(
+            ionTemperature: EvaluatedArray(evaluating: clampedTi),
+            electronTemperature: EvaluatedArray(evaluating: clampedTe),
+            electronDensity: EvaluatedArray(evaluating: clampedNe),
+            poloidalFlux: poloidalFlux
+        )
+    }
 }
 
 // MARK: - Helper Functions

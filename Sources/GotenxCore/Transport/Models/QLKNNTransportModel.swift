@@ -1,5 +1,11 @@
 import MLX
 import Foundation
+
+// FusionSurrogates is a macOS-only dependency (see Package.swift), and this whole
+// model is gated behind `#if os(macOS)` at its only call site (TransportModelFactory).
+// Guard the import and the type identically so the non-macOS (iOS / visionOS) builds
+// the package declares do not fail on the unconditional import.
+#if os(macOS)
 import FusionSurrogates
 
 // MARK: - QLKNN Transport Model
@@ -332,3 +338,5 @@ public struct QLKNNTransportModel: TransportModel {
         return pfe_total * chiGB
     }
 }
+
+#endif  // os(macOS)

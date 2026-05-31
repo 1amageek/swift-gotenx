@@ -3,14 +3,26 @@ import Foundation
 
 // MARK: - Linear Solver
 
-/// Linear solver using predictor-corrector fixed-point iteration
+/// Linear (predictor–corrector) solver for the implicit theta-method transport
+/// equations.
 ///
-/// Solves implicit transport equations using a predictor-corrector scheme:
-/// 1. Predictor: Simple forward Euler step
-/// 2. Corrector: Fixed-point iteration with Pereverzev correction (optional)
+/// Solves one timestep with an explicit predictor followed by theta-method
+/// corrector sweeps:
+/// 1. Predictor: `x* = xⁿ + dt · f(xⁿ)`
+/// 2. Corrector: `x^{k+1} = xⁿ + dt · [θ·f(x^k) + (1−θ)·f(xⁿ)]` (optionally Pereverzev-damped)
 ///
-/// This solver is faster than Newton-Raphson for weakly nonlinear problems
-/// but may not converge for strongly nonlinear cases.
+/// where `f(x) = F(x) / transientCoeff` is the per-cell rate of change. Unlike the
+/// Newton-Raphson solver this keeps every operation differentiable (no iterative
+/// inner solve, no line search), which is why the differentiable simulation path
+/// uses it.
+///
+/// The spatial operator `F` is the **shared** finite-volume operator
+/// (`applySpatialOperator1D`) — identical to the one the Newton solver uses — so the
+/// linear solver now applies Dirichlet/Neumann boundary conditions and an
+/// area-weighted (metric-Jacobian) flux divergence. The previous implementation used
+/// a private operator that ignored boundary conditions and mis-weighted the
+/// divergence, which made the scheme unconditionally unstable (temperatures ran
+/// negative and the residual oscillated) even for constant transport.
 public struct LinearSolver: PDESolver {
     // MARK: - Properties
 
@@ -53,22 +65,22 @@ public struct LinearSolver: PDESolver {
         coreProfilesTplusDt: CoreProfiles,
         coeffsCallback: @escaping CoeffsCallback
     ) -> SolverResult {
-        // Initial guess
-        var xNew = coreProfilesTplusDt
+        // Boundary conditions for the implicit step.
+        let boundary = dynamicParamsTplusDt.boundaryConditions
 
         // Get coefficients at old time
         let coeffsOld = coeffsCallback(coreProfilesT, geometryT)
 
-        // Predictor step: Explicit Euler
-        xNew = predictorStep(
+        // Predictor step: explicit Euler from x^n
+        var xNew = predictorStep(
             xOld: coreProfilesT,
             coeffsOld: coeffsOld,
             dt: dt,
-            dr: staticParams.mesh.dr,
-            staticParams: staticParams
+            staticParams: staticParams,
+            boundary: boundary
         )
 
-        // Corrector steps: Fixed-point iteration
+        // Corrector steps: theta-method fixed-point iteration
         var residualNorm: Float = 0.0
         var actualIterations = 0
 
@@ -76,10 +88,9 @@ public struct LinearSolver: PDESolver {
             actualIterations += 1
             let xPrev = xNew
 
-            // Get coefficients at new time
+            // Coefficients at the current iterate (new time)
             let coeffsNew = coeffsCallback(xNew, geometryTplusDt)
 
-            // Corrector step
             xNew = correctorStep(
                 xOld: coreProfilesT,
                 xPrev: xPrev,
@@ -87,15 +98,13 @@ public struct LinearSolver: PDESolver {
                 coeffsNew: coeffsNew,
                 dt: dt,
                 theta: theta,
-                dr: staticParams.mesh.dr,
                 usePereversev: usePereversevCorrector,
-                staticParams: staticParams
+                staticParams: staticParams,
+                boundary: boundary
             )
 
-            // Compute residual norm
             residualNorm = computeResidualNorm(xNew: xNew, xPrev: xPrev)
 
-            // Check convergence using configured tolerance
             if residualNorm < staticParams.solverTolerance {
                 break
             }
@@ -116,41 +125,28 @@ public struct LinearSolver: PDESolver {
 
     // MARK: - Predictor Step
 
-    /// Predictor step: Explicit Euler
-    ///
-    /// x^* = x^n + dt * f(x^n)
-    ///
-    /// **CRITICAL FIX**: Only evolves variables specified in staticParams
+    /// Predictor step: explicit Euler `x* = xⁿ + dt · f(xⁿ)` (evolved variables only).
     private func predictorStep(
         xOld: CoreProfiles,
         coeffsOld: Block1DCoeffs,
         dt: Float,
-        dr: Float,
-        staticParams: StaticRuntimeParams
+        staticParams: StaticRuntimeParams,
+        boundary: BoundaryConditions
     ) -> CoreProfiles {
-        // Apply spatial operator: f(x^n)
-        let fOld = applySpatialOperator(
-            profiles: xOld,
-            coeffs: coeffsOld,
-            dr: dr
-        )
+        let fOld = spatialRates(profiles: xOld, coeffs: coeffsOld, boundary: boundary)
 
-        // Update: x^* = x^n + dt * f(x^n) - only for evolved variables
-        let tiNew = staticParams.evolveIonHeat ?
-            xOld.ionTemperature.value + dt * fOld.0 :
-            xOld.ionTemperature.value
-
-        let teNew = staticParams.evolveElectronHeat ?
-            xOld.electronTemperature.value + dt * fOld.1 :
-            xOld.electronTemperature.value
-
-        let neNew = staticParams.evolveDensity ?
-            xOld.electronDensity.value + dt * fOld.2 :
-            xOld.electronDensity.value
-
-        let psiNew = staticParams.evolveCurrent ?
-            xOld.poloidalFlux.value + dt * fOld.3 :
-            xOld.poloidalFlux.value
+        let tiNew = staticParams.evolveIonHeat
+            ? xOld.ionTemperature.value + dt * fOld.0
+            : xOld.ionTemperature.value
+        let teNew = staticParams.evolveElectronHeat
+            ? xOld.electronTemperature.value + dt * fOld.1
+            : xOld.electronTemperature.value
+        let neNew = staticParams.evolveDensity
+            ? xOld.electronDensity.value + dt * fOld.2
+            : xOld.electronDensity.value
+        let psiNew = staticParams.evolveCurrent
+            ? xOld.poloidalFlux.value + dt * fOld.3
+            : xOld.poloidalFlux.value
 
         return CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: tiNew),
@@ -162,11 +158,7 @@ public struct LinearSolver: PDESolver {
 
     // MARK: - Corrector Step
 
-    /// Corrector step: Theta-method iteration
-    ///
-    /// x^{k+1} = x^n + dt * [θ*f(x^k) + (1-θ)*f(x^n)]
-    ///
-    /// **CRITICAL FIX**: Only evolves variables specified in staticParams
+    /// Corrector step: `x^{k+1} = xⁿ + dt · [θ·f(x^k) + (1−θ)·f(xⁿ)]` (evolved variables only).
     private func correctorStep(
         xOld: CoreProfiles,
         xPrev: CoreProfiles,
@@ -174,21 +166,16 @@ public struct LinearSolver: PDESolver {
         coeffsNew: Block1DCoeffs,
         dt: Float,
         theta: Float,
-        dr: Float,
         usePereversev: Bool,
-        staticParams: StaticRuntimeParams
+        staticParams: StaticRuntimeParams,
+        boundary: BoundaryConditions
     ) -> CoreProfiles {
-        // Spatial operator at old time: f(x^n)
-        let fOld = applySpatialOperator(profiles: xOld, coeffs: coeffsOld, dr: dr)
+        let fOld = spatialRates(profiles: xOld, coeffs: coeffsOld, boundary: boundary)
+        let fNew = spatialRates(profiles: xPrev, coeffs: coeffsNew, boundary: boundary)
 
-        // Spatial operator at new time: f(x^k)
-        let fNew = applySpatialOperator(profiles: xPrev, coeffs: coeffsNew, dr: dr)
-
-        // Theta-method update
         let dtTheta = dt * theta
         let dtOneMinusTheta = dt * (1.0 - theta)
 
-        // Only evolve variables flagged in staticParams
         var tiNew = xOld.ionTemperature.value
         var teNew = xOld.electronTemperature.value
         var neNew = xOld.electronDensity.value
@@ -197,35 +184,28 @@ public struct LinearSolver: PDESolver {
         if staticParams.evolveIonHeat {
             tiNew = xOld.ionTemperature.value + dtTheta * fNew.0 + dtOneMinusTheta * fOld.0
         }
-
         if staticParams.evolveElectronHeat {
             teNew = xOld.electronTemperature.value + dtTheta * fNew.1 + dtOneMinusTheta * fOld.1
         }
-
         if staticParams.evolveDensity {
             neNew = xOld.electronDensity.value + dtTheta * fNew.2 + dtOneMinusTheta * fOld.2
         }
-
         if staticParams.evolveCurrent {
             psiNew = xOld.poloidalFlux.value + dtTheta * fNew.3 + dtOneMinusTheta * fOld.3
         }
 
-        // Pereverzev correction (improves convergence) - only for evolved variables
+        // Pereverzev damping (blend with previous iterate) for evolved variables.
         if usePereversev {
-            let alpha: Float = 0.5  // Damping factor
-
+            let alpha: Float = 0.5
             if staticParams.evolveIonHeat {
                 tiNew = alpha * tiNew + (1.0 - alpha) * xPrev.ionTemperature.value
             }
-
             if staticParams.evolveElectronHeat {
                 teNew = alpha * teNew + (1.0 - alpha) * xPrev.electronTemperature.value
             }
-
             if staticParams.evolveDensity {
                 neNew = alpha * neNew + (1.0 - alpha) * xPrev.electronDensity.value
             }
-
             if staticParams.evolveCurrent {
                 psiNew = alpha * psiNew + (1.0 - alpha) * xPrev.poloidalFlux.value
             }
@@ -239,157 +219,72 @@ public struct LinearSolver: PDESolver {
         )
     }
 
-    // MARK: - Spatial Operator
+    // MARK: - Spatial Rates
 
-    /// Apply spatial operator to all profiles
-    ///
-    /// Returns: (f_Ti, f_Te, f_ne, f_psi)
-    private func applySpatialOperator(
+    /// Per-cell rates of change `∂x/∂t = F(x) / transientCoeff` for all four channels,
+    /// using the shared finite-volume operator (boundary conditions + area-weighted
+    /// divergence) so the discretization matches the Newton-Raphson solver exactly.
+    private func spatialRates(
         profiles: CoreProfiles,
         coeffs: Block1DCoeffs,
-        dr: Float
+        boundary: BoundaryConditions
     ) -> (MLXArray, MLXArray, MLXArray, MLXArray) {
-        // Apply per-equation operators
+        let geometry = coeffs.geometry
 
-        let fTi = applyOperatorToVariable(
-            x: profiles.ionTemperature.value,
+        let fTi = rate(
+            u: profiles.ionTemperature.value,
             eqCoeffs: coeffs.ionCoeffs,
-            geometry: coeffs.geometry
+            geometry: geometry,
+            boundaryCondition: boundary.ionTemperature
         )
-
-        let fTe = applyOperatorToVariable(
-            x: profiles.electronTemperature.value,
+        let fTe = rate(
+            u: profiles.electronTemperature.value,
             eqCoeffs: coeffs.electronCoeffs,
-            geometry: coeffs.geometry
+            geometry: geometry,
+            boundaryCondition: boundary.electronTemperature
         )
-
-        let fNe = applyOperatorToVariable(
-            x: profiles.electronDensity.value,
+        let fNe = rate(
+            u: profiles.electronDensity.value,
             eqCoeffs: coeffs.densityCoeffs,
-            geometry: coeffs.geometry
+            geometry: geometry,
+            boundaryCondition: boundary.electronDensity
         )
-
-        let fPsi = applyOperatorToVariable(
-            x: profiles.poloidalFlux.value,
+        let fPsi = rate(
+            u: profiles.poloidalFlux.value,
             eqCoeffs: coeffs.fluxCoeffs,
-            geometry: coeffs.geometry
+            geometry: geometry,
+            boundaryCondition: boundary.poloidalFlux
         )
 
         return (fTi, fTe, fNe, fPsi)
     }
 
-    /// Apply operator to single variable: ∂x/∂t = (1/c) * [∇·(D ∇x) + v·∇x + S]
+    /// Rate of change for a single channel: `F(x) / transientCoeff`.
     ///
-    /// where c = transientCoeff (e.g., n_e for temperature equations)
-    ///
-    /// **IMPORTANT ASSUMPTIONS**:
-    /// 1. Uniform grid: Uses `dr = cellDist[0]` for all cells
-    ///    - TODO: Support non-uniform grids (IMPLEMENTATION_NOTES.md Section 7)
-    /// 2. Division by transientCoeff: Uses small epsilon `1e-10` to avoid zero division
-    ///    - Safe for typical densities (n_e ~ 1e20), but see IMPLEMENTATION_NOTES.md Section 3
-    private func applyOperatorToVariable(
-        x: MLXArray,
+    /// The transient coefficient (e.g. `n_e` for the temperature equations) is floored
+    /// to a physical minimum density to avoid division by zero.
+    private func rate(
+        u: MLXArray,
         eqCoeffs: EquationCoeffs,
-        geometry: GeometricFactors
+        geometry: GeometricFactors,
+        boundaryCondition: BoundaryCondition
     ) -> MLXArray {
-        let nCells = x.shape[0]
+        let F = applySpatialOperator1D(
+            u: u,
+            coeffs: eqCoeffs,
+            geometry: geometry,
+            boundaryCondition: boundaryCondition
+        )
 
-        // Extract coefficients
-        let dFace = eqCoeffs.dFace.value
-        let vFace = eqCoeffs.vFace.value
-        let sourceCell = eqCoeffs.sourceCell.value
+        // Physical density floor [m⁻³] guards the non-conservation-form division.
+        let safetyFloor: Float = 1e18
         let transientCoeff = eqCoeffs.transientCoeff.value
-
-        // Get cell distance (ASSUMES UNIFORM GRID - uses first cell distance for all)
-        // For non-uniform grids, should use per-cell spacing
-        let cellDist = geometry.cellDistances.value
-        guard cellDist.shape[0] > 0 else {
-            // Fallback: compute from rCell
-            let rCellArr = geometry.rCell.value
-            if rCellArr.shape[0] >= 2 {
-                // CRITICAL: Force evaluation before calling .item()
-                // (rCellArr[1] - rCellArr[0]) is a lazy MLXArray (subtraction result)
-                let drComputed = rCellArr[1] - rCellArr[0]
-                eval(drComputed)
-                let dr_computed = drComputed.item(Float.self)
-                return MLXArray.zeros([nCells])  // Cannot compute without proper grid
-            } else {
-                return MLXArray.zeros([nCells])
-            }
-        }
-
-        // CRITICAL: Force evaluation before calling .item()
-        // cellDist[0] is a lazy array slice
-        let drSlice = cellDist[0]
-        eval(drSlice)
-        let dr = drSlice.item(Float.self)  // UNIFORM GRID ASSUMPTION
-
-        // Compute gradients at interior faces (vectorized)
-        let x_right = x[1..<nCells]
-        let x_left = x[0..<(nCells-1)]
-        let gradFace_interior = (x_right - x_left) / dr
-
-        // Boundary gradients
-        let gradFace_left = gradFace_interior[0..<1]
-        let gradFace_right = gradFace_interior[(nCells-2)..<(nCells-1)]
-        let gradFace = concatenated([gradFace_left, gradFace_interior, gradFace_right], axis: 0)
-
-        // Diffusion flux
-        let diffFlux = -dFace * gradFace
-
-        // Convection flux
-        let xFace = interpolateToFaces(x)
-        let convFlux = vFace * xFace
-
-        // Total flux
-        let totalFlux = diffFlux + convFlux
-
-        // Divergence (vectorized)
-        let flux_right = totalFlux[1..<(nCells + 1)]
-        let flux_left = totalFlux[0..<nCells]
-        let cellVolumes = geometry.cellVolumes.value
-        let divergence = (flux_right - flux_left) / (cellVolumes + 1e-10)
-
-        // RHS: ∇·flux + S
-        let rhs = divergence + sourceCell
-
-        // Time derivative: ∂x/∂t = (1/c) * rhs
-        // NOTE: For temperature equations, c = n_e (electron density)
-        // Density floor prevents division by zero in non-conservation form
-        // Physical minimum: n_e ≥ 1e18 m⁻³ (below this, plasma is unphysical)
-        // The density floor is already applied in Block1DCoeffsBuilder, but we add safety here too
-        let safetyFloor: Float = 1e18  // [m⁻³]
-        return rhs / maximum(transientCoeff, MLXArray(safetyFloor))
-    }
-
-    /// Interpolate cell values to faces (vectorized)
-    ///
-    /// **IMPORTANT**: This uses **arithmetic mean** for variable interpolation.
-    /// This is different from Block1DCoeffsBuilder which uses **harmonic mean** for coefficients.
-    ///
-    /// **Rationale**:
-    /// - Variables (T, n): Arithmetic mean `(a+b)/2` - standard central differencing
-    /// - Coefficients (D, χ): Harmonic mean `2/(1/a+1/b)` - preserves flux continuity
-    ///
-    /// See IMPLEMENTATION_NOTES.md Section 1 for detailed explanation.
-    private func interpolateToFaces(_ cellValues: MLXArray) -> MLXArray {
-        let nCells = cellValues.shape[0]
-
-        // Interior faces (central difference - arithmetic mean)
-        let left = cellValues[0..<(nCells-1)]
-        let right = cellValues[1..<nCells]
-        let interior = 0.5 * (left + right)
-
-        // Boundary faces (use adjacent cell value)
-        let leftBoundary = cellValues[0..<1]
-        let rightBoundary = cellValues[(nCells-1)..<nCells]
-
-        return concatenated([leftBoundary, interior, rightBoundary], axis: 0)
+        return F / maximum(transientCoeff, MLXArray(safetyFloor))
     }
 
     // MARK: - Convergence Check
 
-    /// Compute residual norm between iterations
+    /// Residual norm between successive corrector iterates.
     private func computeResidualNorm(xNew: CoreProfiles, xPrev: CoreProfiles) -> Float {
         let diffTi = xNew.ionTemperature.value - xPrev.ionTemperature.value
         let diffTe = xNew.electronTemperature.value - xPrev.electronTemperature.value

@@ -165,15 +165,17 @@ public actor SimulationRunner: SimulationRunnable {
             nil
         }
 
+        // Always stop progress monitoring, including when the run throws — otherwise the
+        // background task keeps polling getProgress() and invoking the UI/log callback
+        // after the simulation has already failed.
+        defer { progressTask?.cancel() }
+
         // Run simulation via orchestrator
         let result = try await orchestrator.run(
             until: endTime,
             dynamicParams: dynamicParams,
             saveInterval: nil  // Could be made configurable
         )
-
-        // Cancel progress monitoring
-        progressTask?.cancel()
 
         print("✓ Simulation complete")
         print("  Steps: \(result.statistics.totalSteps)")
@@ -300,13 +302,13 @@ public actor SimulationRunner: SimulationRunnable {
         // Phase 1a: Validate initial profiles (Sprint 1 robustness)
         // Critical: Ensures no NaN/Inf/negative values enter simulation
         guard let validatedProfiles = ValidatedProfiles.validateMinimal(profiles) else {
-            fatalError("""
-                [INIT-FAIL] Initial profile validation failed.
-                Diagnostic info:
+            // User-configuration-derived failure: surface it as a typed error so the
+            // app/CLI can report it, instead of crashing the process with fatalError.
+            throw SimulationError.invalidConfiguration("""
+                Initial profile validation failed (check ProfileConditions in the configuration).
                 - Ti range: [\(ti.min() ?? Float.nan), \(ti.max() ?? Float.nan)] eV
                 - Te range: [\(te.min() ?? Float.nan), \(te.max() ?? Float.nan)] eV
                 - ne range: [\(ne.min() ?? Float.nan), \(ne.max() ?? Float.nan)] m⁻³
-                Check ProfileConditions in configuration.
                 """)
         }
 

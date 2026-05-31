@@ -154,7 +154,10 @@ public struct SauterBootstrapModel: Sendable {
         let sqrt_eps = sqrt(epsilon)
         let Z = Zeff
 
-        return (0.05 + 0.62 * Z) / (Z * Z) * (sqrt_eps / (1.0 + 0.44 * nu_star))
+        // Split scalar prefactor from MLXArray term to keep the type-checker fast
+        let prefactor: Float = (0.05 + 0.62 * Z) / (Z * Z)
+        let collisionalityTerm = sqrt_eps / (1.0 + 0.44 * nu_star)
+        return prefactor * collisionalityTerm
     }
 
     // MARK: - Helper Functions

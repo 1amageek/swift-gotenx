@@ -1,0 +1,60 @@
+{
+  "runtime": {
+    "static": {
+      "mesh": {
+        "nCells": 100,
+        "majorRadius": 3.0,
+        "minorRadius": 1.0,
+        "toroidalField": 2.5,
+        "geometryType": "circular"
+      },
+      "evolution": {
+        "ionTemperature": true,
+        "electronTemperature": true,
+        "density": true,
+        "current": false
+      },
+      "solver": {
+        "type": "newton",
+        "tolerance": 1e-6,
+        "maxIterations": 5
+      },
+      "scheme": {
+        "theta": 1.0,
+        "usePereverzev": true
+      }
+    },
+    "dynamic": {
+      "boundaries": {
+        "ionTemperature": 100.0,
+        "electronTemperature": 100.0,
+        "density": 1e19,
+        "type": "dirichlet"
+      },
+      "transport": {
+        "modelType": "constant",
+        "parameters": {
+          "chiIon": 1.0,
+          "chiElectron": 1.0,
+          "D": 0.5
+        }
+      },
+      "sources": {
+        "fusionPower": false,
+        "ohmicHeating": true,
+        "bremsstrahlung": true,
+        "ionElectronExchange": true
+      }
+    }
+  },
+  "time": {
+    "start": 0.0,
+    "end": 5e-5,
+    "initialDt": 1e-5
+  },
+  "output": {
+    "saveInterval": null,
+    "directory": "/tmp/gx_bench_newton",
+    "format": "json"
+  }
+}

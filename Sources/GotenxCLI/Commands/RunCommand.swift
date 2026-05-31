@@ -152,6 +152,7 @@ struct RunCommand: AsyncParsableCommand {
     // MARK: - Execution
 
     mutating func run() async throws {
+        GotenxLogging.bootstrap()
         printBanner()
 
         // Resolve configuration path (Torax-compatible)

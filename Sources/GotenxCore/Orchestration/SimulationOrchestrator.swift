@@ -1,7 +1,11 @@
 import MLX
 import Foundation
+import Logging
 
 // MARK: - Simulation Orchestrator
+
+// Logger for simulation orchestrator
+private let logger = Logger(label: "com.gotenx.core.orchestrator")
 
 /// Actor-isolated orchestrator for tokamak transport simulation
 ///
@@ -90,12 +94,13 @@ public actor SimulationOrchestrator {
         self.adaptiveConfig = adaptiveConfig
 
         // 🐛 DEBUG: Configuration values received
-        print("[DEBUG-INIT] AdaptiveTimestepConfig received:")
-        print("[DEBUG-INIT]   minDt: \(adaptiveConfig.minDt?.description ?? "nil")")
-        print("[DEBUG-INIT]   minDtFraction: \(adaptiveConfig.minDtFraction?.description ?? "nil")")
-        print("[DEBUG-INIT]   maxDt: \(adaptiveConfig.maxDt)")
-        print("[DEBUG-INIT]   effectiveMinDt: \(adaptiveConfig.effectiveMinDt)")
-        print("[DEBUG-INIT]   maxTimestepGrowth: \(adaptiveConfig.maxTimestepGrowth)")
+        logger.debug("AdaptiveTimestepConfig received", metadata: [
+            "minDt": "\(adaptiveConfig.minDt?.description ?? "nil")",
+            "minDtFraction": "\(adaptiveConfig.minDtFraction?.description ?? "nil")",
+            "maxDt": "\(adaptiveConfig.maxDt)",
+            "effectiveMinDt": "\(adaptiveConfig.effectiveMinDt)",
+            "maxTimestepGrowth": "\(adaptiveConfig.maxTimestepGrowth)"
+        ])
 
         // Create geometry from static params
         self.geometry = Geometry(config: staticParams.mesh)
@@ -109,9 +114,16 @@ public actor SimulationOrchestrator {
         // Create solver based on configuration
         switch staticParams.solverType {
         case .linear:
-            self.solver = LinearSolver(
-                nCorrectorSteps: staticParams.solverMaxIterations,
-                usePereversevCorrector: true,
+            // The implicit theta-method requires an actual implicit solve to be
+            // unconditionally stable. `LinearSolver` is an explicit predictor–corrector
+            // scheme kept for the differentiable optimization path; it is only
+            // conditionally stable and diverges for stiff source terms. For the
+            // production timestepping path we therefore solve the (linear) system with
+            // the Newton machinery, which assembles the implicit system and solves it
+            // exactly in a single step (now fast thanks to the vectorized Jacobian).
+            self.solver = NewtonRaphsonSolver(
+                tolerance: staticParams.solverTolerance,
+                maxIterations: staticParams.solverMaxIterations,
                 theta: staticParams.theta
             )
         case .newtonRaphson:
@@ -164,10 +176,9 @@ public actor SimulationOrchestrator {
         }
 
         while state.time < endTime {
-            // 🐛 DEBUG: Loop iteration
-            if state.step % 10 == 0 || state.step < 5 {
-                print("[DEBUG] Loop iteration: step=\(state.step), time=\(state.time)s / \(endTime)s")
-            }
+            logger.debug("Loop iteration", metadata: [
+                "step": "\(state.step)", "time": "\(state.time)s", "endTime": "\(endTime)s"
+            ])
 
             // Check for task cancellation
             try Task.checkCancellation()
@@ -215,11 +226,10 @@ public actor SimulationOrchestrator {
             timeSeries.append(captureTimePoint())
         }
 
-        // 🐛 DEBUG: Log timeSeries capture
-        print("[DEBUG-Orchestrator] Simulation complete: \(timeSeries.count) time points captured")
-        if !timeSeries.isEmpty {
-            print("[DEBUG-Orchestrator] Time range: [\(timeSeries.first!.time)s, \(timeSeries.last!.time)s]")
-        }
+        logger.debug("Simulation complete", metadata: [
+            "timePoints": "\(timeSeries.count)",
+            "timeRange": timeSeries.isEmpty ? "empty" : "[\(timeSeries.first!.time)s, \(timeSeries.last!.time)s]"
+        ])
 
         // Update final statistics
         let wallTime = Float(Date().timeIntervalSince(startWallTime))
@@ -242,15 +252,14 @@ public actor SimulationOrchestrator {
     public func getProgress() async -> ProgressInfo {
         let includeProfiles = samplingConfig.enableLivePlotting
 
-        // 🐛 DEBUG: Log when getProgress() is called
-        print("[DEBUG-getProgress] Called: time=\(state.time)s, step=\(state.step), includeProfiles=\(includeProfiles)")
+        logger.debug("getProgress called", metadata: [
+            "time": "\(state.time)s", "step": "\(state.step)", "includeProfiles": "\(includeProfiles)"
+        ])
 
         // Convert profiles if needed
         let serializedProfiles: SerializableProfiles?
         if includeProfiles {
-            print("[DEBUG-getProgress] Converting state.profiles to SerializableProfiles...")
             serializedProfiles = state.profiles.toSerializable()
-            print("[DEBUG-getProgress] Conversion complete, returning ProgressInfo with profiles")
         } else {
             serializedProfiles = nil
         }
@@ -420,10 +429,7 @@ public actor SimulationOrchestrator {
 
     /// Perform single timestep
     private func performStep(dynamicParams: DynamicRuntimeParams) async throws {
-        // 🐛 DEBUG: performStep start
-        if state.step < 5 {
-            print("[DEBUG] performStep START: step=\(state.step), time=\(state.time)s")
-        }
+        logger.debug("performStep start", metadata: ["step": "\(state.step)", "time": "\(state.time)s"])
 
         // Construct geometry from mesh configuration
         let geometry = createGeometry(from: staticParams.mesh)
@@ -453,20 +459,25 @@ public actor SimulationOrchestrator {
 
             if cappedDt < rawDt {
                 let growthRatio = rawDt / state.dt
-                print("[DEBUG] dt growth capped: \(String(format: "%.2e", rawDt))s → \(String(format: "%.2e", cappedDt))s (attempted \(String(format: "%.2f", growthRatio))× growth, limit: \(growthCap)×)")
+                logger.info("dt growth capped", metadata: [
+                    "raw": "\(String(format: "%.2e", rawDt))s",
+                    "capped": "\(String(format: "%.2e", cappedDt))s",
+                    "growthRatio": "\(String(format: "%.2f", growthRatio))×",
+                    "limit": "\(growthCap)×"
+                ])
             }
 
             dt = cappedDt
 
             // 🐛 DEBUG: Adaptive dt
             if state.step < 5 {
-                print("[DEBUG] Adaptive dt=\(dt)s")
+                logger.debug("Adaptive dt calculated", metadata: ["dt": "\(dt)s"])
             }
         } else {
             // First step: use configured timestep with safety lower bound
             // ✅ FIXED: Use dynamicParams.dt instead of hardcoded value
             dt = max(dynamicParams.dt, 1e-5)  // Enforce minimum for numerical stability
-            print("[DEBUG] First step: dt=\(dt)s (configured: \(dynamicParams.dt)s)")
+            logger.debug("First step dt", metadata: ["dt": "\(dt)s", "configured": "\(dynamicParams.dt)s"])
         }
 
         // Check for MHD events (sawteeth, NTMs, etc.)
@@ -580,10 +591,9 @@ public actor SimulationOrchestrator {
         var finalResult: SolverResult? = nil
 
         while attempt <= maxSolverRetries {
-            // 🐛 DEBUG: solver.solve() call
-            if state.step < 5 {
-                print("[DEBUG] Calling solver.solve(): step=\(state.step), dt=\(dtAttempt)s, attempt=\(attempt)")
-            }
+            logger.debug("Calling solver.solve", metadata: [
+                "step": "\(state.step)", "dt": "\(dtAttempt)s", "attempt": "\(attempt)"
+            ])
 
             let result = solver.solve(
                 dt: dtAttempt,
@@ -598,10 +608,11 @@ public actor SimulationOrchestrator {
                 coeffsCallback: coeffsCallback
             )
 
-            // 🐛 DEBUG: solver.solve() returned
-            if state.step < 5 {
-                print("[DEBUG] solver.solve() returned: converged=\(result.converged), iterations=\(result.iterations), residual=\(result.residualNorm)")
-            }
+            logger.debug("solver.solve returned", metadata: [
+                "converged": "\(result.converged)",
+                "iterations": "\(result.iterations)",
+                "residual": "\(result.residualNorm)"
+            ])
 
             accumulatedIterations += result.iterations
             worstResidual = max(worstResidual, result.residualNorm)
@@ -615,17 +626,21 @@ public actor SimulationOrchestrator {
             attempt += 1
             let nextDt = dtAttempt * 0.5
 
-            // 🐛 DEBUG: リトライ判定の詳細
-            print("[DEBUG-RETRY] Solver did not converge, evaluating retry:")
-            print("[DEBUG-RETRY]   Current dt: \(dtAttempt)")
-            print("[DEBUG-RETRY]   Next dt (halved): \(nextDt)")
-            print("[DEBUG-RETRY]   Minimum timestep: \(timeStepCalculator.minimumTimestep)")
-            print("[DEBUG-RETRY]   nextDt < minimum? \(nextDt < timeStepCalculator.minimumTimestep)")
-            print("[DEBUG-RETRY]   attempt=\(attempt), maxRetries=\(maxSolverRetries)")
+            // Evaluate retry possibility
+            logger.info("Solver did not converge, evaluating retry", metadata: [
+                "currentDt": "\(dtAttempt)",
+                "nextDt": "\(nextDt)",
+                "minTimestep": "\(timeStepCalculator.minimumTimestep)",
+                "attempt": "\(attempt)",
+                "maxRetries": "\(maxSolverRetries)"
+            ])
 
             if nextDt < timeStepCalculator.minimumTimestep {
                 // これ以上タイムステップを縮小できないので即時エラー
-                print("[DEBUG-RETRY] ❌ Cannot retry: nextDt (\(nextDt)) < minimumTimestep (\(timeStepCalculator.minimumTimestep))")
+                logger.error("Cannot retry: nextDt below minimum", metadata: [
+                    "nextDt": "\(nextDt)",
+                    "minTimestep": "\(timeStepCalculator.minimumTimestep)"
+                ])
                 throw SolverError.convergenceFailure(
                     iterations: accumulatedIterations,
                     residualNorm: result.residualNorm
@@ -639,7 +654,10 @@ public actor SimulationOrchestrator {
                 )
             }
 
-            print("[SimulationOrchestrator] Solver did not converge; reducing dt to \(nextDt) s (attempt \(attempt) of \(maxSolverRetries))")
+            logger.warning("Retrying with smaller dt", metadata: [
+                "newDt": "\(nextDt)s",
+                "attempt": "\(attempt)/\(maxSolverRetries)"
+            ])
             dtAttempt = nextDt
         }
 
@@ -674,10 +692,9 @@ public actor SimulationOrchestrator {
             geometry: geometry
         )
 
-        // 🐛 DEBUG: state updated
-        if state.step < 5 || state.step % 10 == 0 {
-            print("[DEBUG] performStep END: step=\(state.step), time=\(state.time)s, dt=\(state.dt)s")
-        }
+        logger.debug("performStep end", metadata: [
+            "step": "\(state.step)", "time": "\(state.time)s", "dt": "\(state.dt)s"
+        ])
 
         // Apply conservation enforcement if enabled
         if let enforcer = conservationEnforcer, enforcer.shouldEnforce(step: state.step) {
@@ -780,17 +797,14 @@ public actor SimulationOrchestrator {
                 abs(diagnostics.current_drift)
             )
             if state.step % 1000 == 0 {  // Log every 1000 steps to avoid spam
-                print("[Warning] Conservation drift detected at step \(state.step), t=\(state.time)s:")
-                print("  Max drift: \(maxDrift * 100)%")
-                if abs(diagnostics.particle_drift) > 0.01 {
-                    print("  - Particle drift: \(diagnostics.particle_drift * 100)%")
-                }
-                if abs(diagnostics.energy_drift) > 0.01 {
-                    print("  - Energy drift: \(diagnostics.energy_drift * 100)%")
-                }
-                if abs(diagnostics.current_drift) > 0.01 {
-                    print("  - Current drift: \(diagnostics.current_drift * 100)%")
-                }
+                logger.warning("Conservation drift detected", metadata: [
+                    "step": "\(state.step)",
+                    "time": "\(state.time)s",
+                    "maxDrift": "\(maxDrift * 100)%",
+                    "particleDrift": "\(diagnostics.particle_drift * 100)%",
+                    "energyDrift": "\(diagnostics.energy_drift * 100)%",
+                    "currentDrift": "\(diagnostics.current_drift * 100)%"
+                ])
             }
 
         case 2:
@@ -800,12 +814,15 @@ public actor SimulationOrchestrator {
                 abs(diagnostics.energy_drift),
                 abs(diagnostics.current_drift)
             )
-            print("[CRITICAL] Large conservation drift at step \(state.step), t=\(state.time)s:")
-            print("  Max drift: \(maxDrift * 100)%")
-            print("  - Particle drift: \(diagnostics.particle_drift * 100)%")
-            print("  - Energy drift: \(diagnostics.energy_drift * 100)%")
-            print("  - Current drift: \(diagnostics.current_drift * 100)%")
-            print("  Recommendation: Check timestep (dt=\(state.dt)s) and mesh resolution")
+            logger.critical("Large conservation drift", metadata: [
+                "step": "\(state.step)",
+                "time": "\(state.time)s",
+                "maxDrift": "\(maxDrift * 100)%",
+                "particleDrift": "\(diagnostics.particle_drift * 100)%",
+                "energyDrift": "\(diagnostics.energy_drift * 100)%",
+                "currentDrift": "\(diagnostics.current_drift * 100)%",
+                "recommendation": "check timestep (dt=\(state.dt)s) and mesh resolution"
+            ])
 
         default:
             break
@@ -816,9 +833,8 @@ public actor SimulationOrchestrator {
     ///
     /// - Returns: TimePoint with current state data
     private func captureTimePoint() -> TimePoint {
-        print("[DEBUG-captureTimePoint] Capturing TimePoint at t=\(state.time)s, step=\(state.step)")
+        logger.debug("Capturing TimePoint", metadata: ["time": "\(state.time)s", "step": "\(state.step)"])
         let serialized = state.profiles.toSerializable()
-        print("[DEBUG-captureTimePoint] TimePoint created for timeSeries")
 
         return TimePoint(
             time: state.time,
