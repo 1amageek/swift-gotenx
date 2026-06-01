@@ -71,6 +71,11 @@ public struct SimulationState: Sendable {
         Float(timeAccumulator)
     }
 
+    /// Current simulation time with the full CPU-side accumulator precision.
+    var preciseTime: Double {
+        timeAccumulator
+    }
+
     /// Current timestep [s]
     public let dt: Float
 
@@ -166,6 +171,12 @@ public struct SimulationState: Sendable {
             derived: derived ?? self.derived,
             diagnostics: diagnostics ?? self.diagnostics
         )
+    }
+
+    /// Remaining time to a target end time using the high-precision accumulator.
+    func remainingTime(until endTime: Float) -> Float {
+        let remainingTime = Double(endTime) - timeAccumulator
+        return Float(max(remainingTime, 0))
     }
 
     /// Advance state by one timestep with high-precision time accumulation

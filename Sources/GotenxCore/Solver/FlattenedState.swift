@@ -338,6 +338,40 @@ public struct FlattenedState: Sendable {
 
 // MARK: - Jacobian Computation Utilities
 
+/// Compute the Jacobian by central finite differences of the residual function.
+///
+/// Unlike the vjp Jacobian, this evaluates `residualFn` directly at perturbed
+/// states, so it captures EVERY dependency the residual has on `x` — including any
+/// transport coefficients, source terms, or transient coefficients that are
+/// recomputed inside `residualFn`. It is therefore the ground-truth Jacobian to
+/// compare the vjp against: if a vjp-driven Newton solve floors at a residual that
+/// an FD-driven solve drives lower, the vjp is missing those (detached) sensitivities.
+///
+/// Cost is O(n) residual evaluations; intended for diagnostics, not production.
+/// `J[i, j] = ∂R_i/∂x_j`, matching `computeJacobianViaVJP`'s orientation.
+public func computeJacobianViaFiniteDifference(
+    _ residualFn: (MLXArray) -> MLXArray,
+    _ x: MLXArray,
+    epsilon: Float = 1e-3
+) -> MLXArray {
+    let n = x.shape[0]
+    var columns: [MLXArray] = []
+    columns.reserveCapacity(n)
+    for j in 0..<n {
+        var bump = [Float](repeating: 0, count: n)
+        bump[j] = epsilon
+        let e = MLXArray(bump)
+        let rPlus = residualFn(x + e)
+        let rMinus = residualFn(x - e)
+        let column = (rPlus - rMinus) / (2.0 * epsilon)   // [n] = J[:, j]
+        eval(column)
+        columns.append(column)
+    }
+    let jacobian = MLX.stacked(columns, axis: 1)          // J[i, j]
+    eval(jacobian)
+    return jacobian
+}
+
 /// Compute Jacobian via vector-Jacobian product (efficient reverse-mode AD)
 ///
 /// This function computes the full Jacobian matrix using vjp() in reverse mode,

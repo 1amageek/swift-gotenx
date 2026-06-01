@@ -389,14 +389,41 @@ public struct NewtonRaphsonSolver: PDESolver {
                 )
             }
 
-            // Update solution with line search (in scaled space)
-            let alpha = lineSearch(
+            // Update solution with line search (in scaled space).
+            // A nil result means no step along this direction reduces the residual:
+            // the (frozen-coefficient) linearization is no longer trustworthy at this
+            // dt. Reject the step and report non-convergence so the orchestrator
+            // retries with a smaller dt — taking a residual-increasing fallback step
+            // here is what previously drove the stiff solve to diverge.
+            guard let alpha = lineSearch(
                 residualFn: residualFnScaled,
                 x: xScaled.values.value,
                 delta: deltaScaled,
                 initialNorm: residualNorm,
                 maxAlpha: 1.0
-            )
+            ) else {
+                logger.warning("Line search found no residual-reducing step - aborting", metadata: [
+                    "iter": "\(iter)",
+                    "residualNorm": "\(String(format: "%.2e", residualNorm))",
+                    "action": "trigger dt retry"
+                ])
+                // Non-converged result is discarded by the orchestrator (it retries
+                // from the previous step's profiles), so mirror the other abort paths
+                // (linear_error, invalid descent) and skip the physical-floor pass.
+                let finalPhysical = xScaled.unscaled(by: referenceState)
+                let finalProfiles = finalPhysical.toCoreProfiles()
+                return SolverResult(
+                    updatedProfiles: finalProfiles,
+                    iterations: iterations,
+                    residualNorm: residualNorm,
+                    converged: false,
+                    metadata: [
+                        "theta": theta,
+                        "dt": dt,
+                        "failure_type": 3.0  // 3.0 = line_search_no_decrease
+                    ]
+                )
+            }
 
             let xNewScaled = xScaled.values.value + alpha * deltaScaled
             xScaled = FlattenedState(values: EvaluatedArray(evaluating: xNewScaled), layout: layout)
@@ -627,13 +654,24 @@ public struct NewtonRaphsonSolver: PDESolver {
     /// Backtracking line search for step size selection
     ///
     /// Finds α such that ||R(x + α*Δx)|| < ||R(x)||
+    /// Backtracking line search for the Newton step.
+    ///
+    /// Returns the largest `alpha ∈ {maxAlpha, maxAlpha·β, …}` whose trial residual
+    /// is strictly smaller than `initialNorm`, or `nil` if NO tried step reduces the
+    /// residual. Returning `nil` (rather than a fixed fallback step) is essential for
+    /// global convergence: for stiff, solution-dependent transport the frozen-coefficient
+    /// linearization can yield a direction along which every step *increases* the
+    /// residual. Taking a fixed fallback step there compounds into divergence
+    /// (residual blows up, temperatures reach unphysical values). The caller treats
+    /// `nil` as "this dt is too large" and reduces the timestep instead of corrupting
+    /// the iterate with a residual-increasing step.
     private func lineSearch(
         residualFn: (MLXArray) -> MLXArray,
         x: MLXArray,
         delta: MLXArray,
         initialNorm: Float,
         maxAlpha: Float
-    ) -> Float {
+    ) -> Float? {
         let beta: Float = 0.5  // Reduction factor
         let maxIterations = 10
         let batchSize = 4
@@ -671,9 +709,9 @@ public struct NewtonRaphsonSolver: PDESolver {
             }
         }
 
-        // If line search fails, return small step
-        logger.debug("Line search failed to reduce residual; using fallback step")
-        return 0.1
+        // No tried step reduces the residual: signal failure so the caller can
+        // reduce dt rather than take a residual-increasing (divergent) step.
+        return nil
     }
 }
 

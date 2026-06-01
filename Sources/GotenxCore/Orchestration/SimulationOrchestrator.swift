@@ -174,7 +174,16 @@ public actor SimulationOrchestrator {
             timeSeries.append(captureTimePoint())
         }
 
-        while state.time < endTime {
+        let endTimeValue = Double(endTime)
+        let finalTimeTolerance = Self.finalTimeTolerance(for: endTime)
+
+        while state.preciseTime < endTimeValue {
+            let remainingTime = endTimeValue - state.preciseTime
+            if remainingTime <= finalTimeTolerance {
+                state = state.updated(time: endTime)
+                break
+            }
+
             logger.debug("Loop iteration", metadata: [
                 "step": "\(state.step)", "time": "\(state.time)s", "endTime": "\(endTime)s"
             ])
@@ -194,7 +203,7 @@ public actor SimulationOrchestrator {
             let stepStartTime = Date()
 
             // Perform single timestep
-            try await performStep(dynamicParams: dynamicParams)
+            try await performStep(dynamicParams: dynamicParams, endTime: endTime)
 
             let stepWallTime = Float(Date().timeIntervalSince(stepStartTime))
 
@@ -427,14 +436,14 @@ public actor SimulationOrchestrator {
     private var lastSolverResult: SolverResult?
 
     /// Perform single timestep
-    private func performStep(dynamicParams: DynamicRuntimeParams) async throws {
+    private func performStep(dynamicParams: DynamicRuntimeParams, endTime: Float) async throws {
         logger.debug("performStep start", metadata: ["step": "\(state.step)", "time": "\(state.time)s"])
 
         // Construct geometry from mesh configuration
         let geometry = createGeometry(from: staticParams.mesh)
 
         // Calculate adaptive timestep (before MHD check)
-        let dt: Float
+        let computedDt: Float
         if state.step > 0 {
             // Compute transport coefficients for timestep calculation
             let transportCoeffs = transport.computeCoefficients(
@@ -465,16 +474,19 @@ public actor SimulationOrchestrator {
                 ])
             }
 
-            dt = cappedDt
+            computedDt = cappedDt
 
             if state.step < 5 {
-                logger.debug("Adaptive dt calculated", metadata: ["dt": "\(dt)s"])
+                logger.debug("Adaptive dt calculated", metadata: ["dt": "\(computedDt)s"])
             }
         } else {
             // First step: use configured timestep with safety lower bound
-            dt = max(dynamicParams.dt, 1e-5)
-            logger.debug("First step dt", metadata: ["dt": "\(dt)s", "configured": "\(dynamicParams.dt)s"])
+            computedDt = max(dynamicParams.dt, 1e-5)
+            logger.debug("First step dt", metadata: ["dt": "\(computedDt)s", "configured": "\(dynamicParams.dt)s"])
         }
+
+        let remainingTime = state.remainingTime(until: endTime)
+        let dt = selectStepDuration(computedDt: computedDt, remainingTime: remainingTime)
 
         // Check for MHD events (sawteeth, NTMs, etc.)
         for model in mhdModels {
@@ -493,7 +505,7 @@ public actor SimulationOrchestrator {
                 // Get crash step duration if this is a sawtooth model
                 let crashDt: Float
                 if let sawtoothModel = model as? SawtoothModel {
-                    crashDt = sawtoothModel.params.crashStepDuration
+                    crashDt = min(sawtoothModel.params.crashStepDuration, remainingTime)
                 } else {
                     crashDt = dt  // Use normal dt for other MHD models
                 }
@@ -525,21 +537,6 @@ public actor SimulationOrchestrator {
             geometry: geometry,
             params: dynamicParams.transportParams
         )
-
-        // Compute source terms (before solving, for capture)
-        // Note: These will be recomputed in callback for iterative solvers
-        let sourceTerms = sources.reduce(into: SourceTerms.zero(nCells: staticParams.mesh.nCells)) { total, model in
-            if let params = dynamicParams.sourceParams[model.name] {
-                let contribution = model.computeTerms(
-                    profiles: state.profiles,
-                    geometry: geometry,
-                    params: params
-                )
-                total = total + contribution
-            }
-        }
-
-        // dt already calculated above (line 299-314)
 
         // Build CoeffsCallback with closure capture
         // Note: Source terms are computed inside the callback because they depend
@@ -676,6 +673,23 @@ public actor SimulationOrchestrator {
         // Store solver result for diagnostics
         lastSolverResult = resolvedResult
 
+        let finalProfiles = resolvedResult.updatedProfiles
+        let finalTransportCoeffs = transport.computeCoefficients(
+            profiles: finalProfiles,
+            geometry: geometry,
+            params: dynamicParams.transportParams
+        )
+        let finalSourceTerms = sources.reduce(into: SourceTerms.zero(nCells: staticParams.mesh.nCells)) { total, model in
+            if let params = dynamicParams.sourceParams[model.name] {
+                let contribution = model.computeTerms(
+                    profiles: finalProfiles,
+                    geometry: geometry,
+                    params: params
+                )
+                total = total + contribution
+            }
+        }
+
         // Update state using high-precision time accumulation
         var newStats = state.statistics
         newStats.totalSteps += 1
@@ -690,10 +704,10 @@ public actor SimulationOrchestrator {
         // Phase 3: Now also captures transport coefficients and source terms
         state = state.advanced(
             by: dtAttempt,
-            profiles: resolvedResult.updatedProfiles,
+            profiles: finalProfiles,
             statistics: newStats,
-            transport: transportCoeffs,
-            sources: sourceTerms,
+            transport: finalTransportCoeffs,
+            sources: finalSourceTerms,
             geometry: geometry
         )
 
@@ -726,6 +740,23 @@ public actor SimulationOrchestrator {
                 geometry: geometry
             )
         }
+    }
+
+    private static func finalTimeTolerance(for endTime: Float) -> Double {
+        Double(endTime.ulp) * 4
+    }
+
+    private func selectStepDuration(computedDt: Float, remainingTime: Float) -> Float {
+        guard computedDt < remainingTime else {
+            return remainingTime
+        }
+
+        let finalRemainder = remainingTime - computedDt
+        if finalRemainder < timeStepCalculator.minimumTimestep {
+            return remainingTime
+        }
+
+        return computedDt
     }
 
     // MARK: - Phase 2: Derived Quantities & Diagnostics
