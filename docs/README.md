@@ -43,8 +43,8 @@ This directory contains the technical design and architecture documentation for 
 
 **[QUALITY_GATES.md](QUALITY_GATES.md)**
 - Repository-level reliability gates
-- xcodebuild verification command for critical suites
-- API naming, configuration, and numerical diagnostic guardrails
+- Shared xcodebuild script and GitHub Actions workflow
+- API naming, configuration, reference validation, and numerical diagnostic guardrails
 
 ---
 
@@ -141,7 +141,7 @@ This directory contains the technical design and architecture documentation for 
 | CONFIGURATION_SYSTEM.md | ✅ Active reference | 2025-10-21 |
 | CONFIGURATION_ARCHITECTURE_REFACTORING.md | 🚧 Design phase | 2025-10-25 |
 | CONFIGURATION_VALIDATION_SPEC.md | 📋 Specification | 2025-10-24 |
-| QUALITY_GATES.md | ✅ Active reference | 2026-06-02 |
+| QUALITY_GATES.md | ✅ Active reference | 2026-06-03 |
 | FVM_NUMERICAL_IMPROVEMENTS_PLAN.md | 🔥 Ready for impl | 2025-10-22 |
 | NUMERICAL_ROBUSTNESS_DESIGN.md | 🔥 Implementation ready | 2025-10-25 |
 | MLX_BEST_PRACTICES.md | ✅ Active reference | 2025-10-21 |

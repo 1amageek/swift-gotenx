@@ -1,0 +1,58 @@
+name: Quality Gates
+
+on:
+  push:
+    branches:
+      - main
+      - solver-robustness-validation
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  xcodebuild:
+    name: xcodebuild package tests
+    runs-on: macos-26
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode 26.4
+        run: |
+          if [ -d /Applications/Xcode_26.4.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.4.app
+          elif [ -d /Applications/Xcode_26.4.1.app ]; then
+            sudo xcode-select -s /Applications/Xcode_26.4.1.app
+          else
+            echo "Xcode 26.4 is required for this repository."
+            ls -1 /Applications | grep Xcode || true
+            exit 1
+          fi
+
+      - name: Verify toolchain baseline
+        run: |
+          export MACOS_VERSION="$(sw_vers -productVersion)"
+          python3 - <<'PY'
+          import os
+          import sys
+
+          parts = (os.environ["MACOS_VERSION"].split(".") + ["0", "0"])[:3]
+          version = tuple(int(part) for part in parts)
+          if version < (26, 4, 0):
+              sys.exit(f"macOS 26.4 or newer is required, got {os.environ['MACOS_VERSION']}")
+          PY
+
+          sw_vers
+          xcodebuild -version
+          swift --version
+
+      - name: Run repository quality gates
+        run: scripts/run-quality-gates.sh
+
+      - name: Run full package test suite
+        run: |
+          perl -e 'alarm 420; exec @ARGV' \
+            xcodebuild -quiet test \
+            -scheme swift-gotenx-Package \
+            -destination 'platform=macOS,arch=arm64'

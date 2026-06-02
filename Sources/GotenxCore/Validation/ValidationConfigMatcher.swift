@@ -305,6 +305,24 @@ public struct ValidationConfigMatcher {
 
         return results
     }
+
+    /// Compare swift-Gotenx output with TORAX reference data and return an aggregate matrix.
+    ///
+    /// This is the preferred validation entry point for quality gates because it
+    /// validates compatible time/radius grids before computing metrics and keeps a
+    /// failure summary for review logs.
+    public static func compareWithToraxMatrix(
+        gotenx: TORAXReferenceData,
+        torax: TORAXReferenceData,
+        thresholds: ValidationThresholds = .torax
+    ) throws -> ProfileValidationMatrix {
+        try ProfileValidationMatrix.compareTimeSeries(
+            predicted: gotenx,
+            reference: torax,
+            sourceName: "torax",
+            thresholds: thresholds
+        )
+    }
 }
 
 // MARK: - Validation Config Errors
