@@ -4,8 +4,8 @@ import MLX
 @testable import GotenxPhysics
 
 @Test("Fusion reactivity peak at ~70 keV")
-func testFusionPeak() {
-    let fusion = try! FusionPower()
+func testFusionPeak() throws {
+    let fusion = try FusionPower()
 
     let ne = MLXArray([Float(1e20)])
 
@@ -14,7 +14,7 @@ func testFusionPeak() {
 
     var powers: [Float] = []
     for Ti in temperatures {
-        let P = try! fusion.compute(ne: ne, Ti: MLXArray([Ti]))
+        let P = try fusion.compute(electronDensity: ne, ionTemperature: MLXArray([Ti]))
         eval(P)  // Evaluate before calling .item()
         powers.append(P.item(Float.self))
     }
@@ -28,16 +28,16 @@ func testFusionPeak() {
 }
 
 @Test("Fusion power density scaling")
-func testFusionScaling() {
-    let fusion = try! FusionPower()
+func testFusionScaling() throws {
+    let fusion = try FusionPower()
 
-    // P_fusion ∝ n²
+    // fusionPower ∝ n²
     let ne1 = MLXArray([Float(1e20)])
     let ne2 = MLXArray([Float(2e20)])
     let Ti = MLXArray([Float(70000.0)])  // At peak reactivity
 
-    let P1 = try! fusion.compute(ne: ne1, Ti: Ti)
-    let P2 = try! fusion.compute(ne: ne2, Ti: Ti)
+    let P1 = try fusion.compute(electronDensity: ne1, ionTemperature: Ti)
+    let P2 = try fusion.compute(electronDensity: ne2, ionTemperature: Ti)
 
     let ratio_array = P2 / P1
     eval(ratio_array)  // Evaluate before calling .item()
@@ -48,29 +48,29 @@ func testFusionScaling() {
 }
 
 @Test("Zero power at low temperature")
-func testLowTemperature() {
-    let fusion = try! FusionPower()
+func testLowTemperature() throws {
+    let fusion = try FusionPower()
 
     let ne = MLXArray([Float(1e20)])
     let Ti = MLXArray([Float(100.0)])  // 100 eV - too cold for fusion
 
-    let P = try! fusion.compute(ne: ne, Ti: Ti)
+    let P = try fusion.compute(electronDensity: ne, ionTemperature: Ti)
     eval(P)  // Evaluate before calling .item()
 
     #expect(P.item(Float.self) < 1e6, "Fusion power should be negligible at 100 eV")
 }
 
 @Test("Reactivity increases with temperature (below peak)")
-func testReactivityMonotonic() {
-    let fusion = try! FusionPower()
+func testReactivityMonotonic() throws {
+    let fusion = try FusionPower()
 
     let Ti1_keV = MLXArray([Float(10.0)])
     let Ti2_keV = MLXArray([Float(20.0)])
 
-    let sigma_v1 = fusion.computeReactivity(Ti_keV: Ti1_keV)
+    let sigma_v1 = fusion.computeReactivity(ionTemperatureKeV: Ti1_keV)
     eval(sigma_v1)  // Evaluate before calling .item()
 
-    let sigma_v2 = fusion.computeReactivity(Ti_keV: Ti2_keV)
+    let sigma_v2 = fusion.computeReactivity(ionTemperatureKeV: Ti2_keV)
     eval(sigma_v2)  // Evaluate before calling .item()
 
     #expect(sigma_v2.item(Float.self) > sigma_v1.item(Float.self),
@@ -78,19 +78,19 @@ func testReactivityMonotonic() {
 }
 
 @Test("Fuel mixture densities")
-func testFuelMixture() {
+func testFuelMixture() throws {
     // Equal D-T mixture
-    let fusionEqual = try! FusionPower(fuelMix: .equalDT)
+    let fusionEqual = try FusionPower(fuelMixture: .equalDT)
 
     let ne = MLXArray([Float(2e20)])
     let Ti = MLXArray([Float(70000.0)])
 
-    let P_equal = try! fusionEqual.compute(ne: ne, Ti: Ti)
+    let P_equal = try fusionEqual.compute(electronDensity: ne, ionTemperature: Ti)
     eval(P_equal)  // Evaluate before calling .item()
 
     // Custom mixture (25-75)
-    let fusionCustom = try! FusionPower(fuelMix: .custom(nD_frac: 0.25, nT_frac: 0.75))
-    let P_custom = try! fusionCustom.compute(ne: ne, Ti: Ti)
+    let fusionCustom = try FusionPower(fuelMixture: .custom(deuteriumFraction: 0.25, tritiumFraction: 0.75))
+    let P_custom = try fusionCustom.compute(electronDensity: ne, ionTemperature: Ti)
     eval(P_custom)  // Evaluate before calling .item()
 
     // Equal mixture should give more power (optimal is 50-50)
@@ -99,14 +99,14 @@ func testFuelMixture() {
 }
 
 @Test("Triple product computation")
-func testTripleProduct() {
-    let fusion = try! FusionPower()
+func testTripleProduct() throws {
+    let fusion = try FusionPower()
 
     let ne = MLXArray([Float(1e20)])
     let Ti = MLXArray([Float(10000.0)])  // 10 keV
-    let tauE: Float = 1.0  // 1 second
+    let energyConfinementTime: Float = 1.0  // 1 second
 
-    let nTtau = fusion.computeTripleProduct(ne: ne, Ti: Ti, tauE: tauE)
+    let nTtau = fusion.computeTripleProduct(electronDensity: ne, ionTemperature: Ti, energyConfinementTime: energyConfinementTime)
     eval(nTtau)  // Evaluate before calling .item()
 
     let expected: Float = 1e20 * 10000.0 * 1.0  // 1e24
@@ -116,13 +116,13 @@ func testTripleProduct() {
 }
 
 @Test("Fusion power density magnitude")
-func testFusionPowerMagnitude() {
-    let fusion = try! FusionPower()
+func testFusionPowerMagnitude() throws {
+    let fusion = try FusionPower()
 
     let ne = MLXArray([Float(1e20)])  // m⁻³
     let Ti = MLXArray([Float(70000.0)])  // eV
 
-    let P = try! fusion.compute(ne: ne, Ti: Ti)
+    let P = try fusion.compute(electronDensity: ne, ionTemperature: Ti)
     eval(P)  // Evaluate before calling .item()
 
     // Power density should be in W/m³

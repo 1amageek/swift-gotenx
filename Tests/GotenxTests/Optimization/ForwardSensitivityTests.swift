@@ -27,9 +27,9 @@ final class SimpleHeatingSource: GradientAwareSource, @unchecked Sendable {
     func computeTerms(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: SourceParameters
+        parameters: SourceParameters
     ) -> SourceTerms {
-        let nCells = profiles.ionTemperature.shape[0]
+        let cellCount = profiles.ionTemperature.shape[0]
 
         // CRITICAL FOR GRADIENTS: Use MLXArray operations throughout
         if let P_aux_mlx = mlxPower {
@@ -42,28 +42,28 @@ final class SimpleHeatingSource: GradientAwareSource, @unchecked Sendable {
             let electronHeating_mlx = powerDensity_mlx / 2.0
 
             // Broadcast to all cells (MLXArray operations preserve gradients!)
-            let ionHeatingArray = MLXArray.full([nCells], values: ionHeating_mlx)
-            let electronHeatingArray = MLXArray.full([nCells], values: electronHeating_mlx)
+            let ionHeatingArray = MLXArray.full([cellCount], values: ionHeating_mlx)
+            let electronHeatingArray = MLXArray.full([cellCount], values: electronHeating_mlx)
 
             return SourceTerms(
                 ionHeating: EvaluatedArray(evaluating: ionHeatingArray),
                 electronHeating: EvaluatedArray(evaluating: electronHeatingArray),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
         } else {
             // Fallback to Float path (no gradients)
-            let P_aux = params.params["P_auxiliary"] ?? 0.0
+            let P_aux = parameters.parameters["P_auxiliary"] ?? 0.0
             let volume = geometry.volume.value.item(Float.self)
             let powerDensity = P_aux / volume
             let ionHeating = powerDensity / 2.0
             let electronHeating = powerDensity / 2.0
 
             return SourceTerms(
-                ionHeating: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(ionHeating))),
-                electronHeating: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(electronHeating))),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeating: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(ionHeating))),
+                electronHeating: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(electronHeating))),
+                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
         }
     }
@@ -82,17 +82,17 @@ struct ForwardSensitivityTests {
     // MARK: - Test Fixtures
 
     /// Create minimal test configuration
-    private func createTestConfiguration() -> (
-        staticParams: StaticRuntimeParams,
-        dynamicParams: DynamicRuntimeParams,
+    private func createTestConfiguration() throws -> (
+        staticParameters: StaticRuntimeParameters,
+        dynamicParameters: DynamicRuntimeParameters,
         geometry: Geometry,
         initialProfiles: CoreProfiles
     ) {
-        let nCells = 10  // Small grid for fast tests
+        let cellCount = 10  // Small grid for fast tests
 
         // Mesh
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 6.2,
             minorRadius: 2.0,
             toroidalField: 5.3,
@@ -100,13 +100,13 @@ struct ForwardSensitivityTests {
         )
         let geometry = createGeometry(from: meshConfig)
 
-        // Static params
-        let staticParams = StaticRuntimeParams(
+        // Static parameters
+        let staticParameters = StaticRuntimeParameters(
             mesh: meshConfig,
             evolveIonHeat: true,
             evolveElectronHeat: true,
-            evolveDensity: true,
-            evolveCurrent: false,
+            evolveElectronDensity: true,
+            evolvePoloidalFlux: false,
             theta: 1.0
         )
 
@@ -138,46 +138,46 @@ struct ForwardSensitivityTests {
             currentDensity: .constant(0.0)
         )
 
-        // Transport params
-        let transportParams = TransportParameters(
+        // Transport parameters
+        let transportParameters = try TransportParameters(
             modelType: .constant,
-            params: [
-                "chiGB_multiplier": 1.0,
-                "chiB_multiplier": 1.0,
-                "De_multiplier": 1.0
+            parameters: [
+                "ionHeatDiffusivity": 1.0,
+                "electronHeatDiffusivity": 1.0,
+                "particleDiffusivity": 0.1
             ]
         )
 
-        // Source params - add simple heating source
-        let sourceParams: [String: SourceParameters] = [
+        // Source parameters - add simple heating source
+        let sourceParameters: [String: SourceParameters] = [
             "simple_heating": SourceParameters(
                 modelType: "simple_heating",
-                params: ["P_auxiliary": 0.0],  // Will be updated by actuators
+                parameters: ["P_auxiliary": 0.0],  // Will be updated by actuators
                 timeDependent: false
             )
         ]
 
-        // Dynamic params
-        let dynamicParams = DynamicRuntimeParams(
-            dt: 0.005,
+        // Dynamic parameters
+        let dynamicParameters = DynamicRuntimeParameters(
+            timeStep: 0.005,
             boundaryConditions: boundaryConditions,
             profileConditions: profileConditions,
-            sourceParams: sourceParams,
-            transportParams: transportParams
+            sourceParameters: sourceParameters,
+            transportParameters: transportParameters
         )
 
         // Initial profiles (parabolic)
-        let Ti_values = (0..<nCells).map { i in
-            let rho = Float(i) / Float(nCells - 1)
-            return 5000.0 * (1.0 - rho * rho)  // [eV]
+        let Ti_values = (0..<cellCount).map { i in
+            let rho = Float(i) / Float(cellCount - 1)
+            return 100.0 + (5000.0 - 100.0) * (1.0 - rho * rho)  // [eV]
         }
         let Te_values = Ti_values
-        let ne_values = (0..<nCells).map { i in
-            let rho = Float(i) / Float(nCells - 1)
+        let ne_values = (0..<cellCount).map { i in
+            let rho = Float(i) / Float(cellCount - 1)
             return 5e19 * (1.0 - 0.5 * rho * rho)  // [m⁻³]
         }
-        let psi_values = (0..<nCells).map { i in
-            let rho = Float(i) / Float(nCells - 1)
+        let psi_values = (0..<cellCount).map { i in
+            let rho = Float(i) / Float(cellCount - 1)
             return 10.0 * rho * rho  // [Wb]
         }
 
@@ -188,7 +188,7 @@ struct ForwardSensitivityTests {
             poloidalFlux: EvaluatedArray(evaluating: MLXArray(psi_values))
         )
 
-        return (staticParams, dynamicParams, geometry, initialProfiles)
+        return (staticParameters, dynamicParameters, geometry, initialProfiles)
     }
 
     // MARK: - Gradient Correctness Tests
@@ -200,14 +200,14 @@ struct ForwardSensitivityTests {
     /// **Acceptance criterion**: Relative error < 1% for most parameters
     @Test("Gradient correctness via finite differences")
     func testGradientCorrectness() throws {
-        let (staticParams, dynamicParams, geometry, initialProfiles) = createTestConfiguration()
+        let (staticParameters, dynamicParameters, geometry, initialProfiles) = try createTestConfiguration()
 
         // Create simulation with simple heating source
         let simulation = DifferentiableSimulation(
-            staticParams: staticParams,
+            staticParameters: staticParameters,
             transport: ConstantTransportModel(
-                chiIon: 1.0,
-                chiElectron: 1.0,
+                ionHeatDiffusivity: 1.0,
+                electronHeatDiffusivity: 1.0,
                 particleDiffusivity: 0.5
             ),
             sources: [SimpleHeatingSource()],
@@ -219,24 +219,24 @@ struct ForwardSensitivityTests {
 
         // Test parameters - longer simulation for numerical gradient to be detectable
         let timeHorizon: Float = 0.1  // Longer to accumulate heating effect
-        let dt: Float = 0.01
-        let nSteps = 10
+        let timeStep: Float = 0.01
+        let stepCount = 10
 
         let baselineActuators = ActuatorTimeSeries.constant(
-            P_ECRH: 50.0,    // Larger power for detectable gradients
-            P_ICRH: 50.0,
-            gas_puff: 1e20,
-            I_plasma: 15.0,
-            nSteps: nSteps
+            ecrhPower: 50.0,    // Larger power for detectable gradients
+            icrhPower: 50.0,
+            gasPuffRate: 1e20,
+            plasmaCurrent: 15.0,
+            stepCount: stepCount
         )
 
         // Compute analytical gradient
         let analyticalGradient = sensitivity.computeGradient(
             initialProfiles: initialProfiles,
             actuators: baselineActuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         // Compute numerical gradient via finite differences
@@ -247,9 +247,9 @@ struct ForwardSensitivityTests {
             let (_, loss) = simulation.forward(
                 initialProfiles: initialProfiles,
                 actuators: actuators,
-                dynamicParams: dynamicParams,
+                dynamicParameters: dynamicParameters,
                 timeHorizon: timeHorizon,
-                dt: dt
+                timeStep: timeStep
             )
             eval(loss)
             return loss.item(Float.self)
@@ -257,39 +257,39 @@ struct ForwardSensitivityTests {
 
         let baseLoss = computeLoss(actuators: baselineActuators)
 
-        // Numerical gradient for P_ECRH
+        // Numerical gradient for ecrhPower
         // Note: Must perturb ALL timesteps uniformly because forward() takes mean
         let perturbedActuators = ActuatorTimeSeries.constant(
-            P_ECRH: 50.0 + epsilon,  // Perturb all timesteps
-            P_ICRH: 50.0,
-            gas_puff: 1e20,
-            I_plasma: 15.0,
-            nSteps: nSteps
+            ecrhPower: 50.0 + epsilon,  // Perturb all timesteps
+            icrhPower: 50.0,
+            gasPuffRate: 1e20,
+            plasmaCurrent: 15.0,
+            stepCount: stepCount
         )
         let perturbedLoss = computeLoss(actuators: perturbedActuators)
         let numericalGradient = (perturbedLoss - baseLoss) / epsilon
 
-        // Get analytical gradient for ALL P_ECRH timesteps (sum over all timesteps)
+        // Get analytical gradient for ALL ecrhPower timesteps (sum over all timesteps)
         //
-        // CRITICAL: Multiply by nSteps to account for mean() in forward()
+        // CRITICAL: Multiply by stepCount to account for mean() in forward()
         //
         // Explanation:
-        // - forward() uses mean(actuatorArray) which applies d(mean)/dx_i = 1/nSteps
-        // - Each timestep gradient is scaled by 1/nSteps due to mean()
+        // - forward() uses mean(actuatorArray) which applies d(mean)/dx_i = 1/stepCount
+        // - Each timestep gradient is scaled by 1/stepCount due to mean()
         // - Numerical gradient perturbs ALL timesteps → compensates for mean() automatically
-        // - Analytical gradient needs explicit compensation: sum(gradients) × nSteps
-        let analyticalGradientSum = analyticalGradient.P_ECRH.reduce(0.0, +)
-        let analyticalValue = analyticalGradientSum * Float(nSteps)  // Compensate for mean()
+        // - Analytical gradient needs explicit compensation: sum(gradients) × stepCount
+        let analyticalGradientSum = analyticalGradient.ecrhPower.reduce(0.0, +)
+        let analyticalValue = analyticalGradientSum * Float(stepCount)  // Compensate for mean()
 
         // Compute relative error
         let relativeError = abs(analyticalValue - numericalGradient) / max(abs(numericalGradient), 1e-6)
 
         print("Gradient Validation:")
-        print("  Baseline loss: \(baseLoss) (P_ECRH=50 MW)")
-        print("  Perturbed loss: \(perturbedLoss) (P_ECRH=\(50.0 + epsilon) MW)")
+        print("  Baseline loss: \(baseLoss) (ecrhPower=50 MW)")
+        print("  Perturbed loss: \(perturbedLoss) (ecrhPower=\(50.0 + epsilon) MW)")
         print("  Delta loss: \(perturbedLoss - baseLoss)")
-        print("  Analytical (per timestep): \(analyticalGradient.P_ECRH[0])")
-        print("  Analytical (sum × nSteps): \(analyticalValue)")
+        print("  Analytical (per timestep): \(analyticalGradient.ecrhPower[0])")
+        print("  Analytical (sum × stepCount): \(analyticalValue)")
         print("  Numerical:  \(numericalGradient)")
         print("  Relative Error: \(relativeError)")
 
@@ -303,16 +303,16 @@ struct ForwardSensitivityTests {
     ///
     /// **Critical**: Verifies Problem 1 fix (actuator mapping to simulation)
     ///
-    /// **Expected**: Increasing P_ECRH should increase Q_fusion (more heating → better confinement)
+    /// **Expected**: Increasing ecrhPower should increase fusionGain (more heating → better confinement)
     @Test("Actuators affect simulation output")
     func testActuatorEffect() throws {
-        let (staticParams, dynamicParams, geometry, initialProfiles) = createTestConfiguration()
+        let (staticParameters, dynamicParameters, geometry, initialProfiles) = try createTestConfiguration()
 
         let simulation = DifferentiableSimulation(
-            staticParams: staticParams,
+            staticParameters: staticParameters,
             transport: ConstantTransportModel(
-                chiIon: 1.0,
-                chiElectron: 1.0,
+                ionHeatDiffusivity: 1.0,
+                electronHeatDiffusivity: 1.0,
                 particleDiffusivity: 0.5
             ),
             sources: [SimpleHeatingSource()],  // Use heating source so actuators have effect
@@ -320,41 +320,41 @@ struct ForwardSensitivityTests {
         )
 
         let timeHorizon: Float = 0.01
-        let dt: Float = 0.005
-        let nSteps = 2
+        let timeStep: Float = 0.005
+        let stepCount = 2
 
         // Baseline: Low heating
         let lowHeating = ActuatorTimeSeries.constant(
-            P_ECRH: 25.0,    // 25 MW
-            P_ICRH: 25.0,    // 25 MW → Total 50 MW
-            gas_puff: 1e20,
-            I_plasma: 10.0,
-            nSteps: nSteps
+            ecrhPower: 25.0,    // 25 MW
+            icrhPower: 25.0,    // 25 MW → Total 50 MW
+            gasPuffRate: 1e20,
+            plasmaCurrent: 10.0,
+            stepCount: stepCount
         )
 
         // Increased: High heating
         let highHeating = ActuatorTimeSeries.constant(
-            P_ECRH: 100.0,   // 100 MW
-            P_ICRH: 100.0,   // 100 MW → Total 200 MW
-            gas_puff: 1e20,
-            I_plasma: 10.0,
-            nSteps: nSteps
+            ecrhPower: 100.0,   // 100 MW
+            icrhPower: 100.0,   // 100 MW → Total 200 MW
+            gasPuffRate: 1e20,
+            plasmaCurrent: 10.0,
+            stepCount: stepCount
         )
 
-        let (lowProfiles, lowLoss) = simulation.forward(
+        let (_, lowLoss) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: lowHeating,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
-        let (highProfiles, highLoss) = simulation.forward(
+        let (_, highLoss) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: highHeating,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         eval(lowLoss, highLoss)
@@ -395,13 +395,13 @@ struct ForwardSensitivityTests {
     /// **Phase 7 Achievement**: Gradient computation works correctly (4/5 tests pass).
     @Test("Gas puff affects edge density", .disabled("Boundary condition propagation requires PDE solver investigation"))
     func testGasPuffEffect() throws {
-        let (staticParams, dynamicParams, geometry, initialProfiles) = createTestConfiguration()
+        let (staticParameters, dynamicParameters, geometry, initialProfiles) = try createTestConfiguration()
 
         let simulation = DifferentiableSimulation(
-            staticParams: staticParams,
+            staticParameters: staticParameters,
             transport: ConstantTransportModel(
-                chiIon: 1.0,
-                chiElectron: 1.0,
+                ionHeatDiffusivity: 1.0,
+                electronHeatDiffusivity: 1.0,
                 particleDiffusivity: 10.0  // Very high diffusivity for boundary propagation
             ),
             sources: [SimpleHeatingSource()],
@@ -409,46 +409,46 @@ struct ForwardSensitivityTests {
         )
 
         let timeHorizon: Float = 2.0  // Much longer time for boundary effect to propagate
-        let dt: Float = 0.02
-        let nSteps = 100
+        let timeStep: Float = 0.02
+        let stepCount = 100
 
         // Low gas puff: 1e20 → 0.1 × 1e20 = 1e19 (matches initial BC)
         let lowGasPuff = ActuatorTimeSeries.constant(
-            P_ECRH: 50.0,
-            P_ICRH: 50.0,
-            gas_puff: 1e20,  // Low → 1e19 edge density (same as initial)
-            I_plasma: 15.0,
-            nSteps: nSteps
+            ecrhPower: 50.0,
+            icrhPower: 50.0,
+            gasPuffRate: 1e20,  // Low → 1e19 edge density (same as initial)
+            plasmaCurrent: 15.0,
+            stepCount: stepCount
         )
 
         // High gas puff: 4e20 → 0.1 × 4e20 = 4e19 (4× higher)
         let highGasPuff = ActuatorTimeSeries.constant(
-            P_ECRH: 50.0,
-            P_ICRH: 50.0,
-            gas_puff: 4e20,  // High → 4e19 edge density (4× difference)
-            I_plasma: 15.0,
-            nSteps: nSteps
+            ecrhPower: 50.0,
+            icrhPower: 50.0,
+            gasPuffRate: 4e20,  // High → 4e19 edge density (4× difference)
+            plasmaCurrent: 15.0,
+            stepCount: stepCount
         )
 
         let (lowProfiles, _) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: lowGasPuff,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         let (highProfiles, _) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: highGasPuff,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         // Get edge density (last cell)
-        let lowEdgeDensity = lowProfiles.electronDensity.value[staticParams.mesh.nCells - 1].item(Float.self)
-        let highEdgeDensity = highProfiles.electronDensity.value[staticParams.mesh.nCells - 1].item(Float.self)
+        let lowEdgeDensity = lowProfiles.electronDensity.value[staticParameters.mesh.cellCount - 1].item(Float.self)
+        let highEdgeDensity = highProfiles.electronDensity.value[staticParameters.mesh.cellCount - 1].item(Float.self)
 
         print("Gas Puff Effect Test:")
         print("  Low gas puff (1e20 → expect 1e19):  edge density = \(lowEdgeDensity) m⁻³")
@@ -471,13 +471,13 @@ struct ForwardSensitivityTests {
     /// 3. Finite (numerical stability)
     @Test("Gradient flows correctly")
     func testGradientFlow() throws {
-        let (staticParams, dynamicParams, geometry, initialProfiles) = createTestConfiguration()
+        let (staticParameters, dynamicParameters, geometry, initialProfiles) = try createTestConfiguration()
 
         let simulation = DifferentiableSimulation(
-            staticParams: staticParams,
+            staticParameters: staticParameters,
             transport: ConstantTransportModel(
-                chiIon: 1.0,
-                chiElectron: 1.0,
+                ionHeatDiffusivity: 1.0,
+                electronHeatDiffusivity: 1.0,
                 particleDiffusivity: 0.5
             ),
             sources: [SimpleHeatingSource()],
@@ -487,31 +487,31 @@ struct ForwardSensitivityTests {
         let sensitivity = ForwardSensitivity(simulation: simulation)
 
         let timeHorizon: Float = 0.05  // Longer for gradient to be meaningful
-        let dt: Float = 0.005
-        let nSteps = 10
+        let timeStep: Float = 0.005
+        let stepCount = 10
 
         let actuators = ActuatorTimeSeries.constant(
-            P_ECRH: 50.0,    // Larger power for non-zero gradients
-            P_ICRH: 50.0,
-            gas_puff: 1e20,
-            I_plasma: 15.0,
-            nSteps: nSteps
+            ecrhPower: 50.0,    // Larger power for non-zero gradients
+            icrhPower: 50.0,
+            gasPuffRate: 1e20,
+            plasmaCurrent: 15.0,
+            stepCount: stepCount
         )
 
         let gradient = sensitivity.computeGradient(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
-        // Check P_ECRH gradient
-        let gradP_ECRH = gradient.P_ECRH
+        // Check ecrhPower gradient
+        let gradP_ECRH = gradient.ecrhPower
 
         // 1. No NaN values
         for (i, value) in gradP_ECRH.enumerated() {
-            #expect(!value.isNaN, "Gradient P_ECRH[\(i)] is NaN - gradient tape broken!")
+            #expect(!value.isNaN, "Gradient ecrhPower[\(i)] is NaN - gradient tape broken!")
         }
 
         // 2. At least one non-zero gradient (sensitivity exists)
@@ -520,11 +520,11 @@ struct ForwardSensitivityTests {
 
         // 3. All finite
         for (i, value) in gradP_ECRH.enumerated() {
-            #expect(value.isFinite, "Gradient P_ECRH[\(i)] is infinite!")
+            #expect(value.isFinite, "Gradient ecrhPower[\(i)] is infinite!")
         }
 
         print("Gradient Flow Test:")
-        print("  P_ECRH gradients: \(gradP_ECRH)")
+        print("  ecrhPower gradients: \(gradP_ECRH)")
         print("  ✅ All gradients valid (finite, not NaN, non-zero)")
     }
 
@@ -540,56 +540,56 @@ struct ForwardSensitivityTests {
     @Test("Constraint application is differentiable")
     func testConstraintApplication() throws {
         let constraints = ActuatorConstraints.iter
-        let nSteps = 2
+        let stepCount = 2
 
         // Create actuators exceeding constraints
         let unconstrained = ActuatorTimeSeries(
-            P_ECRH: [50.0, 50.0],  // Exceeds maxECRH = 30.0
-            P_ICRH: [5.0, 5.0],
-            gas_puff: [1e20, 1e20],
-            I_plasma: [15.0, 15.0]
+            ecrhPower: [50.0, 50.0],  // Exceeds maximumECRHPower = 30.0
+            icrhPower: [5.0, 5.0],
+            gasPuffRate: [1e20, 1e20],
+            plasmaCurrent: [15.0, 15.0]
         )
 
         // Apply constraints (this happens inside Adam optimizer)
-        let constrainedArray = unconstrained.toMLXArray()
+        let constrainedArray = unconstrained.asMLXArray()
 
         // Simulate Adam's constraint application
         let nActuators = 4
-        var minBounds = [Float](repeating: 0, count: nSteps * nActuators)
-        var maxBounds = [Float](repeating: 0, count: nSteps * nActuators)
+        var minBounds = [Float](repeating: 0, count: stepCount * nActuators)
+        var maxBounds = [Float](repeating: 0, count: stepCount * nActuators)
 
-        for i in 0..<nSteps {
-            minBounds[i] = constraints.minECRH
-            maxBounds[i] = constraints.maxECRH
+        for i in 0..<stepCount {
+            minBounds[i] = constraints.minimumECRHPower
+            maxBounds[i] = constraints.maximumECRHPower
         }
-        for i in nSteps..<(2*nSteps) {
-            minBounds[i] = constraints.minICRH
-            maxBounds[i] = constraints.maxICRH
+        for i in stepCount..<(2*stepCount) {
+            minBounds[i] = constraints.minimumICRHPower
+            maxBounds[i] = constraints.maximumICRHPower
         }
-        for i in (2*nSteps)..<(3*nSteps) {
-            minBounds[i] = constraints.minGasPuff
-            maxBounds[i] = constraints.maxGasPuff
+        for i in (2*stepCount)..<(3*stepCount) {
+            minBounds[i] = constraints.minimumGasPuffRate
+            maxBounds[i] = constraints.maximumGasPuffRate
         }
-        for i in (3*nSteps)..<(4*nSteps) {
-            minBounds[i] = constraints.minCurrent
-            maxBounds[i] = constraints.maxCurrent
+        for i in (3*stepCount)..<(4*stepCount) {
+            minBounds[i] = constraints.minimumCurrent
+            maxBounds[i] = constraints.maximumCurrent
         }
 
         let clampedArray = clip(constrainedArray, min: MLXArray(minBounds), max: MLXArray(maxBounds))
         eval(clampedArray)
 
-        let constrained = ActuatorTimeSeries.fromMLXArray(clampedArray, nSteps: nSteps)
+        let constrained = ActuatorTimeSeries(mlxArray: clampedArray, stepCount: stepCount)
 
-        // Verify P_ECRH was clamped
-        #expect(constrained.P_ECRH[0] == 30.0, "P_ECRH not clamped to max")
-        #expect(constrained.P_ECRH[1] == 30.0, "P_ECRH not clamped to max")
+        // Verify ecrhPower was clamped
+        #expect(constrained.ecrhPower[0] == 30.0, "P_ECRH not clamped to max")
+        #expect(constrained.ecrhPower[1] == 30.0, "P_ECRH not clamped to max")
 
-        // Verify P_ICRH unchanged (within bounds)
-        #expect(constrained.P_ICRH[0] == 5.0, "P_ICRH incorrectly modified")
+        // Verify icrhPower unchanged (within bounds)
+        #expect(constrained.icrhPower[0] == 5.0, "P_ICRH incorrectly modified")
 
         print("Constraint Test:")
-        print("  Unconstrained P_ECRH: \(unconstrained.P_ECRH)")
-        print("  Constrained P_ECRH:   \(constrained.P_ECRH)")
+        print("  Unconstrained ecrhPower: \(unconstrained.ecrhPower)")
+        print("  Constrained ecrhPower:   \(constrained.ecrhPower)")
         print("  ✅ Constraints applied correctly")
     }
 }

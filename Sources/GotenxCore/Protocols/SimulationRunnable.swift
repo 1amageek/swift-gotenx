@@ -99,7 +99,7 @@ public protocol SimulationRunnable: Actor {
     ///     }
     /// }
     ///
-    /// print("Final Ti: \(result.finalProfiles.ionTemperature)")
+    /// print("Final ionTemperature: \(result.finalProfiles.ionTemperature)")
     /// print("Wall time: \(result.statistics.wallTime)s")
     /// ```
     func run(

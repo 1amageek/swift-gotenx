@@ -61,7 +61,7 @@ public struct DynamicConfig: Codable, Sendable, Equatable {
         initialProfile: InitialProfileConfig = .default
     ) {
         self.boundaries = boundaries
-        self.transport = TransportConfig(modelType: .constant)
+        self.transport = .defaultConstant
         self.sources = sources
         self.pedestal = pedestal
         self.mhd = mhd
@@ -83,18 +83,18 @@ public struct PedestalConfig: Codable, Sendable, Equatable {
 // MARK: - Conversion to Runtime Parameters
 
 extension DynamicConfig {
-    /// Convert to DynamicRuntimeParams for simulation execution
+    /// Convert to DynamicRuntimeParameters for simulation execution
     ///
     /// This adapter bridges the configuration system with the runtime execution.
-    /// - Parameter dt: Timestep value (from TimeConfig)
-    /// - Returns: DynamicRuntimeParams ready for simulation
-    public func toDynamicRuntimeParams(dt: Float) -> DynamicRuntimeParams {
-        DynamicRuntimeParams(
-            dt: dt,
+    /// - Parameter timeStep: Timestep value (from TimeConfig)
+    /// - Returns: DynamicRuntimeParameters ready for simulation
+    public func dynamicRuntimeParameters(timeStep: Float) -> DynamicRuntimeParameters {
+        DynamicRuntimeParameters(
+            timeStep: timeStep,
             boundaryConditions: boundaries.toBoundaryConditions(),
             profileConditions: toProfileConditions(),
-            sourceParams: sources.toSourceParams(),
-            transportParams: transport.toTransportParameters()
+            sourceParameters: sources.sourceParameters(),
+            transportParameters: transport.transportParameters()
         )
     }
 
@@ -118,8 +118,8 @@ extension DynamicConfig {
                 exponent: initialProfile.temperatureExponent
             ),
             electronDensity: .parabolic(
-                peak: boundaries.density * initialProfile.densityPeakRatio,
-                edge: boundaries.density,
+                peak: boundaries.electronDensity * initialProfile.densityPeakRatio,
+                edge: boundaries.electronDensity,
                 exponent: initialProfile.densityExponent
             ),
             currentDensity: .constant(1.0)  // Placeholder: 1 MA/m^2

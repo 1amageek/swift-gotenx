@@ -10,24 +10,24 @@ struct EnergyConservationTests {
     // MARK: - Test Helpers
 
     /// Create test profiles with uniform temperature and density
-    private func createUniformProfiles(nCells: Int, Te: Float, Ti: Float, ne: Float) throws -> CoreProfiles {
-        let TeArray = MLXArray(Array(repeating: Te, count: nCells))
-        let TiArray = MLXArray(Array(repeating: Ti, count: nCells))
-        let neArray = MLXArray(Array(repeating: ne, count: nCells))
-        let psi = MLXArray(Array(repeating: Float(0.0), count: nCells))
+    private func createUniformProfiles(cellCount: Int, electronTemperature: Float, ionTemperature: Float, electronDensity: Float) throws -> CoreProfiles {
+        let electronTemperatureArray = MLXArray(Array(repeating: electronTemperature, count: cellCount))
+        let ionTemperatureArray = MLXArray(Array(repeating: ionTemperature, count: cellCount))
+        let electronDensityArray = MLXArray(Array(repeating: electronDensity, count: cellCount))
+        let poloidalFlux = MLXArray(Array(repeating: Float(0.0), count: cellCount))
 
         return CoreProfiles(
-            ionTemperature: EvaluatedArray(evaluating: TiArray),
-            electronTemperature: EvaluatedArray(evaluating: TeArray),
-            electronDensity: EvaluatedArray(evaluating: neArray),
-            poloidalFlux: EvaluatedArray(evaluating: psi)
+            ionTemperature: EvaluatedArray(evaluating: ionTemperatureArray),
+            electronTemperature: EvaluatedArray(evaluating: electronTemperatureArray),
+            electronDensity: EvaluatedArray(evaluating: electronDensityArray),
+            poloidalFlux: EvaluatedArray(evaluating: poloidalFlux)
         )
     }
 
     /// Create simple geometry
-    private func createGeometry(nCells: Int) -> Geometry {
+    private func createGeometry(cellCount: Int) -> Geometry {
         let config = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 6.2,
             minorRadius: 2.0,
             toroidalField: 5.3
@@ -40,11 +40,11 @@ struct EnergyConservationTests {
     @Test("Compute conserved quantity")
     func testComputeConservedQuantity() throws {
         let conservation = EnergyConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles: Te = Ti = 10 keV = 10000 eV, ne = 1e20 m^-3
-        let profiles = try createUniformProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let profiles = try createUniformProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         // Compute total energy
         let totalEnergy = conservation.computeConservedQuantity(
@@ -121,10 +121,10 @@ struct EnergyConservationTests {
     @Test("Apply correction")
     func testApplyCorrection() throws {
         let conservation = EnergyConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles with Te = Ti = 10000 eV
-        let profiles = try createUniformProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
+        let profiles = try createUniformProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
 
         // Apply 5% correction (factor = 1.05)
         let corrected = conservation.applyCorrection(
@@ -159,11 +159,11 @@ struct EnergyConservationTests {
     @Test("Round-trip: correction restores conservation")
     func testRoundTrip() throws {
         let conservation = EnergyConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create initial profiles
-        let initialProfiles = try createUniformProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let initialProfiles = try createUniformProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         // Compute reference
         let E0 = conservation.computeConservedQuantity(
@@ -203,11 +203,11 @@ struct EnergyConservationTests {
     @Test("Energy scales linearly with temperature")
     func testEnergyScalesLinearly() throws {
         let conservation = EnergyConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles with Te = Ti = 10000 eV
-        let profiles1 = try createUniformProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let profiles1 = try createUniformProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let E1 = conservation.computeConservedQuantity(profiles: profiles1, geometry: geometry)
 
@@ -254,11 +254,11 @@ struct EnergyConservationTests {
 
         let E_prev: Float = 1.0e6  // 1 MJ
         let E_curr: Float = 1.1e6  // 1.1 MJ
-        let dt: Float = 0.1  // 0.1 s
+        let timeStep: Float = 0.1  // 0.1 s
 
-        let rate = conservation.computeEnergyRate(current: E_curr, previous: E_prev, dt: dt)
+        let rate = conservation.computeEnergyRate(current: E_curr, previous: E_prev, timeStep: timeStep)
 
-        // Expected: dE/dt = (1.1 - 1.0) / 0.1 = 1.0 MW
+        // Expected: dE/timeStep = (1.1 - 1.0) / 0.1 = 1.0 MW
         let expected: Float = 1.0e6  // W
         #expect(abs(rate - expected) < 1e-3, "Energy rate incorrect")
     }
@@ -268,21 +268,21 @@ struct EnergyConservationTests {
     @Test("Conservation with gradient profiles")
     func testGradientProfiles() throws {
         let conservation = EnergyConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles with linear gradient: T = 15000 * (1 - 0.5*r)
         var Te_values: [Float] = []
         var Ti_values: [Float] = []
-        for i in 0..<nCells {
-            let r = Float(i) / Float(nCells - 1)
+        for i in 0..<cellCount {
+            let r = Float(i) / Float(cellCount - 1)
             Te_values.append(15000.0 * (1.0 - 0.5 * r))
             Ti_values.append(15000.0 * (1.0 - 0.5 * r))
         }
 
-        let Te = MLXArray(Te_values, [nCells])
-        let Ti = MLXArray(Ti_values, [nCells])
-        let ne = MLXArray(Array(repeating: Float(1e20), count: nCells))
-        let psi = MLXArray(Array(repeating: Float(0.0), count: nCells))
+        let Te = MLXArray(Te_values, [cellCount])
+        let Ti = MLXArray(Ti_values, [cellCount])
+        let ne = MLXArray(Array(repeating: Float(1e20), count: cellCount))
+        let psi = MLXArray(Array(repeating: Float(0.0), count: cellCount))
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -291,7 +291,7 @@ struct EnergyConservationTests {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let geometry = createGeometry(nCells: nCells)
+        let geometry = createGeometry(cellCount: cellCount)
 
         // Compute initial energy
         let E0 = conservation.computeConservedQuantity(profiles: profiles, geometry: geometry)
@@ -313,20 +313,20 @@ struct EnergyConservationTests {
     @Test("Conservation with zero temperature cells")
     func testZeroTemperatureCells() throws {
         let conservation = EnergyConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles with some zero temperature cells
         var Te_values: [Float] = []
         var Ti_values: [Float] = []
-        for i in 0..<nCells {
+        for i in 0..<cellCount {
             Te_values.append(i < 20 ? 10000.0 : 0.0)  // Last 5 cells are zero
             Ti_values.append(i < 20 ? 10000.0 : 0.0)
         }
 
-        let Te = MLXArray(Te_values, [nCells])
-        let Ti = MLXArray(Ti_values, [nCells])
-        let ne = MLXArray(Array(repeating: Float(1e20), count: nCells))
-        let psi = MLXArray(Array(repeating: Float(0.0), count: nCells))
+        let Te = MLXArray(Te_values, [cellCount])
+        let Ti = MLXArray(Ti_values, [cellCount])
+        let ne = MLXArray(Array(repeating: Float(1e20), count: cellCount))
+        let psi = MLXArray(Array(repeating: Float(0.0), count: cellCount))
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -335,7 +335,7 @@ struct EnergyConservationTests {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let geometry = createGeometry(nCells: nCells)
+        let geometry = createGeometry(cellCount: cellCount)
 
         // Should handle zero temperature cells gracefully
         let E = conservation.computeConservedQuantity(profiles: profiles, geometry: geometry)

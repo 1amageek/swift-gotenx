@@ -40,7 +40,7 @@ This is implemented via `ToleranceScaler` that applies the same reference state 
 
 ### 2. Configuration Backward Compatibility
 
-**Preserve existing structure**: Extend `AdaptiveTimestepConfig` rather than replacing it. Old configs with explicit `minDt` continue working; new configs can use `minDtFraction` for adaptive scaling.
+**Preserve existing structure**: Extend `AdaptiveTimestepConfig` rather than replacing it. Old configs with explicit `minimumTimeStep` continue working; new configs can use `minimumTimeStepFraction` for adaptive scaling.
 
 ### 3. Physical Correctness
 
@@ -135,12 +135,12 @@ public struct ToleranceScaler {
     /// - Parameters:
     ///   - layout: State layout (equation ranges)
     ///   - physicalState: Current state in physical units (for relative tolerance)
-    /// - Returns: Scaled tolerance vector [4*nCells]
+    /// - Returns: Scaled tolerance vector [4*cellCount]
     public func scaledTolerances(
         layout: StateLayout,
         physicalState: FlattenedState
     ) -> MLXArray {
-        let nCells = layout.nCells
+        let cellCount = layout.cellCount
 
         // Extract per-equation physical values and reference scales
         let Ti_phys = physicalState.values.value[layout.tiRange]
@@ -241,52 +241,52 @@ public struct PhysicalThresholds: Codable, Sendable {
 /// Adaptive timestep configuration (EXTENDED, backward compatible)
 public struct AdaptiveTimestepConfig: Codable, Sendable, Equatable {
     /// Minimum timestep [s] (absolute) - optional for backward compat
-    public let minDt: Float?
+    public let minimumTimeStep: Float?
 
-    /// Minimum timestep fraction of maxDt (default: 0.001)
-    /// Ignored if minDt is explicitly set
-    public let minDtFraction: Float?
+    /// Minimum timestep fraction of maximumTimeStep (default: 0.001)
+    /// Ignored if minimumTimeStep is explicitly set
+    public let minimumTimeStepFraction: Float?
 
     /// Maximum timestep [s]
-    public let maxDt: Float
+    public let maximumTimeStep: Float
 
     /// CFL safety factor (< 1.0)
     public let safetyFactor: Float
 
     /// Maximum timestep growth rate per step (default: 1.2)
-    public let maxTimestepGrowth: Float
+    public let maximumTimeStepGrowth: Float
 
     /// Computed minimum timestep (backward compatible)
     public var effectiveMinDt: Float {
-        if let minDt = minDt {
-            return minDt  // Explicit value takes precedence (old configs)
-        } else if let fraction = minDtFraction {
-            return maxDt * fraction
+        if let minimumTimeStep = minimumTimeStep {
+            return minimumTimeStep  // Explicit value takes precedence (old configs)
+        } else if let fraction = minimumTimeStepFraction {
+            return maximumTimeStep * fraction
         } else {
-            return maxDt * 0.001  // Default fallback
+            return maximumTimeStep * 0.001  // Default fallback
         }
     }
 
     public static let `default` = AdaptiveTimestepConfig(
-        minDt: nil,              // Use fraction instead
-        minDtFraction: 0.001,    // maxDt / 1000
-        maxDt: 1e-1,
+        minimumTimeStep: nil,              // Use fraction instead
+        minimumTimeStepFraction: 0.001,    // maximumTimeStep / 1000
+        maximumTimeStep: 1e-1,
         safetyFactor: 0.9,
-        maxTimestepGrowth: 1.2
+        maximumTimeStepGrowth: 1.2
     )
 
     public init(
-        minDt: Float? = nil,
-        minDtFraction: Float? = 0.001,
-        maxDt: Float,
+        minimumTimeStep: Float? = nil,
+        minimumTimeStepFraction: Float? = 0.001,
+        maximumTimeStep: Float,
         safetyFactor: Float,
-        maxTimestepGrowth: Float = 1.2
+        maximumTimeStepGrowth: Float = 1.2
     ) {
-        self.minDt = minDt
-        self.minDtFraction = minDtFraction
-        self.maxDt = maxDt
+        self.minimumTimeStep = minimumTimeStep
+        self.minimumTimeStepFraction = minimumTimeStepFraction
+        self.maximumTimeStep = maximumTimeStep
         self.safetyFactor = safetyFactor
-        self.maxTimestepGrowth = maxTimestepGrowth
+        self.maximumTimeStepGrowth = maximumTimeStepGrowth
     }
 }
 ```
@@ -296,8 +296,8 @@ public struct AdaptiveTimestepConfig: Codable, Sendable, Equatable {
 // Old config (still works):
 {
   "adaptive": {
-    "minDt": 1e-6,
-    "maxDt": 1e-1,
+    "minimumTimeStep": 1e-6,
+    "maximumTimeStep": 1e-1,
     "safetyFactor": 0.9
   }
 }
@@ -305,10 +305,10 @@ public struct AdaptiveTimestepConfig: Codable, Sendable, Equatable {
 // New config (recommended):
 {
   "adaptive": {
-    "minDtFraction": 0.001,
-    "maxDt": 1e-1,
+    "minimumTimeStepFraction": 0.001,
+    "maximumTimeStep": 1e-1,
     "safetyFactor": 0.9,
-    "maxTimestepGrowth": 1.2
+    "maximumTimeStepGrowth": 1.2
   }
 }
 ```
@@ -346,7 +346,7 @@ public struct NewtonRaphsonSolver: PDESolver {
         )
 
         // Newton-Raphson iteration in SCALED space
-        for iter in 0..<maxIterations {
+        for iter in 0..<maximumIterations {
             // Compute residual in scaled space
             let residualScaled = residualFnScaled(xScaled.values.value)
             eval(residualScaled)
@@ -532,18 +532,18 @@ public struct PowerLawScheme {
     /// Compute face values using power-law weighting
     ///
     /// - Parameters:
-    ///   - cellValues: Values at cell centers [nCells]
+    ///   - cellValues: Values at cell centers [cellCount]
     ///   - peclet: Péclet number at faces [nFaces]
     /// - Returns: Weighted face values [nFaces]
     public static func interpolateToFaces(
         cellValues: MLXArray,
         peclet: MLXArray
     ) -> MLXArray {
-        let nCells = cellValues.shape[0]
+        let cellCount = cellValues.shape[0]
 
         // Interior faces: power-law weighted
-        let leftCells = cellValues[0..<(nCells-1)]
-        let rightCells = cellValues[1..<nCells]
+        let leftCells = cellValues[0..<(cellCount-1)]
+        let rightCells = cellValues[1..<cellCount]
         let pecletInterior = peclet[1..<(peclet.shape[0]-1)]
 
         let alpha = computeWeightingFactor(peclet: pecletInterior)
@@ -565,7 +565,7 @@ public struct PowerLawScheme {
 
         // Boundary faces: use adjacent cell value
         let faceLeft = cellValues[0..<1]
-        let faceRight = cellValues[(nCells-1)..<nCells]
+        let faceRight = cellValues[(cellCount-1)..<cellCount]
 
         return concatenated([faceLeft, faceInterior, faceRight], axis: 0)
     }
@@ -723,10 +723,10 @@ public struct CollisionalityHelpers {
     /// Formula: τₑ ≈ 3.44e5 * Tₑ^(3/2) / (nₑ * ln(Λ))
     ///
     /// - Parameters:
-    ///   - Te: Electron temperature [eV], shape [nCells]
-    ///   - ne: Electron density [m⁻³], shape [nCells]
+    ///   - Te: Electron temperature [eV], shape [cellCount]
+    ///   - ne: Electron density [m⁻³], shape [cellCount]
     ///   - coulombLog: Coulomb logarithm (default: 17.0)
-    /// - Returns: Collision time [s], shape [nCells]
+    /// - Returns: Collision time [s], shape [cellCount]
     public static func computeCollisionTime(
         Te: MLXArray,
         ne: MLXArray,
@@ -745,10 +745,10 @@ public struct CollisionalityHelpers {
     /// - vₜₕ = √(2Tₑ/mₑ): thermal velocity
     ///
     /// - Parameters:
-    ///   - Te: Electron temperature [eV], shape [nCells]
-    ///   - ne: Electron density [m⁻³], shape [nCells]
+    ///   - Te: Electron temperature [eV], shape [cellCount]
+    ///   - ne: Electron density [m⁻³], shape [cellCount]
     ///   - geometry: Tokamak geometry
-    /// - Returns: Normalized collisionality ν* [dimensionless], shape [nCells]
+    /// - Returns: Normalized collisionality ν* [dimensionless], shape [cellCount]
     public static func computeNormalizedCollisionality(
         Te: MLXArray,
         ne: MLXArray,
@@ -773,7 +773,7 @@ public struct CollisionalityHelpers {
     /// Parabolic approximation: q ≈ 1 + (r/a)²
     ///
     /// - Parameter geometry: Tokamak geometry
-    /// - Returns: Safety factor [dimensionless], shape [nCells]
+    /// - Returns: Safety factor [dimensionless], shape [cellCount]
     private static func approximateSafetyFactor(geometry: Geometry) -> MLXArray {
         let r_norm = geometry.radii.value / geometry.minorRadius
         return 1.0 + r_norm * r_norm
@@ -804,7 +804,7 @@ Replace `computeBootstrapCurrent` (Line 474-507):
 /// - Parameters:
 ///   - profiles: Current core profiles
 ///   - geometry: Tokamak geometry
-/// - Returns: Bootstrap current density [A/m²], shape [nCells]
+/// - Returns: Bootstrap current density [A/m²], shape [cellCount]
 private func computeBootstrapCurrent(
     profiles: CoreProfiles,
     geometry: Geometry
@@ -972,20 +972,20 @@ public struct GeometricFactors: Sendable {
     // ... existing fields ...
 
     /// Metric tensor component g₀ = √g (Jacobian of flux coordinates)
-    /// Shape: [nCells]
+    /// Shape: [cellCount]
     public let jacobian: EvaluatedArray
 
     /// Metric tensor component g₁
-    /// Shape: [nCells]
+    /// Shape: [cellCount]
     public let g1: EvaluatedArray
 
     /// Metric tensor component g₂
-    /// Shape: [nCells]
+    /// Shape: [cellCount]
     public let g2: EvaluatedArray
 
     /// Create from full geometry (use g0, g1, g2)
     public static func from(geometry: Geometry) -> GeometricFactors {
-        let nCells = geometry.nCells
+        let cellCount = geometry.cellCount
 
         // Use actual metric tensors from Geometry
         let jacobian = geometry.g0  // √g = F/B_p
@@ -1023,8 +1023,8 @@ Modify `applySpatialOperatorVectorized` to use metric tensors for flux divergenc
 
 let jacobianCells = geometry.jacobian.value
 let jacobianFaces = interpolateToFaces(jacobianCells, mode: .arithmetic)
-let jacobian_right = jacobianFaces[1..<(nCells + 1)]
-let jacobian_left = jacobianFaces[0..<nCells]
+let jacobian_right = jacobianFaces[1..<(cellCount + 1)]
+let jacobian_left = jacobianFaces[0..<cellCount]
 
 let weightedFlux_right = jacobian_right * flux_right
 let weightedFlux_left = jacobian_left * flux_left
@@ -1059,7 +1059,7 @@ struct FVMAnalyticalTests {
         // TODO: Set up simulation with D=χ, V=0, source=0
         // Run to t=tFinal, compare with analytical solution
         // T(r,t) = T₀ exp(-r²/(4χt)) / √(1 + 4χt/r₀²)
-        // Expected error < 5% for nCells=100
+        // Expected error < 5% for cellCount=100
     }
 
     @Test("Steady-state convection-diffusion", arguments: [0.1, 1.0, 5.0, 10.0, 50.0])
@@ -1149,8 +1149,8 @@ struct TORAXBenchmarkTests {
 - [ ] All 15 `1e-6` occurrences replaced with config values
 - [ ] `ToleranceScaler` correctly computes scaled tolerances
 - [ ] `AdaptiveTimestepConfig` extended (backward compatible)
-- [ ] Old configs with explicit `minDt` still work
-- [ ] New configs with `minDtFraction` work
+- [ ] Old configs with explicit `minimumTimeStep` still work
+- [ ] New configs with `minimumTimeStepFraction` work
 - [ ] JSON schema validates
 
 ### Phase 2 (Power-Law): ✅
@@ -1192,7 +1192,7 @@ struct TORAXBenchmarkTests {
   "runtime": {
     "static": {
       "mesh": {
-        "nCells": 200
+        "cellCount": 200
       },
       "solver": {
         "tolerances": {
@@ -1224,18 +1224,18 @@ struct TORAXBenchmarkTests {
           "fluxVariationThreshold": 1e-5,
           "minStoredEnergy": 1e-3
         },
-        "maxIterations": 30,
+        "maximumIterations": 30,
         "lineSearchEnabled": true
       },
       "time": {
         "start": 0.0,
         "end": 10.0,
-        "initialDt": 1e-3,
+        "initialTimeStep": 1e-3,
         "adaptive": {
-          "minDtFraction": 0.001,
-          "maxDt": 0.1,
+          "minimumTimeStepFraction": 0.001,
+          "maximumTimeStep": 0.1,
           "safetyFactor": 0.9,
-          "maxTimestepGrowth": 1.2
+          "maximumTimeStepGrowth": 1.2
         }
       }
     }
@@ -1245,7 +1245,7 @@ struct TORAXBenchmarkTests {
 
 ### CLI Migration Path
 
-**Backward Compatibility**: Old configs with `minDt: 1e-6` will continue working without changes.
+**Backward Compatibility**: Old configs with `minimumTimeStep: 1e-6` will continue working without changes.
 
 ---
 

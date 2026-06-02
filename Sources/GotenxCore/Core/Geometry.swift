@@ -25,17 +25,17 @@ public struct Geometry: Sendable, Equatable {
     /// Plasma volume [m^3]
     public let volume: EvaluatedArray
 
-    /// Geometric coefficient g0 (for FVM)
-    public let g0: EvaluatedArray
+    /// Geometric coefficient fluxSurfaceMetric (for FVM)
+    public let fluxSurfaceMetric: EvaluatedArray
 
-    /// Geometric coefficient g1 (for FVM)
-    public let g1: EvaluatedArray
+    /// Geometric coefficient majorRadiusMetric (for FVM)
+    public let majorRadiusMetric: EvaluatedArray
 
-    /// Geometric coefficient g2 (for FVM)
-    public let g2: EvaluatedArray
+    /// Geometric coefficient shapeMetric (for FVM)
+    public let shapeMetric: EvaluatedArray
 
-    /// Geometric coefficient g3 (for FVM)
-    public let g3: EvaluatedArray
+    /// Geometric coefficient minorRadiusMetric (for FVM)
+    public let minorRadiusMetric: EvaluatedArray
 
     /// Radial coordinates at cell centers [m]
     public let radii: EvaluatedArray
@@ -57,10 +57,10 @@ public struct Geometry: Sendable, Equatable {
         minorRadius: Float,
         toroidalField: Float,
         volume: EvaluatedArray,
-        g0: EvaluatedArray,
-        g1: EvaluatedArray,
-        g2: EvaluatedArray,
-        g3: EvaluatedArray,
+        fluxSurfaceMetric: EvaluatedArray,
+        majorRadiusMetric: EvaluatedArray,
+        shapeMetric: EvaluatedArray,
+        minorRadiusMetric: EvaluatedArray,
         radii: EvaluatedArray,
         safetyFactor: EvaluatedArray,
         poloidalField: EvaluatedArray? = nil,
@@ -71,10 +71,10 @@ public struct Geometry: Sendable, Equatable {
         self.minorRadius = minorRadius
         self.toroidalField = toroidalField
         self.volume = volume
-        self.g0 = g0
-        self.g1 = g1
-        self.g2 = g2
-        self.g3 = g3
+        self.fluxSurfaceMetric = fluxSurfaceMetric
+        self.majorRadiusMetric = majorRadiusMetric
+        self.shapeMetric = shapeMetric
+        self.minorRadiusMetric = minorRadiusMetric
         self.radii = radii
         self.safetyFactor = safetyFactor
         self.poloidalField = poloidalField

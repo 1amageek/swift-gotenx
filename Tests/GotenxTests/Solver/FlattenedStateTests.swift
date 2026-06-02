@@ -16,16 +16,16 @@ struct FlattenedStateTests {
 
         let flattened = try FlattenedState(profiles: profiles)
 
-        #expect(flattened.layout.nCells == 5)
+        #expect(flattened.layout.cellCount == 5)
         #expect(flattened.layout.totalSize == 20)
         #expect(flattened.values.shape == [20])
     }
 
     @Test("FlattenedState layout validation")
     func testLayoutValidation() throws {
-        let layout = try FlattenedState.StateLayout(nCells: 10)
+        let layout = try FlattenedState.StateLayout(cellCount: 10)
 
-        #expect(layout.nCells == 10)
+        #expect(layout.cellCount == 10)
         #expect(layout.totalSize == 40)
         #expect(layout.tiRange == 0..<10)
         #expect(layout.teRange == 10..<20)
@@ -69,11 +69,11 @@ struct FlattenedStateTests {
     @Test("FlattenedState invalid cell count")
     func testInvalidCellCount() throws {
         #expect(throws: FlattenedState.FlattenedStateError.self) {
-            let _ = try FlattenedState.StateLayout(nCells: 0)
+            let _ = try FlattenedState.StateLayout(cellCount: 0)
         }
 
         #expect(throws: FlattenedState.FlattenedStateError.self) {
-            let _ = try FlattenedState.StateLayout(nCells: -1)
+            let _ = try FlattenedState.StateLayout(cellCount: -1)
         }
     }
 }

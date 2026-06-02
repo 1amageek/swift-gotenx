@@ -36,7 +36,7 @@ public struct GotenxPlotView: View {
                 CurrentDensityChart(data: data, config: config)
             case .qProfile:
                 QProfileChart(data: data, config: config)
-            case .psi:
+            case .poloidalFlux:
                 PsiChart(data: data, config: config)
             case .chiEffective, .chiComparison:
                 ChiChart(data: data, config: config)
@@ -55,7 +55,7 @@ public struct GotenxPlotView: View {
             case .energyBalance:
                 EnergyBalanceChart(data: data, config: config)
 
-            // 3D plots (requires iOS 26.0+)
+            // 3D plots (requires iOS 26.4+)
             case .temperature3D, .density3D, .pressure3D:
                 Text("3D plots require GotenxPlot3DView")
                     .foregroundColor(.secondary)
@@ -125,7 +125,7 @@ func lineDash(for style: LineStyle?) -> [CGFloat] {
             Slider(value: Binding(
                 get: { Double(timeIndex) },
                 set: { timeIndex = Int($0) }
-            ), in: 0...Double(sampleData.nTime - 1), step: 1)
+            ), in: 0...Double(sampleData.timeCount - 1), step: 1)
         }
         .padding()
     }
@@ -189,14 +189,14 @@ func lineDash(for style: LineStyle?) -> [CGFloat] {
 extension PlotData {
     /// Create ITER-like sample data for previews
     static func sampleITERLike() -> PlotData {
-        let nCells = 50
-        let nTime = 20
+        let cellCount = 50
+        let timeCount = 20
 
         // Normalized radius
-        let rho = (0..<nCells).map { Float($0) / Float(nCells - 1) }
+        let normalizedRadius = (0..<cellCount).map { Float($0) / Float(cellCount - 1) }
 
         // Time array
-        let time = (0..<nTime).map { Float($0) * 0.1 }  // 0 to 2 seconds
+        let time = (0..<timeCount).map { Float($0) * 0.1 }  // 0 to 2 seconds
 
         // Create realistic profiles
         func makeProfile(
@@ -204,70 +204,70 @@ extension PlotData {
             edge: Float,
             peaking: Float = 2.0
         ) -> [Float] {
-            rho.map { r in
+            normalizedRadius.map { r in
                 edge + (core - edge) * pow(1.0 - pow(r, peaking), 1.5)
             }
         }
 
         // Temperature profiles: peaked at core
-        let Ti = (0..<nTime).map { t in
-            let evolution = 1.0 + Float(t) / Float(nTime) * 0.5  // 50% increase
+        let ionTemperature = (0..<timeCount).map { t in
+            let evolution = 1.0 + Float(t) / Float(timeCount) * 0.5  // 50% increase
             return makeProfile(core: 15.0 * evolution, edge: 0.1, peaking: 2.0)
         }
-        let Te = (0..<nTime).map { t in
-            let evolution = 1.0 + Float(t) / Float(nTime) * 0.5
+        let electronTemperature = (0..<timeCount).map { t in
+            let evolution = 1.0 + Float(t) / Float(timeCount) * 0.5
             return makeProfile(core: 12.0 * evolution, edge: 0.1, peaking: 2.0)
         }
 
         // Density profile: less peaked
-        let ne = (0..<nTime).map { _ in
+        let electronDensity = (0..<timeCount).map { _ in
             makeProfile(core: 10.0, edge: 2.0, peaking: 1.0)
         }
 
-        // Safety factor: q(0) ~ 1, q(edge) ~ 3.5
-        let q = (0..<nTime).map { _ in
-            rho.map { 1.0 + 2.5 * pow($0, 2.0) }
+        // Safety factor: safetyFactor(0) ~ 1, safetyFactor(edge) ~ 3.5
+        let safetyFactor = (0..<timeCount).map { _ in
+            normalizedRadius.map { 1.0 + 2.5 * pow($0, 2.0) }
         }
 
         // Zero profiles for unimplemented features
-        let zeros = (0..<nTime).map { _ in Array(repeating: Float(0), count: nCells) }
+        let zeros = (0..<timeCount).map { _ in Array(repeating: Float(0), count: cellCount) }
 
         // Time series: plasma current, fusion gain
-        let IpProfile = (0..<nTime).map { Float(15.0 - Float($0) * 0.1) }  // 15 MA
-        let qFusion = (0..<nTime).map { Float($0) < 10 ? Float($0) * 0.5 : 5.0 }  // Ramp to Q=5
+        let plasmaCurrent = (0..<timeCount).map { Float(15.0 - Float($0) * 0.1) }  // 15 MA
+        let fusionGain = (0..<timeCount).map { Float($0) < 10 ? Float($0) * 0.5 : 5.0 }  // Ramp to Q=5
 
         return PlotData(
-            rho: rho,
+            normalizedRadius: normalizedRadius,
             time: time,
-            Ti: Ti,
-            Te: Te,
-            ne: ne,
-            q: q,
+            ionTemperature: ionTemperature,
+            electronTemperature: electronTemperature,
+            electronDensity: electronDensity,
+            safetyFactor: safetyFactor,
             magneticShear: zeros,
-            psi: zeros,
-            chiTotalIon: zeros,
-            chiTotalElectron: zeros,
-            chiTurbIon: zeros,
-            chiTurbElectron: zeros,
-            dFace: zeros,
-            jTotal: zeros,
-            jOhmic: zeros,
-            jBootstrap: zeros,
-            jECRH: zeros,
+            poloidalFlux: zeros,
+            totalIonHeatConductivity: zeros,
+            totalElectronHeatConductivity: zeros,
+            turbulentIonHeatConductivity: zeros,
+            turbulentElectronHeatConductivity: zeros,
+            particleDiffusivity: zeros,
+            totalCurrentDensity: zeros,
+            ohmicCurrentDensity: zeros,
+            bootstrapCurrentDensity: zeros,
+            ecrhCurrentDensity: zeros,
             ohmicHeatSource: zeros,
             fusionHeatSource: zeros,
-            pICRHIon: zeros,
-            pICRHElectron: zeros,
-            pECRHElectron: zeros,
-            IpProfile: IpProfile,
-            IBootstrap: Array(repeating: 5.0, count: nTime),
-            IECRH: Array(repeating: 2.0, count: nTime),
-            qFusion: qFusion,
-            pAuxiliary: Array(repeating: 50.0, count: nTime),
-            pOhmicE: Array(repeating: 10.0, count: nTime),
-            pAlphaTotal: Array(repeating: 25.0, count: nTime),
-            pBremsstrahlung: Array(repeating: 5.0, count: nTime),
-            pRadiation: Array(repeating: 15.0, count: nTime)
+            icrhIonHeatingPowerDensity: zeros,
+            icrhElectronHeatingPowerDensity: zeros,
+            ecrhElectronHeatingPowerDensity: zeros,
+            plasmaCurrent: plasmaCurrent,
+            bootstrapCurrent: Array(repeating: 5.0, count: timeCount),
+            ecrhCurrent: Array(repeating: 2.0, count: timeCount),
+            fusionGain: fusionGain,
+            auxiliaryHeatingPower: Array(repeating: 50.0, count: timeCount),
+            ohmicElectronHeatingPower: Array(repeating: 10.0, count: timeCount),
+            totalAlphaPower: Array(repeating: 25.0, count: timeCount),
+            bremsstrahlungPower: Array(repeating: 5.0, count: timeCount),
+            radiationPower: Array(repeating: 15.0, count: timeCount)
         )
     }
 }

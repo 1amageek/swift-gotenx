@@ -46,7 +46,7 @@ public struct SamplingConfig: Sendable, Codable, Equatable {
 
     /// Enable derived quantities (τE, Q, βN, etc.)
     ///
-    /// **Cost**: 24 scalars × 4 bytes × nSteps = ~1.9 MB for 20k steps
+    /// **Cost**: 24 scalars × 4 bytes × stepCount = ~1.9 MB for 20k steps
     ///
     /// **Phase 1**: Always false (DerivedQuantities returns .zero)
     /// **Phase 2+**: Recommended true
@@ -54,7 +54,7 @@ public struct SamplingConfig: Sendable, Codable, Equatable {
 
     /// Enable numerical diagnostics (residuals, conservation, iterations)
     ///
-    /// **Cost**: 11 scalars × 4 bytes × nSteps = ~0.9 MB for 20k steps
+    /// **Cost**: 11 scalars × 4 bytes × stepCount = ~0.9 MB for 20k steps
     ///
     /// **Phase 1**: Always false (NumericalDiagnostics returns .default)
     /// **Phase 2+**: Recommended true for debugging
@@ -65,7 +65,7 @@ public struct SamplingConfig: Sendable, Codable, Equatable {
     /// Sampling interval for profile snapshots (nil = disabled)
     ///
     /// **Cost per snapshot**: 4 profiles × 100 cells × 4 bytes = 1.6 KB
-    /// **Total cost**: (nSteps / interval) × 1.6 KB
+    /// **Total cost**: (stepCount / interval) × 1.6 KB
     ///
     /// **Examples**:
     /// - `nil`: No profile snapshots (0 MB)
@@ -256,36 +256,36 @@ extension SamplingConfig {
     /// Estimate total memory usage for given simulation
     ///
     /// - Parameters:
-    ///   - nSteps: Total number of timesteps
-    ///   - nCells: Number of radial cells
+    ///   - stepCount: Total number of timesteps
+    ///   - cellCount: Number of radial cells
     /// - Returns: Estimated memory usage in bytes
-    public func estimateMemoryUsage(nSteps: Int, nCells: Int) -> Int {
+    public func estimateMemoryUsage(stepCount: Int, cellCount: Int) -> Int {
         var totalBytes = 0
 
         // Tier 1: Scalar time series
         if enableDerivedQuantities {
-            totalBytes += 24 * 4 * nSteps  // 24 scalars in DerivedQuantities
+            totalBytes += 24 * 4 * stepCount  // 24 scalars in DerivedQuantities
         }
 
         if enableDiagnostics {
-            totalBytes += 11 * 4 * nSteps  // 11 scalars in NumericalDiagnostics
+            totalBytes += 11 * 4 * stepCount  // 11 scalars in NumericalDiagnostics
         }
 
         // Tier 2: Profile snapshots
         if let interval = profileSamplingInterval {
-            let nSnapshots = (nSteps / interval) + 1  // +1 for initial condition
+            let nSnapshots = (stepCount / interval) + 1  // +1 for initial condition
 
             // Core profiles (4 arrays)
-            totalBytes += 4 * nCells * 4 * nSnapshots
+            totalBytes += 4 * cellCount * 4 * nSnapshots
 
             // Transport coefficients (4 arrays)
             if enableTransportCapture {
-                totalBytes += 4 * nCells * 4 * nSnapshots
+                totalBytes += 4 * cellCount * 4 * nSnapshots
             }
 
             // Source terms (4 arrays)
             if enableSourceCapture {
-                totalBytes += 4 * nCells * 4 * nSnapshots
+                totalBytes += 4 * cellCount * 4 * nSnapshots
             }
         }
 
@@ -297,11 +297,11 @@ extension SamplingConfig {
     /// Human-readable memory estimate
     ///
     /// - Parameters:
-    ///   - nSteps: Total number of timesteps
-    ///   - nCells: Number of radial cells
+    ///   - stepCount: Total number of timesteps
+    ///   - cellCount: Number of radial cells
     /// - Returns: Memory estimate as string (e.g., "10.5 MB")
-    public func memoryEstimateString(nSteps: Int, nCells: Int) -> String {
-        let bytes = estimateMemoryUsage(nSteps: nSteps, nCells: nCells)
+    public func memoryEstimateString(stepCount: Int, cellCount: Int) -> String {
+        let bytes = estimateMemoryUsage(stepCount: stepCount, cellCount: cellCount)
         let mb = Double(bytes) / (1024 * 1024)
 
         if mb < 1.0 {

@@ -4,7 +4,7 @@
 // Computes: ∂outputs / ∂parameters
 //
 // Use cases:
-// 1. Parameter sensitivity analysis (which params affect Q_fusion most?)
+// 1. Parameter sensitivity analysis (which parameters affect fusionGain most?)
 // 2. Actuator ranking (prioritize control levers)
 // 3. Uncertainty quantification
 
@@ -22,12 +22,12 @@ import MLX
 /// let gradient = sensitivity.computeGradient(
 ///     initialProfiles: profiles,
 ///     actuators: actuators,
-///     dynamicParams: params,
+///     dynamicParameters: parameters,
 ///     timeHorizon: 2.0,
-///     dt: 0.01
+///     timeStep: 0.01
 /// )
 ///
-/// // gradient shows ∂Q_fusion / ∂[P_ECRH, P_ICRH, gas_puff, I_plasma]
+/// // gradient shows ∂fusionGain / ∂[ecrhPower, icrhPower, gasPuffRate, plasmaCurrent]
 /// ```
 public struct ForwardSensitivity {
     /// Differentiable simulation
@@ -48,9 +48,9 @@ public struct ForwardSensitivity {
     /// - Parameters:
     ///   - initialProfiles: Initial plasma profiles
     ///   - actuators: Control parameter time series
-    ///   - dynamicParams: Dynamic runtime parameters
+    ///   - dynamicParameters: Dynamic runtime parameters
     ///   - timeHorizon: Simulation time [s]
-    ///   - dt: Fixed timestep [s]
+    ///   - timeStep: Fixed timestep [s]
     ///
     /// - Returns: Gradient actuators (same structure as input)
     ///
@@ -58,23 +58,23 @@ public struct ForwardSensitivity {
     public func computeGradient(
         initialProfiles: CoreProfiles,
         actuators: ActuatorTimeSeries,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float
+        timeStep: Float
     ) -> ActuatorTimeSeries {
-        let nSteps = actuators.nSteps
-        let actuatorsArray = actuators.toMLXArray()
+        let stepCount = actuators.stepCount
+        let actuatorsArray = actuators.asMLXArray()
 
         // Define loss function (closure captures context)
-        func lossFn(_ params: MLXArray) -> MLXArray {
-            let acts = ActuatorTimeSeries.fromMLXArray(params, nSteps: nSteps)
+        func lossFn(_ parameters: MLXArray) -> MLXArray {
+            let acts = ActuatorTimeSeries(mlxArray: parameters, stepCount: stepCount)
 
             let (_, loss) = simulation.forward(
                 initialProfiles: initialProfiles,
                 actuators: acts,
-                dynamicParams: dynamicParams,
+                dynamicParameters: dynamicParameters,
                 timeHorizon: timeHorizon,
-                dt: dt
+                timeStep: timeStep
             )
 
             return loss
@@ -88,7 +88,7 @@ public struct ForwardSensitivity {
         eval(gradient)
 
         // Convert back to ActuatorTimeSeries
-        return ActuatorTimeSeries.fromMLXArray(gradient, nSteps: nSteps)
+        return ActuatorTimeSeries(mlxArray: gradient, stepCount: stepCount)
     }
 
     /// Compute gradient for custom objective function
@@ -98,32 +98,32 @@ public struct ForwardSensitivity {
     /// - Parameters:
     ///   - initialProfiles: Initial profiles
     ///   - actuators: Control parameters
-    ///   - dynamicParams: Dynamic params
+    ///   - dynamicParameters: Dynamic parameters
     ///   - timeHorizon: Simulation time [s]
-    ///   - dt: Timestep [s]
+    ///   - timeStep: Timestep [s]
     ///   - objectiveFn: Custom objective (profiles → scalar loss)
     ///
     /// - Returns: Gradient w.r.t. actuators
     public func computeGradientWithCustomObjective(
         initialProfiles: CoreProfiles,
         actuators: ActuatorTimeSeries,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float,
+        timeStep: Float,
         objectiveFn: @escaping (CoreProfiles) -> MLXArray
     ) -> ActuatorTimeSeries {
-        let nSteps = actuators.nSteps
-        let actuatorsArray = actuators.toMLXArray()
+        let stepCount = actuators.stepCount
+        let actuatorsArray = actuators.asMLXArray()
 
-        func lossFn(_ params: MLXArray) -> MLXArray {
-            let acts = ActuatorTimeSeries.fromMLXArray(params, nSteps: nSteps)
+        func lossFn(_ parameters: MLXArray) -> MLXArray {
+            let acts = ActuatorTimeSeries(mlxArray: parameters, stepCount: stepCount)
 
             let (finalProfiles, _) = simulation.forward(
                 initialProfiles: initialProfiles,
                 actuators: acts,
-                dynamicParams: dynamicParams,
+                dynamicParameters: dynamicParameters,
                 timeHorizon: timeHorizon,
-                dt: dt
+                timeStep: timeStep
             )
 
             // Apply custom objective
@@ -134,7 +134,7 @@ public struct ForwardSensitivity {
         let gradient = gradFn(actuatorsArray)
         eval(gradient)
 
-        return ActuatorTimeSeries.fromMLXArray(gradient, nSteps: nSteps)
+        return ActuatorTimeSeries(mlxArray: gradient, stepCount: stepCount)
     }
 
     // MARK: - Sensitivity Matrix
@@ -143,16 +143,16 @@ public struct ForwardSensitivity {
     ///
     /// **Purpose**: Analyze which actuators affect which outputs most
     ///
-    /// **Returns**: Matrix[nOutputs, nActuators × nSteps]
+    /// **Returns**: Matrix[nOutputs, nActuators × stepCount]
     ///
     /// Each row shows sensitivity of one output to all actuator parameters.
     ///
     /// - Parameters:
     ///   - initialProfiles: Initial profiles
     ///   - actuators: Control parameters
-    ///   - dynamicParams: Dynamic params
+    ///   - dynamicParameters: Dynamic parameters
     ///   - timeHorizon: Simulation time [s]
-    ///   - dt: Timestep [s]
+    ///   - timeStep: Timestep [s]
     ///   - outputs: Output quantities to analyze
     ///
     /// - Returns: Sensitivity matrix (each row = gradient for one output)
@@ -161,9 +161,9 @@ public struct ForwardSensitivity {
     public func computeSensitivityMatrix(
         initialProfiles: CoreProfiles,
         actuators: ActuatorTimeSeries,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float,
+        timeStep: Float,
         outputs: [SensitivityOutput]
     ) -> SensitivityMatrix {
         var gradients: [[Float]] = []
@@ -181,14 +181,14 @@ public struct ForwardSensitivity {
             let gradient = computeGradientWithCustomObjective(
                 initialProfiles: initialProfiles,
                 actuators: actuators,
-                dynamicParams: dynamicParams,
+                dynamicParameters: dynamicParameters,
                 timeHorizon: timeHorizon,
-                dt: dt,
+                timeStep: timeStep,
                 objectiveFn: objectiveFn
             )
 
             // Convert to flat array
-            let gradientArray = gradient.toMLXArray().asArray(Float.self)
+            let gradientArray = gradient.asMLXArray().asArray(Float.self)
             gradients.append(gradientArray)
             outputNames.append(output.name)
         }
@@ -196,7 +196,7 @@ public struct ForwardSensitivity {
         return SensitivityMatrix(
             outputs: outputNames,
             gradients: gradients,
-            nSteps: actuators.nSteps
+            stepCount: actuators.stepCount
         )
     }
 
@@ -211,37 +211,37 @@ public struct ForwardSensitivity {
     /// - Parameters:
     ///   - initialProfiles: Initial profiles
     ///   - actuators: Control parameters
-    ///   - dynamicParams: Dynamic params
+    ///   - dynamicParameters: Dynamic parameters
     ///   - timeHorizon: Simulation time [s]
-    ///   - dt: Timestep [s]
+    ///   - timeStep: Timestep [s]
     ///
     /// - Returns: Parameter importance ranking
     public func analyzeParameterImportance(
         initialProfiles: CoreProfiles,
         actuators: ActuatorTimeSeries,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float
+        timeStep: Float
     ) -> ParameterImportance {
         let gradient = computeGradient(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         // Compute L2 norm for each actuator type
-        let P_ECRH_importance = l2Norm(gradient.P_ECRH)
-        let P_ICRH_importance = l2Norm(gradient.P_ICRH)
-        let gas_puff_importance = l2Norm(gradient.gas_puff)
-        let I_plasma_importance = l2Norm(gradient.I_plasma)
+        let P_ECRH_importance = l2Norm(gradient.ecrhPower)
+        let P_ICRH_importance = l2Norm(gradient.icrhPower)
+        let gas_puff_importance = l2Norm(gradient.gasPuffRate)
+        let I_plasma_importance = l2Norm(gradient.plasmaCurrent)
 
         return ParameterImportance(
-            P_ECRH: P_ECRH_importance,
-            P_ICRH: P_ICRH_importance,
-            gas_puff: gas_puff_importance,
-            I_plasma: I_plasma_importance
+            ecrhPower: P_ECRH_importance,
+            icrhPower: P_ICRH_importance,
+            gasPuffRate: gas_puff_importance,
+            plasmaCurrent: I_plasma_importance
         )
     }
 
@@ -256,9 +256,9 @@ public struct ForwardSensitivity {
     /// - Parameters:
     ///   - initialProfiles: Initial profiles
     ///   - actuators: Control parameters
-    ///   - dynamicParams: Dynamic params
+    ///   - dynamicParameters: Dynamic parameters
     ///   - timeHorizon: Simulation time [s]
-    ///   - dt: Timestep [s]
+    ///   - timeStep: Timestep [s]
     ///   - epsilon: Finite difference step size
     ///   - sampleSize: Number of parameters to check (random sample)
     ///
@@ -266,9 +266,9 @@ public struct ForwardSensitivity {
     public func validateGradient(
         initialProfiles: CoreProfiles,
         actuators: ActuatorTimeSeries,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float,
+        timeStep: Float,
         epsilon: Float = 1e-4,
         sampleSize: Int = 10
     ) -> GradientValidationResult {
@@ -276,18 +276,18 @@ public struct ForwardSensitivity {
         let analyticalGrad = computeGradient(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         // Numerical gradient (via finite differences)
         let numericalGrad = computeNumericalGradient(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt,
+            timeStep: timeStep,
             epsilon: epsilon,
             sampleSize: sampleSize
         )
@@ -309,9 +309,9 @@ public struct ForwardSensitivity {
     private func computeNumericalGradient(
         initialProfiles: CoreProfiles,
         actuators: ActuatorTimeSeries,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float,
+        timeStep: Float,
         epsilon: Float,
         sampleSize: Int
     ) -> ActuatorTimeSeries {
@@ -319,14 +319,14 @@ public struct ForwardSensitivity {
         let (_, baselineLoss) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
         let baselineLossValue = baselineLoss.item(Float.self)
 
         // Sample random indices to perturb
-        let totalParams = actuators.nSteps * 4
+        let totalParams = actuators.stepCount * 4
         let indices = (0..<totalParams).shuffled().prefix(sampleSize)
 
         // Compute numerical gradients
@@ -340,9 +340,9 @@ public struct ForwardSensitivity {
             let (_, perturbedLoss) = simulation.forward(
                 initialProfiles: initialProfiles,
                 actuators: perturbed,
-                dynamicParams: dynamicParams,
+                dynamicParameters: dynamicParameters,
                 timeHorizon: timeHorizon,
-                dt: dt
+                timeStep: timeStep
             )
             let perturbedLossValue = perturbedLoss.item(Float.self)
 
@@ -351,9 +351,9 @@ public struct ForwardSensitivity {
             numericalGradients[idx] = gradient
         }
 
-        return ActuatorTimeSeries.fromMLXArray(
+        return ActuatorTimeSeries(mlxArray:
             MLXArray(numericalGradients),
-            nSteps: actuators.nSteps
+            stepCount: actuators.stepCount
         )
     }
 
@@ -363,12 +363,12 @@ public struct ForwardSensitivity {
         at index: Int,
         by epsilon: Float
     ) -> ActuatorTimeSeries {
-        var array = actuators.toMLXArray().asArray(Float.self)
+        var array = actuators.asMLXArray().asArray(Float.self)
         array[index] += epsilon
 
-        return ActuatorTimeSeries.fromMLXArray(
+        return ActuatorTimeSeries(mlxArray:
             MLXArray(array),
-            nSteps: actuators.nSteps
+            stepCount: actuators.stepCount
         )
     }
 
@@ -377,8 +377,8 @@ public struct ForwardSensitivity {
         analytical: ActuatorTimeSeries,
         numerical: ActuatorTimeSeries
     ) -> Float {
-        let analyticalArray = analytical.toMLXArray().asArray(Float.self)
-        let numericalArray = numerical.toMLXArray().asArray(Float.self)
+        let analyticalArray = analytical.asMLXArray().asArray(Float.self)
+        let numericalArray = numerical.asMLXArray().asArray(Float.self)
 
         // L2 relative error
         var sumSquaredDiff: Float = 0.0
@@ -409,18 +409,18 @@ public struct ForwardSensitivity {
 
 /// Sensitivity output quantity
 public enum SensitivityOutput {
-    case Q_fusion
-    case tau_E
-    case beta_N
-    case H_factor
+    case fusionGain
+    case energyConfinementTime
+    case normalizedBeta
+    case confinementHFactor
     case custom(name: String, evaluator: (CoreProfiles, Geometry) -> MLXArray)
 
     public var name: String {
         switch self {
-        case .Q_fusion: return "Q_fusion"
-        case .tau_E: return "tau_E"
-        case .beta_N: return "beta_N"
-        case .H_factor: return "H_factor"
+        case .fusionGain: return "Q_fusion"
+        case .energyConfinementTime: return "tau_E"
+        case .normalizedBeta: return "beta_N"
+        case .confinementHFactor: return "H_factor"
         case .custom(let name, _): return name
         }
     }
@@ -432,15 +432,15 @@ public enum SensitivityOutput {
         )
 
         switch self {
-        case .Q_fusion:
-            return MLXArray(-derived.Q_fusion)  // Negative for maximization
-        case .tau_E:
-            return MLXArray(-derived.tau_E)
-        case .beta_N:
-            // Constraint: beta_N < 3.5
-            return smoothReLU(derived.beta_N - 3.5)
-        case .H_factor:
-            return MLXArray(-derived.H_factor)
+        case .fusionGain:
+            return MLXArray(-derived.fusionGain)  // Negative for maximization
+        case .energyConfinementTime:
+            return MLXArray(-derived.energyConfinementTime)
+        case .normalizedBeta:
+            // Constraint: normalizedBeta < 3.5
+            return smoothReLU(derived.normalizedBeta - 3.5)
+        case .confinementHFactor:
+            return MLXArray(-derived.confinementHFactor)
         case .custom(_, let evaluator):
             return evaluator(profiles, geometry)
         }
@@ -465,7 +465,7 @@ public struct SensitivityMatrix {
     public let gradients: [[Float]]
 
     /// Number of timesteps
-    public let nSteps: Int
+    public let stepCount: Int
 
     /// Get gradient for specific output
     public func gradient(for output: String) -> [Float]? {
@@ -495,20 +495,20 @@ public struct SensitivityMatrix {
 
 /// Parameter importance ranking
 public struct ParameterImportance {
-    public let P_ECRH: Float
-    public let P_ICRH: Float
-    public let gas_puff: Float
-    public let I_plasma: Float
+    public let ecrhPower: Float
+    public let icrhPower: Float
+    public let gasPuffRate: Float
+    public let plasmaCurrent: Float
 
     /// Sorted ranking (most important first)
     public var ranking: [(name: String, importance: Float)] {
-        let params: [(name: String, importance: Float)] = [
-            ("P_ECRH", P_ECRH),
-            ("P_ICRH", P_ICRH),
-            ("gas_puff", gas_puff),
-            ("I_plasma", I_plasma)
+        let parameters: [(name: String, importance: Float)] = [
+            ("P_ECRH", ecrhPower),
+            ("P_ICRH", icrhPower),
+            ("gas_puff", gasPuffRate),
+            ("I_plasma", plasmaCurrent)
         ]
-        return params.sorted { $0.1 > $1.1 }
+        return parameters.sorted { $0.1 > $1.1 }
     }
 
     /// Summary description

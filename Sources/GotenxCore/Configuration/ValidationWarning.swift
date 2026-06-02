@@ -10,10 +10,10 @@ public enum ConfigurationValidationWarning: Error, LocalizedError {
     case lowTemperatureForOhmic(value: Float, limit: Float, suggestion: String)
     case highPuffRate(value: Float, limit: Float, suggestion: String)
     case flatProfile(parameter: String, coreFactor: Float, suggestion: String)
-    case timestepTooSmall(dt: Float, timeScale: Float, suggestion: String)
-    case poorTimeResolution(parameter: String, dt: Float, timeScale: Float, suggestion: String)
-    case excessiveMeshResolution(nCells: Int, maximum: Int, suggestion: String)
-    case insufficientGradientResolution(nCells: Int, recommended: Int, profileExponent: Float, suggestion: String)
+    case timestepTooSmall(timeStep: Float, timeScale: Float, suggestion: String)
+    case poorTimeResolution(parameter: String, timeStep: Float, timeScale: Float, suggestion: String)
+    case excessiveMeshResolution(cellCount: Int, maximum: Int, suggestion: String)
+    case insufficientGradientResolution(cellCount: Int, recommended: Int, profileExponent: Float, suggestion: String)
     case outsideTrainingRange(model: String, parameter: String, value: Float, range: (Float, Float), suggestion: String)
     case negligibleFusionPower(temperature: Float, threshold: Float, suggestion: String)
 
@@ -58,34 +58,34 @@ public enum ConfigurationValidationWarning: Error, LocalizedError {
               Suggestion: \(suggestion)
             """
 
-        case .timestepTooSmall(let dt, let timeScale, let suggestion):
+        case .timestepTooSmall(let timeStep, let timeScale, let suggestion):
             return """
             WARNING: Timestep may be unnecessarily small
-              Current dt: \(String(format: "%.2e", dt)) s
+              Current timeStep: \(String(format: "%.2e", timeStep)) s
               Physics time scale: \(String(format: "%.2e", timeScale)) s
               Suggestion: \(suggestion)
             """
 
-        case .poorTimeResolution(let param, let dt, let timeScale, let suggestion):
+        case .poorTimeResolution(let param, let timeStep, let timeScale, let suggestion):
             return """
             WARNING: Poor time resolution for \(param)
-              Current dt: \(String(format: "%.2e", dt)) s
+              Current timeStep: \(String(format: "%.2e", timeStep)) s
               Time scale: \(String(format: "%.2e", timeScale)) s
               Suggestion: \(suggestion)
             """
 
-        case .excessiveMeshResolution(let nCells, let maximum, let suggestion):
+        case .excessiveMeshResolution(let cellCount, let maximum, let suggestion):
             return """
             WARNING: Excessive mesh resolution
-              Current nCells: \(nCells)
+              Current cellCount: \(cellCount)
               Recommended maximum: \(maximum)
               Suggestion: \(suggestion)
             """
 
-        case .insufficientGradientResolution(let nCells, let recommended, let exponent, let suggestion):
+        case .insufficientGradientResolution(let cellCount, let recommended, let exponent, let suggestion):
             return """
             WARNING: Insufficient gradient resolution
-              Current nCells: \(nCells)
+              Current cellCount: \(cellCount)
               Recommended: \(recommended) (for profile exponent \(String(format: "%.1f", exponent)))
               Suggestion: \(suggestion)
             """

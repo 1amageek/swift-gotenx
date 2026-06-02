@@ -58,11 +58,11 @@ public struct HybridLinearSolver: Sendable {
     /// to CPU LU if the candidate cannot meet the configured residual target.
     ///
     /// - Parameters:
-    ///   - A: System matrix [n, n]
-    ///   - b: Right-hand side [n]
+    ///   - matrix: System matrix [n, n]
+    ///   - rightHandSide: Right-hand side [n]
     /// - Returns: Solution x [n]
     /// - Throws: SolverError if solution fails to converge
-    public func solve(_ A: MLXArray, _ b: MLXArray) throws -> MLXArray {
+    public func solve(_ matrix: MLXArray, rightHandSide: MLXArray) throws -> MLXArray {
         // Two-sided equilibration before the linear solve.
         //
         // The coupled-transport Jacobian becomes badly scaled and ill-conditioned
@@ -74,22 +74,22 @@ public struct HybridLinearSolver: Sendable {
         // Dc=1/sqrt(colNorm)) brings rows and columns near unit norm. The scaling
         // norms are floored relative to the largest norm so genuinely decoupled
         // near-zero rows or columns are not amplified.
-        let n = A.shape[0]
-        let rowNorms = MLX.norm(A, ord: 2, axis: 1, keepDims: false)
-        let colNorms = MLX.norm(A, ord: 2, axis: 0, keepDims: false)
+        let n = matrix.shape[0]
+        let rowNorms = MLX.norm(matrix, ord: 2, axis: 1, keepDims: false)
+        let colNorms = MLX.norm(matrix, ord: 2, axis: 0, keepDims: false)
         let rowFloor = rowNorms.max() * 1e-6
         let colFloor = colNorms.max() * 1e-6
-        let dr = 1.0 / sqrt(maximum(rowNorms, rowFloor))
-        let dc = 1.0 / sqrt(maximum(colNorms, colFloor))
+        let rowScaling = 1.0 / sqrt(maximum(rowNorms, rowFloor))
+        let columnScaling = 1.0 / sqrt(maximum(colNorms, colFloor))
 
-        let aEq = dr.reshaped([n, 1]) * A * dc.reshaped([1, n])
-        let bEq = dr * b
+        let equilibratedMatrix = rowScaling.reshaped([n, 1]) * matrix * columnScaling.reshaped([1, n])
+        let equilibratedRightHandSide = rowScaling * rightHandSide
 
         var fallbackResidual = Float.infinity
         if shouldAttemptMetalCGNR(dimension: n) {
-            let gpuAttempt = solveEquilibratedWithMetalCGNR(aEq, bEq)
-            let xGPU = dc * gpuAttempt.y
-            let gpuRelativeResidual = relativeResidual(A: A, x: xGPU, b: b)
+            let gpuAttempt = solveEquilibratedWithMetalCGNR(equilibratedMatrix, equilibratedRightHandSide)
+            let xGPU = columnScaling * gpuAttempt.y
+            let gpuRelativeResidual = relativeResidual(A: matrix, x: xGPU, b: rightHandSide)
             fallbackResidual = gpuRelativeResidual
             if gpuAttempt.accepted && gpuRelativeResidual <= gpuResidualTolerance {
                 logger.debug("Metal CGNR linear solve accepted", metadata: [
@@ -110,8 +110,8 @@ public struct HybridLinearSolver: Sendable {
             ])
         }
 
-        let yCPU = solveEquilibratedWithCPULU(aEq, bEq)
-        let xCPU = dc * yCPU
+        let yCPU = solveEquilibratedWithCPULU(equilibratedMatrix, equilibratedRightHandSide)
+        let xCPU = columnScaling * yCPU
         let range = MLX.stacked([
             xCPU.min(keepDims: false),
             xCPU.max(keepDims: false)

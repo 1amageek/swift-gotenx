@@ -122,7 +122,7 @@ perl -e 'alarm shift; exec @ARGV' 120 xcodebuild test \
 ### NetCDF Compression Strategy
 
 - 出力 NetCDF-4 ファイルは DEFLATE レベル 6 / shuffle 有効で書き出します。
-- 時間方向は最大 256 ステップずつまとめてチャンクし（`[min(256, nTime), nCells]`）、空間方向は全セルを 1 チャンクに含めます。
+- 時間方向は最大 256 ステップずつまとめてチャンクし（`[min(256, timeCount), cellCount]`）、空間方向は全セルを 1 チャンクに含めます。
 - 上記設定でテスト用データに対し 51× 以上、NetCDF 既定チャンクでは 61× の圧縮率を確認しています（`xcodebuild test -only-testing:GotenxTests/NetCDFCompressionTests/testCompressionRatio`）。
 - CLI の `OutputWriter` が生成する NetCDF でも `xcodebuild test -only-testing:GotenxCLITests/OutputWriterTests/testNetCDFCompressionRatio` を実行すると約 20〜25× の圧縮率が再現されます（テストログで実測値を表示）。
 - 時間方向アクセスの局所性を重視する場合は 128/64 ステップといった粒度に落とすか、差分エンコードなどの前処理を併用してください。
@@ -210,7 +210,7 @@ Configurations use JSON format with nested structure:
   "runtime": {
     "static": {
       "mesh": {
-        "nCells": 50,
+        "cellCount": 50,
         "majorRadius": 3.0,
         "minorRadius": 1.0,
         "toroidalField": 2.5,
@@ -219,14 +219,14 @@ Configurations use JSON format with nested structure:
       "solver": {
         "type": "linear",
         "tolerance": 1e-6,
-        "maxIterations": 20
+        "maximumIterations": 20
       }
     },
     "dynamic": {
       "boundaries": {
         "ionTemperature": 50.0,
         "electronTemperature": 50.0,
-        "density": 5e18
+        "electronDensity": 5e18
       },
       "transport": {
         "modelType": "constant"
@@ -241,7 +241,7 @@ Configurations use JSON format with nested structure:
   "time": {
     "start": 0.0,
     "end": 1.0,
-    "initialDt": 1e-5
+    "initialTimeStep": 1e-5
   },
   "output": {
     "directory": "/tmp/gotenx_results",
@@ -318,8 +318,8 @@ QLKNN is configured via the `transport` section:
       "transport": {
         "modelType": "qlknn",
         "parameters": {
-          "Zeff": 1.5,
-          "min_chi": 0.01
+          "effectiveCharge": 1.5,
+          "minimumHeatDiffusivity": 0.01
         }
       }
     }
@@ -328,11 +328,11 @@ QLKNN is configured via the `transport` section:
 ```
 
 **Parameters**:
-- `Zeff` (default: 1.0): Effective charge for collisionality calculation
+- `effectiveCharge` (default: 1.0): Effective charge for collisionality calculation
   - 1.0 = Pure deuterium
   - 1.5 = D-T mixture with typical impurities (ITER baseline)
   - 2.0-3.0 = Higher impurity content
-- `min_chi` (default: 0.01 m²/s): Minimum transport coefficient floor
+- `minimumHeatDiffusivity` (default: 0.01 m²/s): Minimum transport coefficient floor
   - Prevents numerical issues in low-transport regions (ITB)
 
 ### What QLKNN Predicts

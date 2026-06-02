@@ -2,7 +2,7 @@
 // High-level optimization scenarios for tokamak operation
 //
 // Use cases:
-// 1. Maximize Q_fusion (fusion gain)
+// 1. Maximize fusionGain (fusion gain)
 // 2. Match experimental target profiles
 // 3. Optimize ramp-up/ramp-down trajectories
 
@@ -13,19 +13,19 @@ import MLX
 ///
 /// **Purpose**: High-level interface for common optimization scenarios
 ///
-/// **Example 1: Maximize Q_fusion**
+/// **Example 1: Maximize fusionGain**
 /// ```swift
 /// let result = try await ScenarioOptimizer.maximizeQFusion(
 ///     initialProfiles: profiles,
 ///     geometry: geometry,
-///     staticParams: staticParams,
-///     dynamicParams: dynamicParams,
+///     staticParameters: staticParameters,
+///     dynamicParameters: dynamicParameters,
 ///     timeHorizon: 2.0,
-///     dt: 0.01,
+///     timeStep: 0.01,
 ///     constraints: .iter
 /// )
 ///
-/// print("Optimized Q_fusion: \(result.Q_fusion)")
+/// print("Optimized fusionGain: \(result.fusionGain)")
 /// ```
 ///
 /// **Example 2: Match target profiles**
@@ -38,86 +38,86 @@ import MLX
 /// ```
 public struct ScenarioOptimizer {
 
-    // MARK: - Q_fusion Maximization
+    // MARK: - fusionGain Maximization
 
-    /// Optimize actuator trajectory to maximize fusion gain (Q_fusion)
+    /// Optimize actuator trajectory to maximize fusion gain (fusionGain)
     ///
-    /// **Objective**: Maximize Q = P_fusion / (P_auxiliary + P_ohmic)
+    /// **Objective**: Maximize Q = fusionPower / (auxiliaryPower + ohmicPower)
     ///
     /// **Method**: Adam optimizer with gradient-based search
     ///
     /// - Parameters:
     ///   - initialProfiles: Initial plasma profiles
     ///   - geometry: Tokamak geometry
-    ///   - staticParams: Static runtime parameters
-    ///   - dynamicParams: Dynamic runtime parameters (initial guess)
+    ///   - staticParameters: Static runtime parameters
+    ///   - dynamicParameters: Dynamic runtime parameters (initial guess)
     ///   - timeHorizon: Simulation time [s]
-    ///   - dt: Fixed timestep [s]
+    ///   - timeStep: Fixed timestep [s]
     ///   - constraints: Actuator constraints (power limits, etc.)
     ///   - optimizerConfig: Adam optimizer configuration
     ///
-    /// - Returns: Optimization result with optimal actuators and achieved Q_fusion
+    /// - Returns: Optimization result with optimal actuators and achieved fusionGain
     public static func maximizeQFusion(
         initialProfiles: CoreProfiles,
         geometry: Geometry,
-        staticParams: StaticRuntimeParams,
-        dynamicParams: DynamicRuntimeParams,
+        staticParameters: StaticRuntimeParameters,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float,
+        timeStep: Float,
         constraints: ActuatorConstraints = .iter,
         optimizerConfig: AdamConfig = .default
     ) throws -> ScenarioOptimizationResult {
-        let nSteps = Int(timeHorizon / dt)
+        let stepCount = Int(timeHorizon / timeStep)
 
         // Initial guess: constant baseline actuators
         let initialActuators = ActuatorTimeSeries.constant(
-            P_ECRH: 15.0,   // 15 MW ECRH
-            P_ICRH: 7.5,    // 7.5 MW ICRH
-            gas_puff: 5e20, // 5×10²⁰ particles/s
-            I_plasma: 15.0, // 15 MA
-            nSteps: nSteps
+            ecrhPower: 15.0,   // 15 MW ECRH
+            icrhPower: 7.5,    // 7.5 MW ICRH
+            gasPuffRate: 5e20, // 5×10²⁰ particles/s
+            plasmaCurrent: 15.0, // 15 MA
+            stepCount: stepCount
         )
 
         // Create differentiable simulation
         let simulation = DifferentiableSimulation(
-            staticParams: staticParams,
-            transport: createTransportModel(from: dynamicParams),
-            sources: createSourceModels(from: dynamicParams),
+            staticParameters: staticParameters,
+            transport: createTransportModel(from: dynamicParameters),
+            sources: createSourceModels(from: dynamicParameters),
             geometry: geometry
         )
 
-        // Define optimization problem (maximize Q_fusion)
+        // Define optimization problem (maximize fusionGain)
         let problem = QFusionMaximization(
             simulation: simulation,
             initialProfiles: initialProfiles,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         // Create optimizer
         let optimizer = Adam(
             learningRate: optimizerConfig.learningRate,
-            maxIterations: optimizerConfig.maxIterations,
+            maximumIterations: optimizerConfig.maximumIterations,
             tolerance: optimizerConfig.tolerance,
             logInterval: optimizerConfig.logInterval
         )
 
         // Run optimization
-        print("🎯 Optimizing for maximum Q_fusion...")
+        print("🎯 Optimizing for maximum fusionGain...")
         let result = optimizer.optimize(
             problem: problem,
             initialParams: initialActuators,
             constraints: constraints
         )
 
-        // Compute final Q_fusion
+        // Compute final fusionGain
         let (finalProfiles, _) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: result.actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         let derived = DerivedQuantitiesComputer.compute(
@@ -128,9 +128,9 @@ public struct ScenarioOptimizer {
         return ScenarioOptimizationResult(
             actuators: result.actuators,
             finalProfiles: finalProfiles,
-            Q_fusion: derived.Q_fusion,
-            tau_E: derived.tau_E,
-            beta_N: derived.beta_N,
+            fusionGain: derived.fusionGain,
+            energyConfinementTime: derived.energyConfinementTime,
+            normalizedBeta: derived.normalizedBeta,
             iterations: result.iterations,
             converged: result.converged,
             lossHistory: result.lossHistory
@@ -149,10 +149,10 @@ public struct ScenarioOptimizer {
     ///   - initialProfiles: Initial plasma profiles
     ///   - targetProfiles: Experimental target profiles to match
     ///   - geometry: Tokamak geometry
-    ///   - staticParams: Static runtime parameters
-    ///   - dynamicParams: Dynamic runtime parameters
+    ///   - staticParameters: Static runtime parameters
+    ///   - dynamicParameters: Dynamic runtime parameters
     ///   - timeHorizon: Simulation time [s]
-    ///   - dt: Fixed timestep [s]
+    ///   - timeStep: Fixed timestep [s]
     ///   - constraints: Actuator constraints
     ///   - optimizerConfig: Adam optimizer configuration
     ///
@@ -161,29 +161,29 @@ public struct ScenarioOptimizer {
         initialProfiles: CoreProfiles,
         targetProfiles: TargetProfiles,
         geometry: Geometry,
-        staticParams: StaticRuntimeParams,
-        dynamicParams: DynamicRuntimeParams,
+        staticParameters: StaticRuntimeParameters,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float,
+        timeStep: Float,
         constraints: ActuatorConstraints = .iter,
         optimizerConfig: AdamConfig = .default
     ) throws -> ScenarioOptimizationResult {
-        let nSteps = Int(timeHorizon / dt)
+        let stepCount = Int(timeHorizon / timeStep)
 
         // Initial guess
         let initialActuators = ActuatorTimeSeries.constant(
-            P_ECRH: 10.0,
-            P_ICRH: 5.0,
-            gas_puff: 1e20,
-            I_plasma: 15.0,
-            nSteps: nSteps
+            ecrhPower: 10.0,
+            icrhPower: 5.0,
+            gasPuffRate: 1e20,
+            plasmaCurrent: 15.0,
+            stepCount: stepCount
         )
 
         // Create simulation
         let simulation = DifferentiableSimulation(
-            staticParams: staticParams,
-            transport: createTransportModel(from: dynamicParams),
-            sources: createSourceModels(from: dynamicParams),
+            staticParameters: staticParameters,
+            transport: createTransportModel(from: dynamicParameters),
+            sources: createSourceModels(from: dynamicParameters),
             geometry: geometry
         )
 
@@ -192,15 +192,15 @@ public struct ScenarioOptimizer {
             simulation: simulation,
             initialProfiles: initialProfiles,
             targetProfiles: targetProfiles,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         // Optimize
         let optimizer = Adam(
             learningRate: optimizerConfig.learningRate,
-            maxIterations: optimizerConfig.maxIterations,
+            maximumIterations: optimizerConfig.maximumIterations,
             tolerance: optimizerConfig.tolerance
         )
 
@@ -215,9 +215,9 @@ public struct ScenarioOptimizer {
         let (finalProfiles, _) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: result.actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         let derived = DerivedQuantitiesComputer.compute(
@@ -228,9 +228,9 @@ public struct ScenarioOptimizer {
         return ScenarioOptimizationResult(
             actuators: result.actuators,
             finalProfiles: finalProfiles,
-            Q_fusion: derived.Q_fusion,
-            tau_E: derived.tau_E,
-            beta_N: derived.beta_N,
+            fusionGain: derived.fusionGain,
+            energyConfinementTime: derived.energyConfinementTime,
+            normalizedBeta: derived.normalizedBeta,
             iterations: result.iterations,
             converged: result.converged,
             lossHistory: result.lossHistory
@@ -239,15 +239,15 @@ public struct ScenarioOptimizer {
 
     // MARK: - Helper Functions
 
-    /// Create transport model from dynamic params
-    private static func createTransportModel(from params: DynamicRuntimeParams) -> any TransportModel {
-        // Use transport model from params
+    /// Create transport model from dynamic parameters
+    private static func createTransportModel(from parameters: DynamicRuntimeParameters) -> any TransportModel {
+        // Use transport model from parameters
         // For now, return Bohm-GyroBohm as default
         return BohmGyroBohmTransportModel()
     }
 
-    /// Create source models from dynamic params
-    private static func createSourceModels(from params: DynamicRuntimeParams) -> [any SourceModel] {
+    /// Create source models from dynamic parameters
+    private static func createSourceModels(from parameters: DynamicRuntimeParameters) -> [any SourceModel] {
         // Import required: GotenxPhysics module for source adapters
         // For now, return empty array (TODO: wire up source models)
         // This requires importing GotenxPhysics which provides:
@@ -263,21 +263,21 @@ public struct ScenarioOptimizer {
 
 // MARK: - Optimization Problems
 
-/// Q_fusion maximization problem
+/// fusionGain maximization problem
 struct QFusionMaximization: OptimizationProblem {
     let simulation: DifferentiableSimulation
     let initialProfiles: CoreProfiles
-    let dynamicParams: DynamicRuntimeParams
+    let dynamicParameters: DynamicRuntimeParameters
     let timeHorizon: Float
-    let dt: Float
+    let timeStep: Float
 
     func objective(_ actuators: ActuatorTimeSeries) -> Float {
         let (_, loss) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
         return loss.item(Float.self)
     }
@@ -287,9 +287,9 @@ struct QFusionMaximization: OptimizationProblem {
         return sensitivity.computeGradient(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
     }
 }
@@ -299,17 +299,17 @@ struct ProfileMatching: OptimizationProblem {
     let simulation: DifferentiableSimulation
     let initialProfiles: CoreProfiles
     let targetProfiles: TargetProfiles
-    let dynamicParams: DynamicRuntimeParams
+    let dynamicParameters: DynamicRuntimeParameters
     let timeHorizon: Float
-    let dt: Float
+    let timeStep: Float
 
     func objective(_ actuators: ActuatorTimeSeries) -> Float {
         let (finalProfiles, _) = simulation.forward(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt
+            timeStep: timeStep
         )
 
         // Compute L2 error
@@ -335,9 +335,9 @@ struct ProfileMatching: OptimizationProblem {
         return sensitivity.computeGradientWithCustomObjective(
             initialProfiles: initialProfiles,
             actuators: actuators,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             timeHorizon: timeHorizon,
-            dt: dt,
+            timeStep: timeStep,
             objectiveFn: objectiveFn
         )
     }
@@ -348,40 +348,40 @@ struct ProfileMatching: OptimizationProblem {
 /// Adam optimizer configuration
 public struct AdamConfig: Sendable {
     public let learningRate: Float
-    public let maxIterations: Int
+    public let maximumIterations: Int
     public let tolerance: Float
     public let logInterval: Int
 
     public init(
         learningRate: Float,
-        maxIterations: Int,
+        maximumIterations: Int,
         tolerance: Float,
         logInterval: Int = 10
     ) {
         self.learningRate = learningRate
-        self.maxIterations = maxIterations
+        self.maximumIterations = maximumIterations
         self.tolerance = tolerance
         self.logInterval = logInterval
     }
 
-    /// Default configuration for Q_fusion optimization
+    /// Default configuration for fusionGain optimization
     public static let `default` = AdamConfig(
         learningRate: 0.001,
-        maxIterations: 100,
+        maximumIterations: 100,
         tolerance: 1e-4
     )
 
     /// Fast configuration (fewer iterations)
     public static let fast = AdamConfig(
         learningRate: 0.01,
-        maxIterations: 50,
+        maximumIterations: 50,
         tolerance: 1e-3
     )
 
     /// Precise configuration (more iterations, tighter tolerance)
     public static let precise = AdamConfig(
         learningRate: 0.0005,
-        maxIterations: 200,
+        maximumIterations: 200,
         tolerance: 1e-5
     )
 }
@@ -397,13 +397,13 @@ public struct ScenarioOptimizationResult {
     public let finalProfiles: CoreProfiles
 
     /// Achieved fusion gain
-    public let Q_fusion: Float
+    public let fusionGain: Float
 
     /// Energy confinement time [s]
-    public let tau_E: Float
+    public let energyConfinementTime: Float
 
     /// Normalized beta
-    public let beta_N: Float
+    public let normalizedBeta: Float
 
     /// Number of optimization iterations
     public let iterations: Int
@@ -417,18 +417,18 @@ public struct ScenarioOptimizationResult {
     public init(
         actuators: ActuatorTimeSeries,
         finalProfiles: CoreProfiles,
-        Q_fusion: Float,
-        tau_E: Float,
-        beta_N: Float,
+        fusionGain: Float,
+        energyConfinementTime: Float,
+        normalizedBeta: Float,
         iterations: Int,
         converged: Bool,
         lossHistory: [Float]
     ) {
         self.actuators = actuators
         self.finalProfiles = finalProfiles
-        self.Q_fusion = Q_fusion
-        self.tau_E = tau_E
-        self.beta_N = beta_N
+        self.fusionGain = fusionGain
+        self.energyConfinementTime = energyConfinementTime
+        self.normalizedBeta = normalizedBeta
         self.iterations = iterations
         self.converged = converged
         self.lossHistory = lossHistory
@@ -439,9 +439,9 @@ public struct ScenarioOptimizationResult {
         let status = converged ? "✅ Converged" : "⚠️ Max iterations"
         return """
         Scenario Optimization Result: \(status)
-          Q_fusion: \(Q_fusion)
-          τE: \(tau_E) s
-          βN: \(beta_N)
+          fusionGain: \(fusionGain)
+          τE: \(energyConfinementTime) s
+          βN: \(normalizedBeta)
           Iterations: \(iterations)
         """
     }

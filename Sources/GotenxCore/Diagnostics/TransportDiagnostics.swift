@@ -52,7 +52,7 @@ public struct TransportDiagnostics {
 
         // Check ion diffusivity
         results.append(contentsOf: checkDiffusivity(
-            array: coefficients.chiIon.value,
+            array: coefficients.ionHeatDiffusivity.value,
             name: "χᵢ (ion)",
             step: step,
             time: time
@@ -60,7 +60,7 @@ public struct TransportDiagnostics {
 
         // Check electron diffusivity
         results.append(contentsOf: checkDiffusivity(
-            array: coefficients.chiElectron.value,
+            array: coefficients.electronHeatDiffusivity.value,
             name: "χₑ (electron)",
             step: step,
             time: time

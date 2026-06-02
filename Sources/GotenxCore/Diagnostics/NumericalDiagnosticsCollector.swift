@@ -24,13 +24,13 @@ public enum NumericalDiagnosticsCollector {
     ///
     /// - Parameters:
     ///   - solverResult: Result from Newton-Raphson or linear solver
-    ///   - dt: Current timestep [s]
+    ///   - timeStep: Current timestep [s]
     ///   - wallTime: Wall clock time for this step [s] (optional)
     ///   - cflNumber: CFL number (optional, Phase 3)
     /// - Returns: Numerical diagnostics
     public static func collect(
         from solverResult: SolverResult,
-        dt: Float,
+        timeStep: Float,
         wallTime: Float = 0.0,
         cflNumber: Float = 0.0
     ) -> NumericalDiagnostics {
@@ -52,17 +52,17 @@ public enum NumericalDiagnosticsCollector {
         let currentDrift: Float = 0.0
 
         return NumericalDiagnostics(
-            residual_norm: residualNorm,
-            newton_iterations: newtonIterations,
-            linear_iterations: linearIterations,
+            residualNorm: residualNorm,
+            newtonIterations: newtonIterations,
+            linearIterations: linearIterations,
             converged: converged,
-            particle_drift: particleDrift,
-            energy_drift: energyDrift,
-            current_drift: currentDrift,
-            wall_time: wallTime,
-            eval_count: evalCount,
-            dt: dt,
-            cfl_number: cflNumber
+            particleDrift: particleDrift,
+            energyDrift: energyDrift,
+            currentDrift: currentDrift,
+            wallTime: wallTime,
+            evaluationCount: evalCount,
+            timeStep: timeStep,
+            cflNumber: cflNumber
         )
     }
 
@@ -141,7 +141,7 @@ public enum NumericalDiagnosticsCollector {
     ///
     /// - Parameters:
     ///   - solverResult: Result from Newton-Raphson or linear solver
-    ///   - dt: Current timestep [s]
+    ///   - timeStep: Current timestep [s]
     ///   - wallTime: Wall clock time for this step [s]
     ///   - cflNumber: CFL number
     ///   - currentProfiles: Current state profiles (optional, for conservation)
@@ -150,7 +150,7 @@ public enum NumericalDiagnosticsCollector {
     /// - Returns: Numerical diagnostics with conservation monitoring
     public static func collectWithConservation(
         from solverResult: SolverResult,
-        dt: Float,
+        timeStep: Float,
         wallTime: Float = 0.0,
         cflNumber: Float = 0.0,
         currentProfiles: CoreProfiles? = nil,
@@ -188,17 +188,17 @@ public enum NumericalDiagnosticsCollector {
         }
 
         return NumericalDiagnostics(
-            residual_norm: residualNorm,
-            newton_iterations: newtonIterations,
-            linear_iterations: linearIterations,
+            residualNorm: residualNorm,
+            newtonIterations: newtonIterations,
+            linearIterations: linearIterations,
             converged: converged,
-            particle_drift: particleDrift,
-            energy_drift: energyDrift,
-            current_drift: currentDrift,
-            wall_time: wallTime,
-            eval_count: evalCount,
-            dt: dt,
-            cfl_number: cflNumber
+            particleDrift: particleDrift,
+            energyDrift: energyDrift,
+            currentDrift: currentDrift,
+            wallTime: wallTime,
+            evaluationCount: evalCount,
+            timeStep: timeStep,
+            cflNumber: cflNumber
         )
     }
 }

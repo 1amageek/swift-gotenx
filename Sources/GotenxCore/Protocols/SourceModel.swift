@@ -4,21 +4,22 @@ import Foundation
 
 /// Source model protocol for computing heating, particle, and current sources
 ///
-/// Phase 4a: Added optional metadata computation for power balance tracking.
-/// Models can opt-in by implementing `computeTermsWithMetadata()`.
+/// Diagnostic source terms must include metadata so power accounting is explicit.
+/// Solver source terms may omit metadata because they are evaluated repeatedly inside
+/// Newton iterations and automatic differentiation transforms.
 public protocol SourceModel: PhysicsComponent, Sendable {
-    /// Compute source terms (Phase 3 compatibility)
+    /// Compute source terms for diagnostics and time-series capture.
     ///
     /// - Parameters:
     ///   - profiles: Current core profiles
     ///   - geometry: Tokamak geometry
-    ///   - params: Source model parameters
-    /// - Returns: Source terms (heating, particles, current)
+    ///   - parameters: Source model parameters
+    /// - Returns: Source terms with source metadata
     func computeTerms(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: SourceParameters
-    ) -> SourceTerms
+        parameters: SourceParameters
+    ) throws -> SourceTerms
 
     /// Compute source terms for solver residual evaluation.
     ///
@@ -28,46 +29,21 @@ public protocol SourceModel: PhysicsComponent, Sendable {
     func computeTermsForSolver(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: SourceParameters
-    ) -> SourceTerms
-
-    /// Phase 4a: Compute source terms with metadata (optional)
-    ///
-    /// Models that implement this method enable accurate power balance tracking.
-    /// Default implementation falls back to `computeTerms()` without metadata.
-    ///
-    /// - Parameters:
-    ///   - profiles: Current core profiles
-    ///   - geometry: Tokamak geometry
-    ///   - params: Source model parameters
-    /// - Returns: Source terms with metadata
-    func computeTermsWithMetadata(
-        profiles: CoreProfiles,
-        geometry: Geometry,
-        params: SourceParameters
+        parameters: SourceParameters
     ) -> SourceTerms
 }
-
-// MARK: - Default Implementation (Phase 3 Compatibility)
 
 extension SourceModel {
     public func computeTermsForSolver(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: SourceParameters
+        parameters: SourceParameters
     ) -> SourceTerms {
-        computeTerms(profiles: profiles, geometry: geometry, params: params)
-    }
-
-    /// Default implementation: calls `computeTerms()` without metadata
-    ///
-    /// Phase 3 models automatically get this fallback behavior.
-    public func computeTermsWithMetadata(
-        profiles: CoreProfiles,
-        geometry: Geometry,
-        params: SourceParameters
-    ) -> SourceTerms {
-        // Fall back to Phase 3 implementation (no metadata)
-        return computeTerms(profiles: profiles, geometry: geometry, params: params)
+        do {
+            return try computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        } catch {
+            let cellCount = profiles.ionTemperature.shape.first ?? 0
+            return SourceTerms.invalidNumerics(cellCount: cellCount)
+        }
     }
 }

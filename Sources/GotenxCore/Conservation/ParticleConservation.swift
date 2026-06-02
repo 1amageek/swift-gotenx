@@ -18,7 +18,7 @@ import Foundation
 /// For closed system (Sₙ = 0, Γ·n̂ = 0 at boundary):
 ///
 /// ```
-/// dN/dt = 0  →  N = ∫ nₑ dV = const
+/// dN/timeStep = 0  →  N = ∫ nₑ dV = const
 /// ```
 ///
 /// ## Numerical Drift
@@ -97,8 +97,8 @@ public struct ParticleConservation: ConservationLaw {
         geometry: Geometry
     ) -> Float {
         // Extract electron density and cell volumes
-        let ne = profiles.electronDensity.value                                    // [nCells], m^-3
-        let volumes = GeometricFactors.from(geometry: geometry).cellVolumes.value  // [nCells], m^3
+        let ne = profiles.electronDensity.value                                    // [cellCount], m^-3
+        let volumes = GeometricFactors.from(geometry: geometry).cellVolumes.value  // [cellCount], m^3
 
         // Total particle number: N = ∫ nₑ dV ≈ Σ nₑ,i × Vᵢ
         let totalParticles = (ne * volumes).sum()    // GPU sum reduction

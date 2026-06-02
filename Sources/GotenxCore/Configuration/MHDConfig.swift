@@ -9,18 +9,18 @@ public struct MHDConfig: Codable, Sendable, Equatable {
     public var sawtoothEnabled: Bool
 
     /// Sawtooth model parameters
-    public var sawtoothParams: SawtoothParameters
+    public var sawtoothParameters: SawtoothParameters
 
     /// Enable/disable neoclassical tearing modes (future)
     public var ntmEnabled: Bool
 
     public init(
         sawtoothEnabled: Bool = false,
-        sawtoothParams: SawtoothParameters = SawtoothParameters(),
+        sawtoothParameters: SawtoothParameters = SawtoothParameters(),
         ntmEnabled: Bool = false
     ) {
         self.sawtoothEnabled = sawtoothEnabled
-        self.sawtoothParams = sawtoothParams
+        self.sawtoothParameters = sawtoothParameters
         self.ntmEnabled = ntmEnabled
     }
 
@@ -47,7 +47,7 @@ public struct SawtoothParameters: Codable, Sendable, Equatable {
 
     /// Critical magnetic shear threshold
     ///
-    /// Crash occurs when shear s = (r/q)(dq/dr) at q=1 surface exceeds this value.
+    /// Crash occurs when shear s = (r/q)(dq/radialSpacing) at q=1 surface exceeds this value.
     ///
     /// **Typical value**: 0.2
     public var sCritical: Float
@@ -57,7 +57,7 @@ public struct SawtoothParameters: Codable, Sendable, Equatable {
     /// Prevents unphysically rapid crash sequences.
     ///
     /// **Typical value**: 0.01 s (10 ms)
-    public var minCrashInterval: Float
+    public var minimumCrashInterval: Float
 
     // MARK: - Redistribution Parameters
 
@@ -89,14 +89,14 @@ public struct SawtoothParameters: Codable, Sendable, Equatable {
     public init(
         minimumRadius: Float = 0.2,
         sCritical: Float = 0.2,
-        minCrashInterval: Float = 0.01,
+        minimumCrashInterval: Float = 0.01,
         flatteningFactor: Float = 1.01,
         mixingRadiusMultiplier: Float = 1.5,
         crashStepDuration: Float = 1e-3
     ) {
         self.minimumRadius = minimumRadius
         self.sCritical = sCritical
-        self.minCrashInterval = minCrashInterval
+        self.minimumCrashInterval = minimumCrashInterval
         self.flatteningFactor = flatteningFactor
         self.mixingRadiusMultiplier = mixingRadiusMultiplier
         self.crashStepDuration = crashStepDuration
@@ -110,13 +110,13 @@ public protocol MHDModel: Sendable {
     ///   - profiles: Current core profiles
     ///   - geometry: Simulation geometry
     ///   - time: Current simulation time
-    ///   - dt: Timestep
+    ///   - timeStep: Timestep
     /// - Returns: Modified profiles after MHD effects
     func apply(
         to profiles: CoreProfiles,
         geometry: Geometry,
         time: Float,
-        dt: Float
+        timeStep: Float
     ) -> CoreProfiles
 }
 
@@ -130,7 +130,7 @@ public struct MHDModelFactory {
             return nil
         }
 
-        return SawtoothModel(params: config.sawtoothParams)
+        return SawtoothModel(parameters: config.sawtoothParameters)
     }
 
     /// Create all enabled MHD models

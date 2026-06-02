@@ -137,29 +137,29 @@ public struct CheckpointMetadata: Codable {
     public let createdAt: Date
 
     /// Number of time steps
-    public let nSteps: Int
+    public let stepCount: Int
 
     /// Simulation time range
     public let timeRangeStart: Float
     public let timeRangeEnd: Float
 
     /// Grid resolution
-    public let nCells: Int
+    public let cellCount: Int
 
     public init(
         gotenxVersion: String = "0.1.0",
         createdAt: Date = Date(),
-        nSteps: Int,
+        stepCount: Int,
         timeRangeStart: Float,
         timeRangeEnd: Float,
-        nCells: Int
+        cellCount: Int
     ) {
         self.gotenxVersion = gotenxVersion
         self.createdAt = createdAt
-        self.nSteps = nSteps
+        self.stepCount = stepCount
         self.timeRangeStart = timeRangeStart
         self.timeRangeEnd = timeRangeEnd
-        self.nCells = nCells
+        self.cellCount = cellCount
     }
 }
 
@@ -172,7 +172,7 @@ public struct CheckpointMetadata: Codable {
  ----------------------
  Dimensions:
    - time: UNLIMITED
-   - rho: nCells
+   - rho: cellCount
 
  Variables:
    - time(time): simulation time [s]
@@ -217,9 +217,9 @@ public struct CheckpointMetadata: Codable {
 
  // Read profiles at that time
  let Ti = try file.getVariable("ion_temperature")
-     .read(offset: [timeIndex, 0], shape: [1, nCells])
+     .read(offset: [timeIndex, 0], shape: [1, cellCount])
  let Te = try file.getVariable("electron_temperature")
-     .read(offset: [timeIndex, 0], shape: [1, nCells])
+     .read(offset: [timeIndex, 0], shape: [1, cellCount])
  // ...
 
  // Create CoreProfiles

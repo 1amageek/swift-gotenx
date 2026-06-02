@@ -27,7 +27,7 @@ struct FluxDivergenceTests {
 
     /// Create minimal test setup for flux divergence tests
     private func createTestSetup(
-        nCells: Int = 50,
+        cellCount: Int = 50,
         majorRadius: Float = 6.2,
         minorRadius: Float = 2.0,
         temperature: [Float]? = nil,
@@ -39,20 +39,20 @@ struct FluxDivergenceTests {
         geometry: Geometry,
         transport: TransportCoefficients,
         sources: SourceTerms,
-        staticParams: StaticRuntimeParams
+        staticParameters: StaticRuntimeParameters
     ) {
         // Use provided temperature or create flat profile
-        let tempArray = temperature ?? Array(repeating: Float(1000.0), count: nCells)
+        let tempArray = temperature ?? Array(repeating: Float(1000.0), count: cellCount)
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: MLXArray(tempArray)),
             electronTemperature: EvaluatedArray(evaluating: MLXArray(tempArray)),
-            electronDensity: EvaluatedArray(evaluating: MLXArray(Array(repeating: density, count: nCells))),
-            poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+            electronDensity: EvaluatedArray(evaluating: MLXArray(Array(repeating: density, count: cellCount))),
+            poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
         )
 
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: majorRadius,
             minorRadius: minorRadius,
             toroidalField: 5.3,
@@ -61,50 +61,50 @@ struct FluxDivergenceTests {
         let geometry = Geometry(config: meshConfig)
 
         let transport = TransportCoefficients(
-            chiIon: EvaluatedArray(evaluating: MLXArray(Array(repeating: chi, count: nCells))),
-            chiElectron: EvaluatedArray(evaluating: MLXArray(Array(repeating: chi, count: nCells))),
-            particleDiffusivity: EvaluatedArray(evaluating: MLXArray(Array(repeating: Float(0.1), count: nCells))),
-            convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+            ionHeatDiffusivity: EvaluatedArray(evaluating: MLXArray(Array(repeating: chi, count: cellCount))),
+            electronHeatDiffusivity: EvaluatedArray(evaluating: MLXArray(Array(repeating: chi, count: cellCount))),
+            particleDiffusivity: EvaluatedArray(evaluating: MLXArray(Array(repeating: Float(0.1), count: cellCount))),
+            convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
         )
 
         let sources = SourceTerms(
-            ionHeating: EvaluatedArray(evaluating: MLXArray(Array(repeating: sourceValue, count: nCells))),
-            electronHeating: EvaluatedArray(evaluating: MLXArray(Array(repeating: sourceValue, count: nCells))),
-            particleSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-            currentSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+            ionHeating: EvaluatedArray(evaluating: MLXArray(Array(repeating: sourceValue, count: cellCount))),
+            electronHeating: EvaluatedArray(evaluating: MLXArray(Array(repeating: sourceValue, count: cellCount))),
+            particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+            currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
         )
 
-        let staticParams = StaticRuntimeParams(
+        let staticParameters = StaticRuntimeParameters(
             mesh: meshConfig,
             evolveIonHeat: true,
             evolveElectronHeat: true,
-            evolveDensity: false,
-            evolveCurrent: false,
+            evolveElectronDensity: false,
+            evolvePoloidalFlux: false,
             solverType: .linear,
             theta: 1.0,
             solverTolerance: 1e-6,
-            solverMaxIterations: 100
+            solverMaximumIterations: 100
         )
 
-        return (profiles, geometry, transport, sources, staticParams)
+        return (profiles, geometry, transport, sources, staticParameters)
     }
 
     // MARK: - Gradient Calculation Tests
 
     /// Test diffusion coefficients with flat temperature profile
     ///
-    /// **Expected**: dFace = n_e × χ_i for all faces
+    /// **Expected**: faceDiffusionCoefficient = n_e × χ_i for all faces
     ///
     /// **Physics**: Diffusion coefficient depends on density and thermal diffusivity
     @Test("Flat profile diffusion coefficients are correct")
     func testFlatProfileDiffusionCoeffs() throws {
-        let nCells = 50
+        let cellCount = 50
         let density: Float = 2.0e19
         let chi: Float = 1.0
 
         let setup = createTestSetup(
-            nCells: nCells,
-            temperature: Array(repeating: 1000.0, count: nCells),
+            cellCount: cellCount,
+            temperature: Array(repeating: 1000.0, count: cellCount),
             density: density,
             chi: chi
         )
@@ -113,27 +113,27 @@ struct FluxDivergenceTests {
             transport: setup.transport,
             sources: setup.sources,
             geometry: setup.geometry,
-            staticParams: setup.staticParams,
+            staticParameters: setup.staticParameters,
             profiles: setup.profiles
         )
 
-        // Verify dFace = n_e × χ_i
-        let dFace = coeffs.ionCoeffs.dFace.value.asArray(Float.self)
+        // Verify faceDiffusionCoefficient = n_e × χ_i
+        let faceDiffusionCoefficient = coeffs.ionCoeffs.faceDiffusionCoefficient.value.asArray(Float.self)
         let expectedD = density * chi  // 2e19 × 1.0 = 2e19
 
-        for (i, d) in dFace.enumerated() {
+        for (i, d) in faceDiffusionCoefficient.enumerated() {
             // Allow 10% variation due to harmonic mean interpolation at boundaries
             let relativeError = abs(d - expectedD) / expectedD
             #expect(relativeError < 0.1,
-                   "dFace[\(i)] = \(d), expected ≈\(expectedD) (error: \(relativeError*100)%)")
+                   "faceDiffusionCoefficient[\(i)] = \(d), expected ≈\(expectedD) (error: \(relativeError*100)%)")
         }
 
         // Verify transient coefficient = n_e
-        let transientCoeff = coeffs.ionCoeffs.transientCoeff.value.asArray(Float.self)
-        for (i, coeff) in transientCoeff.enumerated() {
+        let transientCoefficient = coeffs.ionCoeffs.transientCoefficient.value.asArray(Float.self)
+        for (i, coeff) in transientCoefficient.enumerated() {
             let relativeError = abs(coeff - density) / density
             #expect(relativeError < 0.01,
-                   "transientCoeff[\(i)] = \(coeff), expected \(density) (error: \(relativeError*100)%)")
+                   "transientCoefficient[\(i)] = \(coeff), expected \(density) (error: \(relativeError*100)%)")
         }
     }
 
@@ -143,28 +143,28 @@ struct FluxDivergenceTests {
     /// - Core (r=0): 2000 eV
     /// - Edge (r=a): 1000 eV
     ///
-    /// **Expected gradient**: dT/dr = -1000/a = -500 eV/m (for a=2.0 m)
+    /// **Expected gradient**: dT/radialSpacing = -1000/a = -500 eV/m (for a=2.0 m)
     @Test("Linear profile produces constant gradient")
     func testLinearProfileGradient() throws {
-        let nCells = 50
+        let cellCount = 50
         let minorRadius: Float = 2.0
         let Tcore: Float = 2000.0
         let Tedge: Float = 1000.0
 
         // Create linear temperature profile: T(r) = Tedge + (Tcore - Tedge) * (1 - r/a)
-        var tempProfile = [Float](repeating: 0.0, count: nCells)
-        for i in 0..<nCells {
-            let rNorm = Float(i) / Float(nCells - 1)  // r/a ∈ [0, 1]
+        var tempProfile = [Float](repeating: 0.0, count: cellCount)
+        for i in 0..<cellCount {
+            let rNorm = Float(i) / Float(cellCount - 1)  // r/a ∈ [0, 1]
             tempProfile[i] = Tedge + (Tcore - Tedge) * (1.0 - rNorm)
         }
 
         let setup = createTestSetup(
-            nCells: nCells,
+            cellCount: cellCount,
             minorRadius: minorRadius,
             temperature: tempProfile
         )
 
-        // Expected gradient magnitude: |dT/dr| = (Tcore - Tedge) / a
+        // Expected gradient magnitude: |dT/radialSpacing| = (Tcore - Tedge) / a
         // let expectedGradientMag = abs(Tcore - Tedge) / minorRadius
         // Expected: |500| eV/m for (2000-1000)/2.0
 
@@ -174,19 +174,19 @@ struct FluxDivergenceTests {
             transport: setup.transport,
             sources: setup.sources,
             geometry: setup.geometry,
-            staticParams: setup.staticParams,
+            staticParameters: setup.staticParameters,
             profiles: setup.profiles
         )
 
-        // Verify dFace is computed correctly (should be n_e × χ_i)
-        let dFace = coeffs.ionCoeffs.dFace.value.asArray(Float.self)
+        // Verify faceDiffusionCoefficient is computed correctly (should be n_e × χ_i)
+        let faceDiffusionCoefficient = coeffs.ionCoeffs.faceDiffusionCoefficient.value.asArray(Float.self)
         let expectedD: Float = 2.0e19 * 1.0  // n_e × χ_i = 2e19 × 1.0
 
-        // All interior faces should have similar dFace values
-        for (i, d) in dFace.enumerated() {
+        // All interior faces should have similar faceDiffusionCoefficient values
+        for (i, d) in faceDiffusionCoefficient.enumerated() {
             // Allow 10% variation due to harmonic mean interpolation
             let relativeError = abs(d - expectedD) / expectedD
-            #expect(relativeError < 0.1, "dFace[\(i)] = \(d), expected ≈\(expectedD) (error: \(relativeError*100)%)")
+            #expect(relativeError < 0.1, "faceDiffusionCoefficient[\(i)] = \(d), expected ≈\(expectedD) (error: \(relativeError*100)%)")
         }
     }
 
@@ -204,7 +204,7 @@ struct FluxDivergenceTests {
     @Test("Unit conversion from MW/m³ to eV/(m³·s) is correct")
     func testUnitConversion() throws {
         // Test conversion constant
-        let conversionFactor = UnitConversions.megawattsPerCubicMeterToEvPerCubicMeterPerSecond
+        let conversionFactor = UnitConversions.megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond
         let expectedFactor: Float = 6.2415090744e24
 
         let relativeError = abs(conversionFactor - expectedFactor) / expectedFactor
@@ -212,7 +212,7 @@ struct FluxDivergenceTests {
 
         // Test conversion of typical heating power
         let Q_MW: Float = 1.0  // 1 MW/m³ (typical heating power density)
-        let Q_eV = UnitConversions.megawattsToEvDensity(Q_MW)
+        let Q_eV = UnitConversions.megawattsToElectronVoltDensity(Q_MW)
 
         let expectedQ_eV = Q_MW * expectedFactor
         let conversionError = abs(Q_eV - expectedQ_eV) / expectedQ_eV
@@ -220,7 +220,7 @@ struct FluxDivergenceTests {
 
         // Test array conversion
         let Q_MW_array = MLXArray([Float(1.0), Float(10.0), Float(100.0)])
-        let Q_eV_array = UnitConversions.megawattsToEvDensity(Q_MW_array)
+        let Q_eV_array = UnitConversions.megawattsToElectronVoltDensity(Q_MW_array)
         let Q_eV_values = Q_eV_array.asArray(Float.self)
 
         let expected_eV_values: [Float] = [1.0e24, 1.0e25, 1.0e26].map { Float($0 * 6.2415090744) }
@@ -239,7 +239,7 @@ struct FluxDivergenceTests {
         // Typical ohmic heating: 10 kW/m³ = 1e4 W/m³
         let Q_watts: Float = 1e4
         let Q_MW = Q_watts / 1e6  // 0.01 MW/m³
-        let Q_eV = UnitConversions.megawattsToEvDensity(Q_MW)
+        let Q_eV = UnitConversions.megawattsToElectronVoltDensity(Q_MW)
 
         // Expected: ~6e22 eV/(m³·s)
         let expectedOrder: Float = 1e22
@@ -285,24 +285,24 @@ struct FluxDivergenceTests {
     ///
     /// **Calculation chain**:
     /// 1. gradFace = ∂T/∂r [eV/m]
-    /// 2. dFace = n_e × χ [m⁻¹·s⁻¹]
-    /// 3. flux = -dFace × gradFace [eV/(m²·s)]
+    /// 2. faceDiffusionCoefficient = n_e × χ [m⁻¹·s⁻¹]
+    /// 3. flux = -faceDiffusionCoefficient × gradFace [eV/(m²·s)]
     /// 4. weightedFlux = √g × flux [eV/(m·s)]
     /// 5. fluxDiv = Δ(weightedFlux) / (√g × Δr) [eV/(m³·s)]
     @Test("Flux divergence has correct dimensions")
     func testFluxDivergenceDimensions() throws {
-        let nCells = 50
+        let cellCount = 50
         let minorRadius: Float = 2.0
 
         // Create linear profile for non-zero gradient
-        var tempProfile = [Float](repeating: 0.0, count: nCells)
-        for i in 0..<nCells {
-            let rNorm = Float(i) / Float(nCells - 1)
+        var tempProfile = [Float](repeating: 0.0, count: cellCount)
+        for i in 0..<cellCount {
+            let rNorm = Float(i) / Float(cellCount - 1)
             tempProfile[i] = 2000.0 - 1000.0 * rNorm
         }
 
         let setup = createTestSetup(
-            nCells: nCells,
+            cellCount: cellCount,
             minorRadius: minorRadius,
             temperature: tempProfile,
             sourceValue: 1.0  // 1 MW/m³ source
@@ -312,17 +312,17 @@ struct FluxDivergenceTests {
             transport: setup.transport,
             sources: setup.sources,
             geometry: setup.geometry,
-            staticParams: setup.staticParams,
+            staticParameters: setup.staticParameters,
             profiles: setup.profiles
         )
 
         // Source term should be converted to eV/(m³·s)
-        let sourceCell = coeffs.ionCoeffs.sourceCell.value.asArray(Float.self)
+        let cellSource = coeffs.ionCoeffs.cellSource.value.asArray(Float.self)
 
         // Expected: 1 MW/m³ × 6.24e24 ≈ 6.24e24 eV/(m³·s)
         let expectedSourceMagnitude: Float = 1.0 * 6.2415090744e24
 
-        for (i, source) in sourceCell.enumerated() {
+        for (i, source) in cellSource.enumerated() {
             // Source should be in correct order of magnitude
             let orderOfMagnitude = log10(abs(source))
             let expectedOrder = log10(expectedSourceMagnitude)
@@ -357,15 +357,15 @@ struct FluxDivergenceTests {
             transport: setup.transport,
             sources: setup.sources,
             geometry: setup.geometry,
-            staticParams: setup.staticParams,
+            staticParameters: setup.staticParameters,
             profiles: setup.profiles
         )
 
         // For flat profile, flux divergence ≈ source term
-        let sourceCell = coeffs.ionCoeffs.sourceCell.value.asArray(Float.self)
+        let cellSource = coeffs.ionCoeffs.cellSource.value.asArray(Float.self)
 
         // Expected order: ~6e22 eV/(m³·s) for 10 kW/m³
-        for (i, source) in sourceCell.enumerated() {
+        for (i, source) in cellSource.enumerated() {
             let orderOfMagnitude = log10(abs(source))
 
             // Should be in range 10²² - 10²³ eV/(m³·s)
@@ -391,14 +391,14 @@ struct FluxDivergenceTests {
             transport: setup.transport,
             sources: setup.sources,
             geometry: setup.geometry,
-            staticParams: setup.staticParams,
+            staticParameters: setup.staticParameters,
             profiles: setup.profiles
         )
 
         // Verify source term is zero
-        let sourceCell = coeffs.ionCoeffs.sourceCell.value.asArray(Float.self)
+        let cellSource = coeffs.ionCoeffs.cellSource.value.asArray(Float.self)
 
-        for (i, source) in sourceCell.enumerated() {
+        for (i, source) in cellSource.enumerated() {
             #expect(abs(source) < 1e-10,
                    "Source[\(i)] = \(source), expected 0 for zero source input")
         }
@@ -408,31 +408,31 @@ struct FluxDivergenceTests {
 
     /// Test CFL condition for numerical stability
     ///
-    /// **CFL Condition**: CFL = χ × dt / dx² < 0.5 (diffusion stability limit)
+    /// **CFL Condition**: CFL = χ × timeStep / dx² < 0.5 (diffusion stability limit)
     ///
     /// **Physics**: Violating CFL leads to numerical instability and oscillations
     ///
-    /// **Expected**: For nCells=50, minorRadius=2.0, chi=1.0, dt=7e-4:
+    /// **Expected**: For cellCount=50, minorRadius=2.0, chi=1.0, timeStep=7e-4:
     /// - dx = 2.0/50 = 0.04 m
     /// - CFL = 1.0 × 7e-4 / (0.04)² = 0.4375 < 0.5 ✓
     @Test("CFL condition is satisfied for stable timestepping")
     func testCFLCondition() throws {
-        let nCells = 50
+        let cellCount = 50
         let minorRadius: Float = 2.0
         let chi: Float = 1.0
-        let dt: Float = 7e-4
+        let timeStep: Float = 7e-4
 
         let setup = createTestSetup(
-            nCells: nCells,
+            cellCount: cellCount,
             minorRadius: minorRadius,
             chi: chi
         )
 
-        // Cell spacing: dx = a / nCells
-        let dx = minorRadius / Float(nCells)
+        // Cell spacing: dx = a / cellCount
+        let dx = minorRadius / Float(cellCount)
 
-        // CFL number: CFL = chi * dt / dx^2
-        let CFL = chi * dt / (dx * dx)
+        // CFL number: CFL = chi * timeStep / dx^2
+        let CFL = chi * timeStep / (dx * dx)
 
         // Verify CFL < 0.5 for diffusion stability
         #expect(CFL < 0.5, "CFL = \(CFL) violates stability condition (must be < 0.5)")
@@ -452,21 +452,21 @@ struct FluxDivergenceTests {
         let chi: Float = 1.0
 
         // Test different resolutions
-        let testCases: [(nCells: Int, dt: Float, expectedCFL: Float)] = [
-            (25, 2.8e-3, 0.4375),  // Coarse mesh, larger dt
+        let testCases: [(cellCount: Int, timeStep: Float, expectedCFL: Float)] = [
+            (25, 2.8e-3, 0.4375),  // Coarse mesh, larger timeStep
             (50, 7.0e-4, 0.4375),  // Medium mesh
-            (100, 1.75e-4, 0.4375) // Fine mesh, smaller dt
+            (100, 1.75e-4, 0.4375) // Fine mesh, smaller timeStep
         ]
 
         for testCase in testCases {
-            let dx = minorRadius / Float(testCase.nCells)
-            let CFL = chi * testCase.dt / (dx * dx)
+            let dx = minorRadius / Float(testCase.cellCount)
+            let CFL = chi * testCase.timeStep / (dx * dx)
 
             #expect(abs(CFL - testCase.expectedCFL) < 1e-3,
-                   "nCells=\(testCase.nCells): CFL=\(CFL) ≠ expected \(testCase.expectedCFL)")
+                   "cellCount=\(testCase.cellCount): CFL=\(CFL) ≠ expected \(testCase.expectedCFL)")
 
             #expect(CFL < 0.5,
-                   "nCells=\(testCase.nCells): CFL=\(CFL) violates stability")
+                   "cellCount=\(testCase.cellCount): CFL=\(CFL) violates stability")
         }
     }
 
@@ -481,20 +481,20 @@ struct FluxDivergenceTests {
     /// This corresponds to ~0.26 eV temperature difference over one cell (0.026% of 1000 eV)
     @Test("Boundary conditions create small gradients in flat profile")
     func testBoundaryConditionGradient() throws {
-        let nCells = 50
+        let cellCount = 50
         let minorRadius: Float = 2.0
         let boundaryTemp: Float = 1000.0
 
         // Flat profile (all cells at boundary temperature)
         let setup = createTestSetup(
-            nCells: nCells,
+            cellCount: cellCount,
             minorRadius: minorRadius,
-            temperature: Array(repeating: boundaryTemp, count: nCells)
+            temperature: Array(repeating: boundaryTemp, count: cellCount)
         )
 
         // Expected gradient near boundaries from solver iteration
         // From Phase 2 logs: gradFace ~ 6.5 eV/m
-        let dx = minorRadius / Float(nCells)  // Cell spacing
+        let dx = minorRadius / Float(cellCount)  // Cell spacing
 
         // Maximum expected temperature variation per cell
         let expectedMaxGrad: Float = 10.0  // eV/m (conservative upper bound)
@@ -519,12 +519,12 @@ struct FluxDivergenceTests {
     /// - Face area: A = 2πR₀
     @Test("Geometric factors are consistent with Jacobian")
     func testGeometricFactorsConsistency() throws {
-        let nCells = 50
+        let cellCount = 50
         let majorRadius: Float = 6.2
         let minorRadius: Float = 2.0
 
         let setup = createTestSetup(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: majorRadius,
             minorRadius: minorRadius
         )
@@ -542,8 +542,8 @@ struct FluxDivergenceTests {
         }
 
         // Verify cell volumes: V = Jacobian × Δr
-        let dr = minorRadius / Float(nCells)
-        let expectedVolume = expectedJacobian * dr
+        let radialSpacing = minorRadius / Float(cellCount)
+        let expectedVolume = expectedJacobian * radialSpacing
         let cellVolumes = geomFactors.cellVolumes.value.asArray(Float.self)
 
         for (i, vol) in cellVolumes.enumerated() {
@@ -568,27 +568,27 @@ struct FluxDivergenceTests {
     /// Test complete unit chain from coefficients to flux divergence
     ///
     /// **Unit Chain**:
-    /// 1. dFace = n_e × χ [m⁻³ × m²/s = m⁻¹·s⁻¹]
+    /// 1. faceDiffusionCoefficient = n_e × χ [m⁻³ × m²/s = m⁻¹·s⁻¹]
     /// 2. gradFace = ∂T/∂r [eV/m]
-    /// 3. flux = -dFace × gradFace [m⁻¹·s⁻¹ × eV/m = eV/(m²·s)]
+    /// 3. flux = -faceDiffusionCoefficient × gradFace [m⁻¹·s⁻¹ × eV/m = eV/(m²·s)]
     /// 4. weightedFlux = √g × flux [m × eV/(m²·s) = eV/(m·s)]
     /// 5. divergence = Δ(weightedFlux)/(√g × Δr) [eV/(m³·s)]
     @Test("Complete unit chain from coefficients to divergence")
     func testUnitChainEndToEnd() throws {
-        let nCells = 50
+        let cellCount = 50
         let minorRadius: Float = 2.0
         let density: Float = 2.0e19
         let chi: Float = 1.0
 
         // Linear temperature profile for predictable gradient
-        var tempProfile = [Float](repeating: 0.0, count: nCells)
-        for i in 0..<nCells {
-            let rNorm = Float(i) / Float(nCells - 1)
+        var tempProfile = [Float](repeating: 0.0, count: cellCount)
+        for i in 0..<cellCount {
+            let rNorm = Float(i) / Float(cellCount - 1)
             tempProfile[i] = 2000.0 - 1000.0 * rNorm  // 2000 eV → 1000 eV
         }
 
         let setup = createTestSetup(
-            nCells: nCells,
+            cellCount: cellCount,
             minorRadius: minorRadius,
             temperature: tempProfile,
             density: density,
@@ -599,18 +599,18 @@ struct FluxDivergenceTests {
             transport: setup.transport,
             sources: setup.sources,
             geometry: setup.geometry,
-            staticParams: setup.staticParams,
+            staticParameters: setup.staticParameters,
             profiles: setup.profiles
         )
 
-        // 1. Verify dFace units [m⁻¹·s⁻¹]
-        let dFace = coeffs.ionCoeffs.dFace.value.asArray(Float.self)
+        // 1. Verify faceDiffusionCoefficient units [m⁻¹·s⁻¹]
+        let faceDiffusionCoefficient = coeffs.ionCoeffs.faceDiffusionCoefficient.value.asArray(Float.self)
         let expectedD = density * chi  // 2e19 m⁻³ × 1.0 m²/s = 2e19 m⁻¹·s⁻¹
 
         // Sample check (middle face)
-        let midIdx = dFace.count / 2
-        let dRelError = abs(dFace[midIdx] - expectedD) / expectedD
-        #expect(dRelError < 0.1, "dFace units incorrect: \(dFace[midIdx]) vs \(expectedD)")
+        let midIdx = faceDiffusionCoefficient.count / 2
+        let dRelError = abs(faceDiffusionCoefficient[midIdx] - expectedD) / expectedD
+        #expect(dRelError < 0.1, "faceDiffusionCoefficient units incorrect: \(faceDiffusionCoefficient[midIdx]) vs \(expectedD)")
 
         // 2. Expected gradient [eV/m]
         let expectedGrad = 1000.0 / minorRadius  // ΔT / Δr = 1000 eV / 2 m = 500 eV/m
@@ -623,7 +623,7 @@ struct FluxDivergenceTests {
         #expect(fluxOrder >= 21.0 && fluxOrder <= 23.0,
                "Flux magnitude outside expected range: 10^\(fluxOrder) eV/(m²·s)")
 
-        print("✓ Unit chain verified: dFace ~ \(expectedD), flux ~ \(expectedFlux) eV/(m²·s)")
+        print("✓ Unit chain verified: faceDiffusionCoefficient ~ \(expectedD), flux ~ \(expectedFlux) eV/(m²·s)")
     }
 
     // MARK: - Transient Evolution Tests
@@ -651,13 +651,13 @@ struct FluxDivergenceTests {
             transport: setup.transport,
             sources: setup.sources,
             geometry: setup.geometry,
-            staticParams: setup.staticParams,
+            staticParameters: setup.staticParameters,
             profiles: setup.profiles
         )
 
         // Source term in eV/(m³·s)
-        let sourceCell = coeffs.ionCoeffs.sourceCell.value.asArray(Float.self)
-        let avgSource = sourceCell.reduce(0.0, +) / Float(sourceCell.count)
+        let cellSource = coeffs.ionCoeffs.cellSource.value.asArray(Float.self)
+        let avgSource = cellSource.reduce(0.0, +) / Float(cellSource.count)
 
         // Expected: Q_source ≈ 6e22 eV/(m³·s)
         let expectedSource: Float = Q_kW_m3 * 1e3 * 6.2415e18  // W/m³ → eV/(m³·s)

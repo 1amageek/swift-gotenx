@@ -5,7 +5,7 @@ import Foundation
 /// Mesh configuration for spatial discretization
 public struct MeshConfig: Sendable, Codable, Equatable, Hashable {
     /// Number of cells in radial direction
-    public let nCells: Int
+    public let cellCount: Int
 
     /// Major radius [m]
     public let majorRadius: Float
@@ -20,7 +20,7 @@ public struct MeshConfig: Sendable, Codable, Equatable, Hashable {
     public let geometryType: GeometryType
 
     public init(
-        nCells: Int,
+        cellCount: Int,
         majorRadius: Float,
         minorRadius: Float,
         toroidalField: Float,
@@ -31,7 +31,7 @@ public struct MeshConfig: Sendable, Codable, Equatable, Hashable {
         // `validate()`.  This keeps construction lightweight even for
         // obviously invalid inputs, which mirrors the configuration
         // loading flow exercised by the tests.
-        self.nCells = nCells
+        self.cellCount = cellCount
         self.majorRadius = majorRadius
         self.minorRadius = minorRadius
         self.toroidalField = toroidalField
@@ -39,15 +39,44 @@ public struct MeshConfig: Sendable, Codable, Equatable, Hashable {
     }
 
     /// Grid spacing [m]
-    public var dr: Float {
-        guard nCells > 0 else { return .infinity }
-        return minorRadius / Float(nCells)
+    public var radialSpacing: Float {
+        guard cellCount > 0 else { return .infinity }
+        return minorRadius / Float(cellCount)
     }
 
     /// Aspect ratio (R/a)
     public var aspectRatio: Float {
         guard minorRadius != 0 else { return .infinity }
         return majorRadius / minorRadius
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case cellCount
+        case majorRadius
+        case minorRadius
+        case toroidalField
+        case geometryType
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            cellCount: try container.decode(Int.self, forKey: .cellCount),
+            majorRadius: try container.decode(Float.self, forKey: .majorRadius),
+            minorRadius: try container.decode(Float.self, forKey: .minorRadius),
+            toroidalField: try container.decode(Float.self, forKey: .toroidalField),
+            geometryType: try container.decodeIfPresent(GeometryType.self, forKey: .geometryType) ?? .circular
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(cellCount, forKey: .cellCount)
+        try container.encode(majorRadius, forKey: .majorRadius)
+        try container.encode(minorRadius, forKey: .minorRadius)
+        try container.encode(toroidalField, forKey: .toroidalField)
+        try container.encode(geometryType, forKey: .geometryType)
     }
 }
 
@@ -56,18 +85,18 @@ public struct MeshConfig: Sendable, Codable, Equatable, Hashable {
 extension MeshConfig {
     /// Validate physics constraints
     public func validate() throws {
-        guard nCells > 0 else {
+        guard cellCount > 0 else {
             throw ConfigurationError.invalidValue(
-                key: "mesh.nCells",
-                value: "\(nCells)",
+                key: "mesh.cellCount",
+                value: "\(cellCount)",
                 reason: "Must be positive"
             )
         }
 
-        guard nCells >= 10 else {
+        guard cellCount >= 10 else {
             throw ConfigurationError.physicsWarning(
-                key: "mesh.nCells",
-                value: "\(nCells)",
+                key: "mesh.cellCount",
+                value: "\(cellCount)",
                 reason: "Fewer than 10 cells may produce inaccurate results"
             )
         }

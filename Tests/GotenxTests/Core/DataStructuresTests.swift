@@ -119,7 +119,7 @@ struct GeometryTests {
     @Test("Geometry construction from mesh config")
     func testGeometryFromMesh() {
         let mesh = MeshConfig(
-            nCells: 10,
+            cellCount: 10,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -131,13 +131,13 @@ struct GeometryTests {
         #expect(geometry.minorRadius == 1.0)
         #expect(geometry.toroidalField == 2.5)
         #expect(geometry.volume.shape == [])  // Scalar
-        #expect(geometry.g0.shape == [11])  // nCells + 1 faces
+        #expect(geometry.fluxSurfaceMetric.shape == [11])  // cellCount + 1 faces
     }
 
     @Test("Geometry volume computation")
     func testVolumeComputation() {
         let mesh = MeshConfig(
-            nCells: 10,
+            cellCount: 10,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -161,14 +161,14 @@ struct TransportCoefficientsTests {
     @Test("TransportCoefficients construction")
     func testConstruction() {
         let coeffs = TransportCoefficients(
-            chiIon: .full([10], value: Float(1.0)),
-            chiElectron: .full([10], value: Float(1.5)),
+            ionHeatDiffusivity: .full([10], value: Float(1.0)),
+            electronHeatDiffusivity: .full([10], value: Float(1.5)),
             particleDiffusivity: .full([10], value: Float(0.5)),
             convectionVelocity: .zeros([10])
         )
 
-        #expect(coeffs.chiIon.shape == [10])
-        #expect(coeffs.chiElectron.shape == [10])
+        #expect(coeffs.ionHeatDiffusivity.shape == [10])
+        #expect(coeffs.electronHeatDiffusivity.shape == [10])
     }
 }
 
@@ -179,7 +179,7 @@ struct SourceTermsDataStructureTests {
 
     @Test("SourceTerms zero initialization")
     func testZeroInitialization() {
-        let sources = SourceTerms.zero(nCells: 10)
+        let sources = SourceTerms.zero(cellCount: 10)
 
         #expect(sources.ionHeating.shape == [10])
         #expect(sources.electronHeating.shape == [10])

@@ -32,19 +32,19 @@ public struct PlasmaPhysics {
 
     // MARK: - Spitzer Resistivity
 
-    /// Compute Spitzer resistivity η = η₀ Z_eff ln(Λ) / T_e^(3/2)
+    /// Compute Spitzer resistivity η = η₀ effectiveCharge ln(Λ) / T_e^(3/2)
     ///
     /// **Formula** (SI units):
     /// ```
-    /// η = 5.2×10⁻⁵ × Z_eff × ln(Λ) / T_e^(3/2)  [Ω·m]
+    /// η = 5.2×10⁻⁵ × effectiveCharge × ln(Λ) / T_e^(3/2)  [Ω·m]
     /// ```
     ///
     /// **Parameters**:
-    /// - Te_eV: Electron temperature [nCells] in eV
-    /// - ne_m3: Electron density [nCells] in m⁻³
-    /// - Z_eff: Effective charge (default: 1.0 for pure deuterium)
+    /// - Te_eV: Electron temperature [cellCount] in eV
+    /// - ne_m3: Electron density [cellCount] in m⁻³
+    /// - effectiveCharge: Effective charge (default: 1.0 for pure deuterium)
     ///
-    /// **Returns**: Resistivity η [nCells] in Ω·m
+    /// **Returns**: Resistivity η [cellCount] in Ω·m
     ///
     /// **Units Verification**:
     /// - η₀ = 5.2×10⁻⁵ [Ω·m·eV^(3/2)]
@@ -55,16 +55,16 @@ public struct PlasmaPhysics {
     public static func spitzerResistivity(
         Te_eV: MLXArray,
         ne_m3: MLXArray,
-        Z_eff: Float = 1.0
+        effectiveCharge: Float = 1.0
     ) -> MLXArray {
         // Spitzer coefficient in SI units
         let eta0: Float = 5.2e-5  // Ω·m·eV^(3/2)
 
         // Coulomb logarithm
-        let lnLambda = coulombLogarithm(Te_eV: Te_eV, ne_m3: ne_m3)
+        let coulombLogarithm = coulombLogarithm(Te_eV: Te_eV, ne_m3: ne_m3)
 
-        // Spitzer formula: η = η₀ Z_eff ln(Λ) / T_e^(3/2)
-        let eta = eta0 * Z_eff * lnLambda / pow(Te_eV, 1.5)
+        // Spitzer formula: η = η₀ effectiveCharge ln(Λ) / T_e^(3/2)
+        let eta = eta0 * effectiveCharge * coulombLogarithm / pow(Te_eV, 1.5)
         eval(eta)
         return eta
     }
@@ -77,10 +77,10 @@ public struct PlasmaPhysics {
     /// ```
     ///
     /// **Parameters**:
-    /// - Te_eV: Electron temperature [nCells] in eV
-    /// - ne_m3: Electron density [nCells] in m⁻³
+    /// - Te_eV: Electron temperature [cellCount] in eV
+    /// - ne_m3: Electron density [cellCount] in m⁻³
     ///
-    /// **Returns**: Coulomb logarithm ln(Λ) [nCells] (dimensionless)
+    /// **Returns**: Coulomb logarithm ln(Λ) [cellCount] (dimensionless)
     ///
     /// **Typical values**: 15-20 for fusion plasmas
     ///
@@ -94,10 +94,10 @@ public struct PlasmaPhysics {
         let Te_keV = Te_eV / 1000.0  // Temperature in keV
 
         // Coulomb logarithm formula
-        let lnLambda = 15.2 - 0.5 * log(ne_1e20) + log(Te_keV)
+        let coulombLogarithm = 15.2 - 0.5 * log(ne_1e20) + log(Te_keV)
 
         // Clamp to reasonable range [10, 25]
-        let lnLambda_clamped = clip(lnLambda, min: MLXArray(10.0), max: MLXArray(25.0))
+        let lnLambda_clamped = clip(coulombLogarithm, min: MLXArray(10.0), max: MLXArray(25.0))
         eval(lnLambda_clamped)
         return lnLambda_clamped
     }
@@ -107,10 +107,10 @@ public struct PlasmaPhysics {
     /// Characteristic time for magnetic field diffusion.
     ///
     /// **Parameters**:
-    /// - eta: Resistivity [nCells] in Ω·m
+    /// - eta: Resistivity [cellCount] in Ω·m
     /// - minorRadius: Plasma minor radius in meters
     ///
-    /// **Returns**: Resistive time τ_R [nCells] in seconds
+    /// **Returns**: Resistive time τ_R [cellCount] in seconds
     ///
     /// **Units Verification**:
     /// - μ₀: [H/m] = [Ω·s/m]
@@ -139,9 +139,9 @@ public struct PlasmaPhysics {
     ///
     /// **Parameters**:
     /// - profiles: Core plasma profiles
-    /// - magneticField: Total magnetic field B [nCells] in Tesla
+    /// - magneticField: Total magnetic field B [cellCount] in Tesla
     ///
-    /// **Returns**: Plasma beta β [nCells] (dimensionless)
+    /// **Returns**: Plasma beta β [cellCount] (dimensionless)
     ///
     /// **Units Verification**:
     /// - p = n_e × (T_e + T_i) × e [Pa]
@@ -178,20 +178,20 @@ public struct PlasmaPhysics {
     ///
     /// **Parameters**:
     /// - toroidalField: Toroidal field B_tor (constant) in Tesla
-    /// - poloidalField: Poloidal field B_pol [nCells] in Tesla (optional)
-    /// - nCells: Number of radial cells for array shape consistency
+    /// - poloidalField: Poloidal field B_pol [cellCount] in Tesla (optional)
+    /// - cellCount: Number of radial cells for array shape consistency
     ///
-    /// **Returns**: Total magnetic field B_total [nCells] in Tesla
+    /// **Returns**: Total magnetic field B_total [cellCount] in Tesla
     ///
-    /// **Fallback**: If B_pol not provided, returns constant B_tor array [nCells]
+    /// **Fallback**: If B_pol not provided, returns constant B_tor array [cellCount]
     public static func totalMagneticField(
         toroidalField: Float,
         poloidalField: MLXArray?,
-        nCells: Int
+        cellCount: Int
     ) -> MLXArray {
         guard let B_pol = poloidalField else {
             // No poloidal field: use constant toroidal field array
-            let B_total = MLXArray.full([nCells], values: MLXArray(toroidalField))
+            let B_total = MLXArray.full([cellCount], values: MLXArray(toroidalField))
             eval(B_total)
             return B_total
         }
@@ -217,11 +217,11 @@ public struct PlasmaPhysics {
     /// ```
     ///
     /// **Parameters**:
-    /// - Te_eV: Electron temperature [nCells] in eV
-    /// - magneticField: Magnetic field B [nCells] in Tesla
+    /// - Te_eV: Electron temperature [cellCount] in eV
+    /// - magneticField: Magnetic field B [cellCount] in Tesla
     /// - ionMass: Ion mass in kg (default: deuterium = 2 × m_p)
     ///
-    /// **Returns**: Ion sound Larmor radius ρ_s [nCells] in meters
+    /// **Returns**: Ion sound Larmor radius ρ_s [cellCount] in meters
     ///
     /// **Typical values**: 1-5 mm for tokamaks
     public static func ionSoundLarmorRadius(

@@ -11,16 +11,16 @@ struct TempDensityChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {
         Chart {
             // Ion temperature
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("Ti", data.Ti[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("ionTemperature", data.ionTemperature[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#FF6B6B"))
                 .lineStyle(StrokeStyle(lineWidth: 2, dash: lineDash(for: config.plot.lineStyles[safe: 0])))
@@ -28,10 +28,10 @@ struct TempDensityChart: View {
             .accessibilityLabel("Ion Temperature")
 
             // Electron temperature
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("Te", data.Te[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("electronTemperature", data.electronTemperature[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 1] ?? "#4ECDC4"))
                 .lineStyle(StrokeStyle(lineWidth: 2, dash: lineDash(for: config.plot.lineStyles[safe: 1])))
@@ -39,10 +39,10 @@ struct TempDensityChart: View {
             .accessibilityLabel("Electron Temperature")
 
             // Electron density (scaled)
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("ne", data.ne[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("electronDensity", data.electronDensity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 2] ?? "#45B7D1"))
                 .lineStyle(StrokeStyle(lineWidth: 2, dash: lineDash(for: config.plot.lineStyles[safe: 2])))
@@ -67,26 +67,26 @@ struct CurrentDensityChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {
         Chart {
             // Total current
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("j_total", data.jTotal[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("j_total", data.totalCurrentDensity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#000000"))
             }
             .accessibilityLabel("Total Current")
 
             // Ohmic current
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("j_ohmic", data.jOhmic[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("j_ohmic", data.ohmicCurrentDensity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 1] ?? "#FF6B6B"))
                 .lineStyle(StrokeStyle(dash: [5, 5]))
@@ -94,10 +94,10 @@ struct CurrentDensityChart: View {
             .accessibilityLabel("Ohmic Current")
 
             // Bootstrap current
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("j_bootstrap", data.jBootstrap[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("j_bootstrap", data.bootstrapCurrentDensity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 2] ?? "#4ECDC4"))
                 .lineStyle(StrokeStyle(dash: [5, 5]))
@@ -105,10 +105,10 @@ struct CurrentDensityChart: View {
             .accessibilityLabel("Bootstrap Current")
 
             // ECRH current
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("j_ecrh", data.jECRH[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("j_ecrh", data.ecrhCurrentDensity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 3] ?? "#FFA07A"))
                 .lineStyle(StrokeStyle(dash: [2, 2]))
@@ -127,15 +127,15 @@ struct QProfileChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {
         Chart {
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("q", data.q[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("safetyFactor", data.safetyFactor[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#9B59B6"))
             }
@@ -152,15 +152,15 @@ struct PsiChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {
         Chart {
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("ψ", data.psi[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("ψ", data.poloidalFlux[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#E74C3C"))
             }
@@ -177,26 +177,26 @@ struct ChiChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {
         Chart {
             // Ion χ
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("χ_i", data.chiTotalIon[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("χ_i", data.totalIonHeatConductivity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#E74C3C"))
             }
             .accessibilityLabel("Ion Heat Diffusivity")
 
             // Electron χ
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("χ_e", data.chiTotalElectron[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("χ_e", data.totalElectronHeatConductivity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 1] ?? "#3498DB"))
             }
@@ -214,15 +214,15 @@ struct DiffusivityChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {
         Chart {
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("D", data.dFace[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("D", data.particleDiffusivity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#1ABC9C"))
             }
@@ -239,15 +239,15 @@ struct HeatSourcesChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {
         Chart {
             // Ohmic heating
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
+                    x: .value("ρ", normalizedRadius),
                     y: .value("Ohmic", data.ohmicHeatSource[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#E67E22"))
@@ -255,9 +255,9 @@ struct HeatSourcesChart: View {
             .accessibilityLabel("Ohmic Heating")
 
             // Fusion heating
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
+                    x: .value("ρ", normalizedRadius),
                     y: .value("Fusion", data.fusionHeatSource[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 1] ?? "#9B59B6"))
@@ -266,10 +266,10 @@ struct HeatSourcesChart: View {
             .accessibilityLabel("Fusion Heating")
 
             // ICRH ion heating
-            ForEach(Array(data.rho.enumerated()), id: \.offset) { index, rho in
+            ForEach(Array(data.normalizedRadius.enumerated()), id: \.offset) { index, normalizedRadius in
                 LineMark(
-                    x: .value("ρ", rho),
-                    y: .value("ICRH", data.pICRHIon[timeIndex][index])
+                    x: .value("ρ", normalizedRadius),
+                    y: .value("ICRH", data.icrhIonHeatingPowerDensity[timeIndex][index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 2] ?? "#1ABC9C"))
                 .lineStyle(StrokeStyle(dash: [2, 2]))
@@ -288,7 +288,7 @@ struct ParticleSourcesChart: View {
     let config: PlotConfiguration
 
     var timeIndex: Int {
-        config.plot.timeIndex < 0 ? data.nTime - 1 : min(config.plot.timeIndex, data.nTime - 1)
+        config.plot.timeIndex < 0 ? data.timeCount - 1 : min(config.plot.timeIndex, data.timeCount - 1)
     }
 
     var body: some View {

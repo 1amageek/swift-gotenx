@@ -12,7 +12,7 @@
 
 Implemented three critical fixes to prevent Newton-Raphson solver instability caused by aggressive timestep increases:
 
-1. **Timestep growth cap enforcement** - Limits dt increases to `maxTimestepGrowth` (default 1.2) per step
+1. **Timestep growth cap enforcement** - Limits dt increases to `maximumTimeStepGrowth` (default 1.2) per step
 2. **Linear solver error threshold** - Aborts iteration if `||J*Δ + R|| / ||R|| > 1e-3`
 3. **Descent direction validation** - Aborts iteration if `Δ·(-R) ≤ 0`
 
@@ -44,10 +44,10 @@ These changes address the Step 2 Newton failure where dt jumped 4.3× (1.5e-4 �
 ```
 SimulationOrchestrator.swift:428 で timeStepCalculator.compute(...) の結果を
 そのまま dt に入れ、前ステップの state.dt に対する増加率制限をかけていません。
-adaptiveConfig.maxTimestepGrowth が init で渡されているのに活用されていない状態です。
+adaptiveConfig.maximumTimeStepGrowth が init で渡されているのに活用されていない状態です。
 ```
 
-**Translation:** SimulationOrchestrator.swift:428 uses timeStepCalculator.compute() result directly without applying growth rate limit relative to previous state.dt. adaptiveConfig.maxTimestepGrowth is passed to init but not utilized.
+**Translation:** SimulationOrchestrator.swift:428 uses timeStepCalculator.compute() result directly without applying growth rate limit relative to previous state.dt. adaptiveConfig.maximumTimeStepGrowth is passed to init but not utilized.
 
 ---
 
@@ -79,12 +79,12 @@ let rawDt = timeStepCalculator.compute(
 )
 
 // ✅ CRITICAL: Enforce dt growth cap to prevent Newton solver instability
-// Limits dt increase to maxTimestepGrowth per step (default 1.2)
+// Limits dt increase to maximumTimeStepGrowth per step (default 1.2)
 // This prevents aggressive dt jumps that cause:
 // - Jacobian condition number explosion (κ > 1e6)
 // - Linear solver accuracy degradation (errors > 1e-2)
 // - Invalid Newton descent direction (Δ·(-R) < 0)
-let growthCap = adaptiveConfig.maxTimestepGrowth
+let growthCap = adaptiveConfig.maximumTimeStepGrowth
 let cappedDt = min(rawDt, state.dt * growthCap)
 
 if cappedDt < rawDt {
@@ -98,9 +98,9 @@ dt = cappedDt
 #### How It Works
 
 1. `timeStepCalculator.compute()` calculates optimal dt based on CFL condition
-2. Growth cap limits dt to `previousDt × maxTimestepGrowth`
+2. Growth cap limits dt to `previousDt × maximumTimeStepGrowth`
 3. If raw dt exceeds cap, it's clamped and a debug message is logged
-4. Default `maxTimestepGrowth = 1.2` allows 20% increase per step
+4. Default `maximumTimeStepGrowth = 1.2` allows 20% increase per step
 
 #### Expected Behavior
 
@@ -223,10 +223,10 @@ When Newton solver returns `converged=false` due to our early termination checks
 ### Verification Steps
 
 1. **Run simulation with same configuration that failed at Step 2:**
-   - nCells = 75
+   - cellCount = 75
    - tolerance = 2e-1 (or default 1e-6 with per-variable criteria)
    - dt = 1.5e-4
-   - maxTimestepGrowth = 1.2 (default)
+   - maximumTimeStepGrowth = 1.2 (default)
 
 2. **Check for dt growth cap activation:**
    ```
@@ -331,7 +331,7 @@ Newton converges
 
 ## Configuration Adjustments (Optional)
 
-### Recommended maxTimestepGrowth Values
+### Recommended maximumTimeStepGrowth Values
 
 - **Conservative (default):** 1.2 (20% growth per step)
 - **Moderate:** 1.5 (50% growth per step) - for well-behaved simulations
@@ -344,13 +344,13 @@ Newton converges
   "time": {
     "start": 0.0,
     "end": 2.0,
-    "initialDt": 1e-4,
+    "initialTimeStep": 1e-4,
     "adaptive": {
       "enabled": true,
       "safetyFactor": 0.9,
-      "minDt": 1e-7,
-      "maxDt": 1e-3,
-      "maxTimestepGrowth": 1.2  // ← This parameter is now enforced!
+      "minimumTimeStep": 1e-7,
+      "maximumTimeStep": 1e-3,
+      "maximumTimeStepGrowth": 1.2  // ← This parameter is now enforced!
     }
   }
 }
@@ -364,7 +364,7 @@ If simulations frequently fail with linear solver errors, consider:
    - Current: Uses MLX default (typically 1e-6)
    - Recommendation: Keep default, but reduce `linearErrorThreshold` if needed
 
-2. **Reduce maxTimestepGrowth** to 1.1 (10% growth):
+2. **Reduce maximumTimeStepGrowth** to 1.1 (10% growth):
    - Slower dt growth = better conditioned Jacobian
    - Trade-off: More steps to reach end time
 
@@ -403,7 +403,7 @@ If simulations frequently fail with linear solver errors, consider:
 ## Code Quality Improvements
 
 1. **Used existing configuration:**
-   - `maxTimestepGrowth` was already defined in `AdaptiveTimestepConfig`
+   - `maximumTimeStepGrowth` was already defined in `AdaptiveTimestepConfig`
    - Just needed to store and use it (no new API added)
 
 2. **Clear diagnostic messages:**

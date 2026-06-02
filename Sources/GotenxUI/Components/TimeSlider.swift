@@ -53,14 +53,14 @@ public struct TimeSlider: View {
                         get: { Double(timeIndex) },
                         set: { timeIndex = Int($0) }
                     ),
-                    in: 0...Double(max(data.nTime - 1, 0)),
+                    in: 0...Double(max(data.timeCount - 1, 0)),
                     step: 1
                 )
 
                 Button(action: nextStep) {
                     Image(systemName: "chevron.right")
                 }
-                .disabled(timeIndex >= data.nTime - 1)
+                .disabled(timeIndex >= data.timeCount - 1)
             }
 
             // Progress bar
@@ -103,19 +103,19 @@ public struct TimeSlider: View {
     }
 
     private var timeDetails: String {
-        guard data.nTime > 1 else { return "" }
-        let dt = timeIndex < data.nTime - 1 ? data.time[timeIndex + 1] - data.time[timeIndex] : 0
-        return String(format: "dt = %.2e s", dt)
+        guard data.timeCount > 1 else { return "" }
+        let timeStep = timeIndex < data.timeCount - 1 ? data.time[timeIndex + 1] - data.time[timeIndex] : 0
+        return String(format: "dt = %.2e s", timeStep)
     }
 
     private var currentTime: Float {
-        guard timeIndex < data.nTime else { return 0 }
+        guard timeIndex < data.timeCount else { return 0 }
         return data.time[timeIndex]
     }
 
     private func progressWidth(_ totalWidth: CGFloat) -> CGFloat {
-        guard data.nTime > 1 else { return 0 }
-        let progress = CGFloat(timeIndex) / CGFloat(data.nTime - 1)
+        guard data.timeCount > 1 else { return 0 }
+        let progress = CGFloat(timeIndex) / CGFloat(data.timeCount - 1)
         return totalWidth * progress
     }
 
@@ -128,7 +128,7 @@ public struct TimeSlider: View {
     }
 
     private func nextStep() {
-        if timeIndex < data.nTime - 1 {
+        if timeIndex < data.timeCount - 1 {
             timeIndex += 1
         }
     }
@@ -161,7 +161,7 @@ public struct TimeRangeSelector: View {
                 Spacer()
                 Button("Reset") {
                     startIndex = 0
-                    endIndex = data.nTime - 1
+                    endIndex = data.timeCount - 1
                 }
                 .font(.subheadline)
             }
@@ -182,7 +182,7 @@ public struct TimeRangeSelector: View {
                         get: { Double(startIndex) },
                         set: { startIndex = min(Int($0), endIndex) }
                     ),
-                    in: 0...Double(max(data.nTime - 1, 0)),
+                    in: 0...Double(max(data.timeCount - 1, 0)),
                     step: 1
                 )
             }
@@ -203,7 +203,7 @@ public struct TimeRangeSelector: View {
                         get: { Double(endIndex) },
                         set: { endIndex = max(Int($0), startIndex) }
                     ),
-                    in: 0...Double(max(data.nTime - 1, 0)),
+                    in: 0...Double(max(data.timeCount - 1, 0)),
                     step: 1
                 )
             }
@@ -266,7 +266,7 @@ public struct PlaybackControls: View {
             Button(action: stepForward) {
                 Image(systemName: "forward.frame.fill")
             }
-            .disabled(timeIndex >= data.nTime - 1)
+            .disabled(timeIndex >= data.timeCount - 1)
 
             Divider()
 
@@ -305,13 +305,13 @@ public struct PlaybackControls: View {
 
     private func togglePlayback() {
         isPlaying.toggle()
-        if isPlaying && timeIndex >= data.nTime - 1 {
+        if isPlaying && timeIndex >= data.timeCount - 1 {
             timeIndex = 0
         }
     }
 
     private func stepForward() {
-        if timeIndex < data.nTime - 1 {
+        if timeIndex < data.timeCount - 1 {
             timeIndex += 1
         }
     }
@@ -325,8 +325,8 @@ public struct PlaybackControls: View {
     private func advanceFrame() {
         let speedFactor = Int(max(1, playbackSpeed))
         timeIndex += speedFactor
-        if timeIndex >= data.nTime {
-            timeIndex = data.nTime - 1
+        if timeIndex >= data.timeCount {
+            timeIndex = data.timeCount - 1
             isPlaying = false
         }
     }
@@ -340,37 +340,37 @@ public struct PlaybackControls: View {
 
     // Static data declarations come after @Previewable
     let sampleData = PlotData(
-        rho: [0.0, 0.5, 1.0],
+        normalizedRadius: [0.0, 0.5, 1.0],
         time: [0.0, 0.5, 1.0, 1.5, 2.0],
-        Ti: Array(repeating: [1.0, 2.0, 3.0], count: 5),
-        Te: Array(repeating: [1.0, 2.0, 3.0], count: 5),
-        ne: Array(repeating: [1.0, 2.0, 3.0], count: 5),
-        q: Array(repeating: [1.0, 2.0, 3.0], count: 5),
+        ionTemperature: Array(repeating: [1.0, 2.0, 3.0], count: 5),
+        electronTemperature: Array(repeating: [1.0, 2.0, 3.0], count: 5),
+        electronDensity: Array(repeating: [1.0, 2.0, 3.0], count: 5),
+        safetyFactor: Array(repeating: [1.0, 2.0, 3.0], count: 5),
         magneticShear: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        psi: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        chiTotalIon: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        chiTotalElectron: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        chiTurbIon: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        chiTurbElectron: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        dFace: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        jTotal: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        jOhmic: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        jBootstrap: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        jECRH: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        poloidalFlux: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        totalIonHeatConductivity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        totalElectronHeatConductivity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        turbulentIonHeatConductivity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        turbulentElectronHeatConductivity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        particleDiffusivity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        totalCurrentDensity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        ohmicCurrentDensity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        bootstrapCurrentDensity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        ecrhCurrentDensity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
         ohmicHeatSource: Array(repeating: [0.0, 0.0, 0.0], count: 5),
         fusionHeatSource: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        pICRHIon: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        pICRHElectron: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        pECRHElectron: Array(repeating: [0.0, 0.0, 0.0], count: 5),
-        IpProfile: [0.0, 0.0, 0.0, 0.0, 0.0],
-        IBootstrap: [0.0, 0.0, 0.0, 0.0, 0.0],
-        IECRH: [0.0, 0.0, 0.0, 0.0, 0.0],
-        qFusion: [0.0, 0.0, 0.0, 0.0, 0.0],
-        pAuxiliary: [0.0, 0.0, 0.0, 0.0, 0.0],
-        pOhmicE: [0.0, 0.0, 0.0, 0.0, 0.0],
-        pAlphaTotal: [0.0, 0.0, 0.0, 0.0, 0.0],
-        pBremsstrahlung: [0.0, 0.0, 0.0, 0.0, 0.0],
-        pRadiation: [0.0, 0.0, 0.0, 0.0, 0.0]
+        icrhIonHeatingPowerDensity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        icrhElectronHeatingPowerDensity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        ecrhElectronHeatingPowerDensity: Array(repeating: [0.0, 0.0, 0.0], count: 5),
+        plasmaCurrent: [0.0, 0.0, 0.0, 0.0, 0.0],
+        bootstrapCurrent: [0.0, 0.0, 0.0, 0.0, 0.0],
+        ecrhCurrent: [0.0, 0.0, 0.0, 0.0, 0.0],
+        fusionGain: [0.0, 0.0, 0.0, 0.0, 0.0],
+        auxiliaryHeatingPower: [0.0, 0.0, 0.0, 0.0, 0.0],
+        ohmicElectronHeatingPower: [0.0, 0.0, 0.0, 0.0, 0.0],
+        totalAlphaPower: [0.0, 0.0, 0.0, 0.0, 0.0],
+        bremsstrahlungPower: [0.0, 0.0, 0.0, 0.0, 0.0],
+        radiationPower: [0.0, 0.0, 0.0, 0.0, 0.0]
     )
 
     TimeSlider(data: sampleData, timeIndex: $timeIndex)

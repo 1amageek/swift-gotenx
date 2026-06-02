@@ -16,19 +16,19 @@ import Foundation
 /// For an isolated system (no heating, no losses), energy is conserved:
 ///
 /// ```
-/// dE/dt = 0  →  E = const
+/// dE/timeStep = 0  →  E = const
 /// ```
 ///
 /// With sources/sinks, energy balance becomes:
 ///
 /// ```
-/// dE/dt = P_heating - P_losses
+/// dE/timeStep = P_heating - P_losses
 /// ```
 ///
 /// ## Use Cases
 ///
 /// 1. **Pure conservation test**: No sources/sinks → E should be constant
-/// 2. **Energy balance validation**: With sources, track dE/dt = P_in - P_out
+/// 2. **Energy balance validation**: With sources, track dE/timeStep = P_in - P_out
 ///
 /// This implementation handles **Case 1** (pure conservation). For Case 2, use
 /// diagnostics to monitor energy balance without enforcement.
@@ -112,10 +112,10 @@ public struct EnergyConservation: ConservationLaw {
         geometry: Geometry
     ) -> Float {
         // Extract profiles and geometry
-        let ne = profiles.electronDensity.value                                    // [nCells], m^-3
-        let Te = profiles.electronTemperature.value                                // [nCells], eV
-        let Ti = profiles.ionTemperature.value                                     // [nCells], eV
-        let volumes = GeometricFactors.from(geometry: geometry).cellVolumes.value  // [nCells], m^3
+        let ne = profiles.electronDensity.value                                    // [cellCount], m^-3
+        let Te = profiles.electronTemperature.value                                // [cellCount], eV
+        let Ti = profiles.ionTemperature.value                                     // [cellCount], eV
+        let volumes = GeometricFactors.from(geometry: geometry).cellVolumes.value  // [cellCount], m^3
 
         // Constants (SI units)
         let eV_to_J: Float = 1.602176634e-19        // 1 eV in joules
@@ -220,7 +220,7 @@ extension EnergyConservation {
     /// For simulations with heating/losses, track energy rate of change:
     ///
     /// ```
-    /// dE/dt ≈ (E - E_prev) / dt
+    /// dE/timeStep ≈ (E - E_prev) / timeStep
     /// ```
     ///
     /// Compare with expected: P_heating - P_losses
@@ -228,14 +228,14 @@ extension EnergyConservation {
     /// - Parameters:
     ///   - current: Current total energy
     ///   - previous: Previous total energy
-    ///   - dt: Timestep
+    ///   - timeStep: Timestep
     /// - Returns: Energy rate of change [W]
     public func computeEnergyRate(
         current: Float,
         previous: Float,
-        dt: Float
+        timeStep: Float
     ) -> Float {
-        guard dt > 0 else { return 0.0 }
-        return (current - previous) / dt  // [J/s] = [W]
+        guard timeStep > 0 else { return 0.0 }
+        return (current - previous) / timeStep  // [J/s] = [W]
     }
 }

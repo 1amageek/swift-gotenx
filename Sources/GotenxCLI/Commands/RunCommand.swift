@@ -47,7 +47,7 @@ struct RunCommand: AsyncParsableCommand {
 
     @Flag(
         name: .long,
-        help: "Log simulation progress (time, dt, iterations) to stdout"
+        help: "Log simulation progress (time, timeStep, iterations) to stdout"
     )
     var logProgress: Bool = false
 
@@ -121,9 +121,9 @@ struct RunCommand: AsyncParsableCommand {
 
     @Option(
         name: .long,
-        help: "Override mesh number of cells"
+        help: "Override mesh cell count"
     )
-    var meshNcells: Int?
+    var meshCellCount: Int?
 
     @Option(
         name: .long,
@@ -147,7 +147,7 @@ struct RunCommand: AsyncParsableCommand {
         name: .long,
         help: "Override initial timestep (s)"
     )
-    var initialDt: Double?
+    var initialTimeStep: Double?
 
     // MARK: - Execution
 
@@ -181,10 +181,10 @@ struct RunCommand: AsyncParsableCommand {
         print("\n📋 Loading configuration...")
         let simulationConfig = try await loadConfiguration(from: resolvedConfigPath)
         print("✓ Configuration loaded and validated")
-        print("  Mesh cells: \(simulationConfig.runtime.static.mesh.nCells)")
+        print("  Mesh cells: \(simulationConfig.runtime.static.mesh.cellCount)")
         print("  Major radius: \(simulationConfig.runtime.static.mesh.majorRadius) m")
         print("  Time range: [\(simulationConfig.time.start), \(simulationConfig.time.end)] s")
-        print("  Initial dt: \(simulationConfig.time.initialDt) s")
+        print("  Initial timeStep: \(simulationConfig.time.initialTimeStep) s")
 
         // Create output directory (after config loaded)
         try createOutputDirectory(config: simulationConfig)
@@ -257,8 +257,8 @@ struct RunCommand: AsyncParsableCommand {
         // Build CLI overrides map (only include explicitly specified values)
         var cliOverrides: [String: String] = [:]
 
-        if let value = meshNcells {
-            cliOverrides["runtime.static.mesh.nCells"] = String(value)
+        if let value = meshCellCount {
+            cliOverrides["runtime.static.mesh.cellCount"] = String(value)
         }
         if let value = meshMajorRadius {
             cliOverrides["runtime.static.mesh.majorRadius"] = String(value)
@@ -269,8 +269,8 @@ struct RunCommand: AsyncParsableCommand {
         if let value = timeEnd {
             cliOverrides["time.end"] = String(value)
         }
-        if let value = initialDt {
-            cliOverrides["time.initialDt"] = String(value)
+        if let value = initialTimeStep {
+            cliOverrides["time.initialTimeStep"] = String(value)
         }
         if let value = outputDir {
             cliOverrides["output.directory"] = value
@@ -421,7 +421,7 @@ struct RunCommand: AsyncParsableCommand {
         return { fraction, progress in
             // Simple progress logging - could be enhanced with ETA, etc.
             let percentage = Int(fraction * 100)
-            print("  Progress: \(percentage)% | Time: \(String(format: "%.6f", progress.currentTime))s | dt: \(String(format: "%.8f", progress.lastDt))s")
+            print("  Progress: \(percentage)% | Time: \(String(format: "%.6f", progress.currentTime))s | timeStep: \(String(format: "%.8f", progress.lastTimeStep))s")
         }
     }
 

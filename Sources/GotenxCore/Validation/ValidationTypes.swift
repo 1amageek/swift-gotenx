@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Validation Types
 
 /// Geometry parameters for tokamak configuration
-public struct GeometryParams: Sendable, Codable {
+public struct GeometryParameters: Sendable, Codable {
     /// Major radius [m]
     public let majorRadius: Float
 
@@ -42,25 +42,31 @@ public struct GeometryParams: Sendable, Codable {
 /// Reference profiles at a specific time point
 public struct ReferenceProfiles: Sendable, Codable {
     /// Normalized toroidal flux coordinate [dimensionless]
-    public let rho: [Float]
+    public let normalizedRadius: [Float]
 
     /// Ion temperature [eV]
-    public let Ti: [Float]
+    public let ionTemperature: [Float]
 
     /// Electron temperature [eV]
-    public let Te: [Float]
+    public let electronTemperature: [Float]
 
     /// Electron density [m⁻³]
-    public let ne: [Float]
+    public let electronDensity: [Float]
 
     /// Time point [s]
     public let time: Float
 
-    public init(rho: [Float], Ti: [Float], Te: [Float], ne: [Float], time: Float) {
-        self.rho = rho
-        self.Ti = Ti
-        self.Te = Te
-        self.ne = ne
+    public init(
+        normalizedRadius: [Float],
+        ionTemperature: [Float],
+        electronTemperature: [Float],
+        electronDensity: [Float],
+        time: Float
+    ) {
+        self.normalizedRadius = normalizedRadius
+        self.ionTemperature = ionTemperature
+        self.electronTemperature = electronTemperature
+        self.electronDensity = electronDensity
         self.time = time
     }
 }
@@ -68,26 +74,26 @@ public struct ReferenceProfiles: Sendable, Codable {
 /// Global quantities (volume-integrated)
 public struct GlobalQuantities: Sendable, Codable {
     /// Fusion power [MW]
-    public let P_fusion: Float
+    public let fusionPower: Float
 
     /// Alpha power [MW]
-    public let P_alpha: Float
+    public let alphaPower: Float
 
     /// Energy confinement time [s]
-    public let tau_E: Float
+    public let energyConfinementTime: Float
 
     /// Normalized beta
-    public let beta_N: Float
+    public let normalizedBeta: Float
 
-    /// Fusion gain Q = P_fusion / P_input
-    public let Q_fusion: Float
+    /// Fusion gain Q = fusionPower / P_input
+    public let fusionGain: Float
 
-    public init(P_fusion: Float, P_alpha: Float, tau_E: Float, beta_N: Float, Q_fusion: Float) {
-        self.P_fusion = P_fusion
-        self.P_alpha = P_alpha
-        self.tau_E = tau_E
-        self.beta_N = beta_N
-        self.Q_fusion = Q_fusion
+    public init(fusionPower: Float, alphaPower: Float, energyConfinementTime: Float, normalizedBeta: Float, fusionGain: Float) {
+        self.fusionPower = fusionPower
+        self.alphaPower = alphaPower
+        self.energyConfinementTime = energyConfinementTime
+        self.normalizedBeta = normalizedBeta
+        self.fusionGain = fusionGain
     }
 }
 
@@ -131,35 +137,35 @@ public struct ComparisonResult: Sendable {
 /// Validation thresholds for comparison metrics
 public struct ValidationThresholds: Sendable {
     /// Maximum acceptable L2 relative error
-    public let maxL2Error: Float
+    public let maximumL2Error: Float
 
     /// Maximum acceptable MAPE (%)
-    public let maxMAPE: Float
+    public let maximumMAPE: Float
 
     /// Minimum acceptable Pearson correlation
-    public let minCorrelation: Float
+    public let minimumCorrelation: Float
 
     public init(
-        maxL2Error: Float = 0.1,      // 10%
-        maxMAPE: Float = 20.0,         // 20%
-        minCorrelation: Float = 0.95   // r > 0.95
+        maximumL2Error: Float = 0.1,      // 10%
+        maximumMAPE: Float = 20.0,         // 20%
+        minimumCorrelation: Float = 0.95   // r > 0.95
     ) {
-        self.maxL2Error = maxL2Error
-        self.maxMAPE = maxMAPE
-        self.minCorrelation = minCorrelation
+        self.maximumL2Error = maximumL2Error
+        self.maximumMAPE = maximumMAPE
+        self.minimumCorrelation = minimumCorrelation
     }
 
     /// Standard thresholds for TORAX comparison
     public static let torax = ValidationThresholds(
-        maxL2Error: 0.1,
-        maxMAPE: 15.0,
-        minCorrelation: 0.95
+        maximumL2Error: 0.1,
+        maximumMAPE: 15.0,
+        minimumCorrelation: 0.95
     )
 
     /// Relaxed thresholds for experimental data
     public static let experimental = ValidationThresholds(
-        maxL2Error: 0.2,
-        maxMAPE: 25.0,
-        minCorrelation: 0.90
+        maximumL2Error: 0.2,
+        maximumMAPE: 25.0,
+        minimumCorrelation: 0.90
     )
 }

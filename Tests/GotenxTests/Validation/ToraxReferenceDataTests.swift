@@ -19,34 +19,34 @@ struct ToraxReferenceDataTests {
         removeTestItemIfExists(atPath: filePath)
 
         // Create mock TORAX file
-        let (nTime, nRho) = try createMockToraxFile(path: filePath)
+        let (timeCount, nRho) = try createMockToraxFile(path: filePath)
 
         // Load data using the extension method
-        let data = try ToraxReferenceData.loadFromNetCDF(path: filePath)
+        let data = try TORAXReferenceData.loadFromNetCDF(path: filePath)
 
         // Verify dimensions
-        #expect(data.time.count == nTime, "Should have \(nTime) time points")
-        #expect(data.rho.count == nRho, "Should have \(nRho) rho points")
+        #expect(data.time.count == timeCount, "Should have \(timeCount) time points")
+        #expect(data.normalizedRadius.count == nRho, "Should have \(nRho) rho points")
 
         // Verify profiles
-        #expect(data.Ti.count == nTime, "Ti should have \(nTime) time points")
-        #expect(data.Ti[0].count == nRho, "Ti[0] should have \(nRho) rho points")
-        #expect(data.Te.count == nTime, "Te should have \(nTime) time points")
-        #expect(data.Te[0].count == nRho, "Te[0] should have \(nRho) rho points")
-        #expect(data.ne.count == nTime, "ne should have \(nTime) time points")
-        #expect(data.ne[0].count == nRho, "ne[0] should have \(nRho) rho points")
+        #expect(data.ionTemperature.count == timeCount, "Ti should have \(timeCount) time points")
+        #expect(data.ionTemperature[0].count == nRho, "Ti[0] should have \(nRho) rho points")
+        #expect(data.electronTemperature.count == timeCount, "Te should have \(timeCount) time points")
+        #expect(data.electronTemperature[0].count == nRho, "Te[0] should have \(nRho) rho points")
+        #expect(data.electronDensity.count == timeCount, "ne should have \(timeCount) time points")
+        #expect(data.electronDensity[0].count == nRho, "ne[0] should have \(nRho) rho points")
 
         // Verify data ranges (realistic plasma values)
-        #expect(data.Ti[0][0] > 0, "Ti should be positive")
-        #expect(data.Ti[0][0] < 100000, "Ti should be reasonable (< 100 keV)")
-        #expect(data.Te[0][0] > 0, "Te should be positive")
-        #expect(data.ne[0][0] > 0, "ne should be positive")
-        #expect(data.ne[0][0] < 1e21, "ne should be reasonable (< 10²¹ m⁻³)")
+        #expect(data.ionTemperature[0][0] > 0, "Ti should be positive")
+        #expect(data.ionTemperature[0][0] < 100000, "Ti should be reasonable (< 100 keV)")
+        #expect(data.electronTemperature[0][0] > 0, "Te should be positive")
+        #expect(data.electronDensity[0][0] > 0, "ne should be positive")
+        #expect(data.electronDensity[0][0] < 1e21, "ne should be reasonable (< 10²¹ m⁻³)")
 
         // Verify psi is optional
-        #expect(data.psi != nil, "psi should be present in mock file")
-        if let psi = data.psi {
-            #expect(psi.count == nTime, "psi should have \(nTime) time points")
+        #expect(data.poloidalFlux != nil, "psi should be present in mock file")
+        if let psi = data.poloidalFlux {
+            #expect(psi.count == timeCount, "psi should have \(timeCount) time points")
             #expect(psi[0].count == nRho, "psi[0] should have \(nRho) rho points")
         }
 
@@ -55,10 +55,10 @@ struct ToraxReferenceDataTests {
 
         print("✅ Successfully loaded mock TORAX data:")
         print("   Time points: \(data.time.count)")
-        print("   Grid size: \(data.rho.count)")
-        print("   Ti range: \(data.Ti.flatMap { $0 }.min()!) - \(data.Ti.flatMap { $0 }.max()!) eV")
-        print("   Te range: \(data.Te.flatMap { $0 }.min()!) - \(data.Te.flatMap { $0 }.max()!) eV")
-        print("   ne range: \(data.ne.flatMap { $0 }.min()!) - \(data.ne.flatMap { $0 }.max()!) m⁻³")
+        print("   Grid size: \(data.normalizedRadius.count)")
+        print("   Ti range: \(data.ionTemperature.flatMap { $0 }.min()!) - \(data.ionTemperature.flatMap { $0 }.max()!) eV")
+        print("   Te range: \(data.electronTemperature.flatMap { $0 }.min()!) - \(data.electronTemperature.flatMap { $0 }.max()!) eV")
+        print("   ne range: \(data.electronDensity.flatMap { $0 }.min()!) - \(data.electronDensity.flatMap { $0 }.max()!) m⁻³")
     }
 
     @Test("Load TORAX file without poloidal flux")
@@ -73,10 +73,10 @@ struct ToraxReferenceDataTests {
         try createMockToraxFile(path: filePath, includePsi: false)
 
         // Load data
-        let data = try ToraxReferenceData.loadFromNetCDF(path: filePath)
+        let data = try TORAXReferenceData.loadFromNetCDF(path: filePath)
 
         // Verify psi is nil
-        #expect(data.psi == nil, "psi should be nil when not present in file")
+        #expect(data.poloidalFlux == nil, "psi should be nil when not present in file")
 
         // Clean up
         removeTestItemIfExists(atPath: filePath)
@@ -86,8 +86,8 @@ struct ToraxReferenceDataTests {
 
     @Test("Error: File not found")
     func testFileNotFound() throws {
-        #expect(throws: ToraxDataError.self) {
-            try ToraxReferenceData.loadFromNetCDF(path: "/nonexistent/path.nc")
+        #expect(throws: TORAXDataError.self) {
+            try TORAXReferenceData.loadFromNetCDF(path: "/nonexistent/path.nc")
         }
     }
 
@@ -102,8 +102,8 @@ struct ToraxReferenceDataTests {
 
         try createMockToraxFile(path: filePath, nRho: 5)
 
-        #expect(throws: ToraxDataError.self) {
-            try ToraxReferenceData.loadFromNetCDF(path: filePath)
+        #expect(throws: TORAXDataError.self) {
+            try TORAXReferenceData.loadFromNetCDF(path: filePath)
         }
 
         // Clean up
@@ -113,12 +113,12 @@ struct ToraxReferenceDataTests {
     @Test("Time utilities: findTimeIndex")
     func testFindTimeIndex() throws {
         // Create simple mock data
-        let toraxData = ToraxReferenceData(
+        let toraxData = TORAXReferenceData(
             time: [0.0, 0.5, 1.0, 1.5, 2.0],
-            rho: [0.0, 0.5, 1.0],
-            Ti: Array(repeating: Array(repeating: Float(1000.0), count: 3), count: 5),
-            Te: Array(repeating: Array(repeating: Float(1000.0), count: 3), count: 5),
-            ne: Array(repeating: Array(repeating: Float(1e20), count: 3), count: 5)
+            normalizedRadius: [0.0, 0.5, 1.0],
+            ionTemperature: Array(repeating: Array(repeating: Float(1000.0), count: 3), count: 5),
+            electronTemperature: Array(repeating: Array(repeating: Float(1000.0), count: 3), count: 5),
+            electronDensity: Array(repeating: Array(repeating: Float(1e20), count: 3), count: 5)
         )
 
         // Test exact match
@@ -133,37 +133,37 @@ struct ToraxReferenceDataTests {
         #expect(toraxData.findTimeIndex(closestTo: 10.0) == 4)  // After end
     }
 
-    @Test("Time utilities: getProfiles")
+    @Test("Time utilities: profiles")
     func testGetProfiles() throws {
         // Create mock data with varying profiles
         let time: [Float] = [0.0, 1.0, 2.0]
-        let rho: [Float] = [0.0, 0.5, 1.0]
+        let normalizedRadius: [Float] = [0.0, 0.5, 1.0]
 
-        let Ti: [[Float]] = [
+        let ionTemperature: [[Float]] = [
             [15000.0, 10000.0, 100.0],  // t=0
             [16000.0, 11000.0, 110.0],  // t=1
             [17000.0, 12000.0, 120.0]   // t=2
         ]
 
-        let toraxData = ToraxReferenceData(
+        let toraxData = TORAXReferenceData(
             time: time,
-            rho: rho,
-            Ti: Ti,
-            Te: Ti,  // Same as Ti for simplicity
-            ne: Array(repeating: Array(repeating: Float(1e20), count: 3), count: 3)
+            normalizedRadius: normalizedRadius,
+            ionTemperature: ionTemperature,
+            electronTemperature: ionTemperature,  // Same as Ti for simplicity
+            electronDensity: Array(repeating: Array(repeating: Float(1e20), count: 3), count: 3)
         )
 
-        // Test getProfiles(at:)
-        let profiles_t1 = toraxData.getProfiles(at: 1)
+        // Test profiles(at:)
+        let profiles_t1 = toraxData.profiles(at: 1)
         #expect(profiles_t1.time == 1.0)
-        #expect(profiles_t1.Ti[0] == 16000.0)
-        #expect(profiles_t1.Ti[1] == 11000.0)
+        #expect(profiles_t1.ionTemperature[0] == 16000.0)
+        #expect(profiles_t1.ionTemperature[1] == 11000.0)
 
-        // Test getProfiles(closestTo:)
-        let profiles_near_1_5 = toraxData.getProfiles(closestTo: 1.5)
+        // Test profiles(closestTo:)
+        let profiles_near_1_5 = toraxData.profiles(closestTo: 1.5)
         // 1.5 is equidistant from 1.0 and 2.0, but findTimeIndex returns first match (index 1)
         #expect(profiles_near_1_5.time == 1.0)  // Returns first equidistant point
-        #expect(profiles_near_1_5.Ti[0] == 16000.0)
+        #expect(profiles_near_1_5.ionTemperature[0] == 16000.0)
     }
 
     // MARK: - Helper: Create Mock TORAX File
@@ -172,14 +172,14 @@ struct ToraxReferenceDataTests {
     ///
     /// - Parameters:
     ///   - path: File path
-    ///   - nTime: Number of time points (default: 50)
+    ///   - timeCount: Number of time points (default: 50)
     ///   - nRho: Number of radial points (default: 50)
     ///   - includePsi: Include poloidal flux variable (default: true)
-    /// - Returns: Tuple of (nTime, nRho)
+    /// - Returns: Tuple of (timeCount, nRho)
     @discardableResult
     private func createMockToraxFile(
         path: String,
-        nTime: Int = 50,
+        timeCount: Int = 50,
         nRho: Int = 50,
         includePsi: Bool = true
     ) throws -> (Int, Int) {
@@ -187,7 +187,7 @@ struct ToraxReferenceDataTests {
         let file = try NetCDF.create(path: path, overwriteExisting: true, useNetCDF4: true)
 
         // Define dimensions
-        let timeDim = try file.createDimension(name: "time", length: nTime)
+        let timeDim = try file.createDimension(name: "time", length: timeCount)
         let rhoDim = try file.createDimension(name: "rho_tor_norm", length: nRho)
 
         // Create coordinate variables
@@ -200,7 +200,7 @@ struct ToraxReferenceDataTests {
         try rhoVar.setAttribute("units", "1")
 
         // Write coordinate data
-        let timeData: [Float] = (0..<nTime).map { Float($0) * 2.0 / Float(nTime - 1) }  // 0 to 2 seconds
+        let timeData: [Float] = (0..<timeCount).map { Float($0) * 2.0 / Float(timeCount - 1) }  // 0 to 2 seconds
         let rhoData: [Float] = (0..<nRho).map { Float($0) / Float(nRho - 1) }  // 0 to 1
 
         try timeVar.write(timeData)
@@ -224,11 +224,11 @@ struct ToraxReferenceDataTests {
             try variable.setAttribute("units", varSpec.units)
 
             // Generate realistic profile data
-            let data: [Float] = (0..<(nTime * nRho)).map { i in
+            let data: [Float] = (0..<(timeCount * nRho)).map { i in
                 let timeIdx = i / nRho
                 let rhoIdx = i % nRho
                 let rho = Float(rhoIdx) / Float(nRho - 1)
-                let time = Float(timeIdx) / Float(nTime - 1)
+                let time = Float(timeIdx) / Float(timeCount - 1)
 
                 switch varSpec.name {
                 case "ion_temperature", "electron_temperature":
@@ -247,7 +247,7 @@ struct ToraxReferenceDataTests {
                 }
             }
 
-            try variable.write(data, offset: [0, 0], count: [nTime, nRho])
+            try variable.write(data, offset: [0, 0], count: [timeCount, nRho])
         }
 
         // Optionally create poloidal flux variable
@@ -261,18 +261,18 @@ struct ToraxReferenceDataTests {
             try psiVar.setAttribute("long_name", "poloidal flux")
             try psiVar.setAttribute("units", "Wb")
 
-            let psiData: [Float] = (0..<(nTime * nRho)).map { i in
+            let psiData: [Float] = (0..<(timeCount * nRho)).map { i in
                 let rhoIdx = i % nRho
                 let rho = Float(rhoIdx) / Float(nRho - 1)
                 let psi0: Float = 10.0  // Wb
                 return psi0 * rho * rho
             }
 
-            try psiVar.write(psiData, offset: [0, 0], count: [nTime, nRho])
+            try psiVar.write(psiData, offset: [0, 0], count: [timeCount, nRho])
         }
 
         file.sync()
 
-        return (nTime, nRho)
+        return (timeCount, nRho)
     }
 }

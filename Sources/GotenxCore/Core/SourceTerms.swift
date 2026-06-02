@@ -5,7 +5,6 @@ import MLX
 
 /// Source and sink terms for plasma equations
 ///
-/// Phase 4a: Added optional metadata field for power balance tracking.
 /// Metadata enables accurate separation of fusion, auxiliary, ohmic, and
 /// radiation contributions without fixed-ratio estimation.
 public struct SourceTerms: Sendable, Equatable {
@@ -21,10 +20,10 @@ public struct SourceTerms: Sendable, Equatable {
     /// Current source [MA/m^2]
     public let currentSource: EvaluatedArray
 
-    /// Phase 4a: Source metadata for power balance (optional)
+    /// Source metadata for power balance
     ///
-    /// When present, enables accurate power categorization.
-    /// When nil, falls back to Phase 3 fixed-ratio estimation.
+    /// Diagnostic paths must provide metadata. Solver-only paths may omit it because
+    /// metadata integration performs host-side scalar reads and is not differentiable.
     public let metadata: SourceMetadataCollection?
 
     public init(
@@ -42,13 +41,13 @@ public struct SourceTerms: Sendable, Equatable {
         // ═══════════════════════════════════════════════════════════════
 
         // Validate array shapes
-        let nCells = ionHeating.shape[0]
-        precondition(electronHeating.shape[0] == nCells,
-                    "SourceTerms: electron heating shape mismatch (expected \(nCells), got \(electronHeating.shape[0]))")
-        precondition(particleSource.shape[0] == nCells,
-                    "SourceTerms: particle source shape mismatch (expected \(nCells), got \(particleSource.shape[0]))")
-        precondition(currentSource.shape[0] == nCells,
-                    "SourceTerms: current source shape mismatch (expected \(nCells), got \(currentSource.shape[0]))")
+        let cellCount = ionHeating.shape[0]
+        precondition(electronHeating.shape[0] == cellCount,
+                    "SourceTerms: electron heating shape mismatch (expected \(cellCount), got \(electronHeating.shape[0]))")
+        precondition(particleSource.shape[0] == cellCount,
+                    "SourceTerms: particle source shape mismatch (expected \(cellCount), got \(particleSource.shape[0]))")
+        precondition(currentSource.shape[0] == cellCount,
+                    "SourceTerms: current source shape mismatch (expected \(cellCount), got \(currentSource.shape[0]))")
 
         // Validate heating units (should be MW/m³, NOT eV/(m³·s)).
         // This guard is a unit-conversion sentinel, not a physics limiter:
@@ -130,17 +129,29 @@ public struct SourceTerms: Sendable, Equatable {
 
     /// Zero source terms
     public static func zero(
-        nCells: Int,
+        cellCount: Int,
         metadata: SourceMetadataCollection? = SourceMetadataCollection.empty,
         validateDebugUnits: Bool = true
     ) -> SourceTerms {
         SourceTerms(
-            ionHeating: .zeros([nCells]),
-            electronHeating: .zeros([nCells]),
-            particleSource: .zeros([nCells]),
-            currentSource: .zeros([nCells]),
+            ionHeating: .zeros([cellCount]),
+            electronHeating: .zeros([cellCount]),
+            particleSource: .zeros([cellCount]),
+            currentSource: .zeros([cellCount]),
             metadata: metadata,
             validateDebugUnits: validateDebugUnits
+        )
+    }
+
+    public static func invalidNumerics(cellCount: Int) -> SourceTerms {
+        let invalid = EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float.nan)))
+        return SourceTerms(
+            ionHeating: invalid,
+            electronHeating: invalid,
+            particleSource: invalid,
+            currentSource: invalid,
+            metadata: nil,
+            validateDebugUnits: false
         )
     }
 
@@ -151,10 +162,10 @@ public struct SourceTerms: Sendable, Equatable {
         lhs.adding(rhs)
     }
 
-    public func adding(_ rhs: SourceTerms, validateDebugUnits: Bool = true) -> SourceTerms {
+    public func adding(_ other: SourceTerms, validateDebugUnits: Bool = true) -> SourceTerms {
         // Merge metadata collections
         let mergedMetadata: SourceMetadataCollection?
-        switch (metadata, rhs.metadata) {
+        switch (metadata, other.metadata) {
         case (let lm?, let rm?):
             mergedMetadata = SourceMetadataCollection(entries: lm.entries + rm.entries)
         case (let lm?, nil):
@@ -166,12 +177,38 @@ public struct SourceTerms: Sendable, Equatable {
         }
 
         return SourceTerms(
-            ionHeating: EvaluatedArray(evaluating: ionHeating.value + rhs.ionHeating.value),
-            electronHeating: EvaluatedArray(evaluating: electronHeating.value + rhs.electronHeating.value),
-            particleSource: EvaluatedArray(evaluating: particleSource.value + rhs.particleSource.value),
-            currentSource: EvaluatedArray(evaluating: currentSource.value + rhs.currentSource.value),
+            ionHeating: EvaluatedArray(evaluating: ionHeating.value + other.ionHeating.value),
+            electronHeating: EvaluatedArray(evaluating: electronHeating.value + other.electronHeating.value),
+            particleSource: EvaluatedArray(evaluating: particleSource.value + other.particleSource.value),
+            currentSource: EvaluatedArray(evaluating: currentSource.value + other.currentSource.value),
             metadata: mergedMetadata,
             validateDebugUnits: validateDebugUnits
         )
+    }
+}
+
+extension SourceTerms {
+    public func validateNumerics(
+        expectedCellCount: Int,
+        requiresMetadata: Bool = false
+    ) throws {
+        try NumericalValidation.validateShape(ionHeating.value, field: "ionHeating", expected: [expectedCellCount])
+        try NumericalValidation.validateShape(electronHeating.value, field: "electronHeating", expected: [expectedCellCount])
+        try NumericalValidation.validateShape(particleSource.value, field: "particleSource", expected: [expectedCellCount])
+        try NumericalValidation.validateShape(currentSource.value, field: "currentSource", expected: [expectedCellCount])
+
+        try NumericalValidation.validateFinite(ionHeating.value, field: "ionHeating")
+        try NumericalValidation.validateFinite(electronHeating.value, field: "electronHeating")
+        try NumericalValidation.validateFinite(particleSource.value, field: "particleSource")
+        try NumericalValidation.validateFinite(currentSource.value, field: "currentSource")
+
+        guard let metadata else {
+            if requiresMetadata {
+                throw NumericalValidationError.missingMetadata(field: "SourceTerms.metadata")
+            }
+            return
+        }
+
+        try metadata.validatePowerAccounting()
     }
 }

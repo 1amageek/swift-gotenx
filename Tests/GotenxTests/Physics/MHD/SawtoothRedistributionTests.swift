@@ -18,9 +18,9 @@ struct SawtoothRedistributionTests {
             mixingRadiusMultiplier: 1.5
         )
 
-        let nCells = 50
-        let geometry = createTestGeometry(nCells: nCells)
-        let profiles = createPeakedProfiles(nCells: nCells, geometry: geometry)
+        let cellCount = 50
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let profiles = createPeakedProfiles(cellCount: cellCount, geometry: geometry)
         let rhoQ1: Float = 0.4  // q=1 surface at 40% of minor radius
 
         // Compute total particles before crash
@@ -52,9 +52,9 @@ struct SawtoothRedistributionTests {
             mixingRadiusMultiplier: 1.5
         )
 
-        let nCells = 50
-        let geometry = createTestGeometry(nCells: nCells)
-        let profiles = createPeakedProfiles(nCells: nCells, geometry: geometry)
+        let cellCount = 50
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let profiles = createPeakedProfiles(cellCount: cellCount, geometry: geometry)
         let rhoQ1: Float = 0.4
 
         // Compute total ion thermal energy before crash
@@ -87,9 +87,9 @@ struct SawtoothRedistributionTests {
             mixingRadiusMultiplier: 1.5
         )
 
-        let nCells = 50
-        let geometry = createTestGeometry(nCells: nCells)
-        let profiles = createPeakedProfiles(nCells: nCells, geometry: geometry)
+        let cellCount = 50
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let profiles = createPeakedProfiles(cellCount: cellCount, geometry: geometry)
         let rhoQ1: Float = 0.4
 
         // Compute total electron thermal energy before crash
@@ -122,9 +122,9 @@ struct SawtoothRedistributionTests {
             mixingRadiusMultiplier: 1.5
         )
 
-        let nCells = 50
-        let geometry = createTestGeometry(nCells: nCells)
-        let profiles = createPeakedProfiles(nCells: nCells, geometry: geometry)
+        let cellCount = 50
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let profiles = createPeakedProfiles(cellCount: cellCount, geometry: geometry)
         let rhoQ1: Float = 0.4
 
         // Apply redistribution
@@ -153,9 +153,9 @@ struct SawtoothRedistributionTests {
             mixingRadiusMultiplier: 1.5
         )
 
-        let nCells = 50
-        let geometry = createTestGeometry(nCells: nCells)
-        let profiles = createPeakedProfiles(nCells: nCells, geometry: geometry)
+        let cellCount = 50
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let profiles = createPeakedProfiles(cellCount: cellCount, geometry: geometry)
         let rhoQ1: Float = 0.3  // Small q=1 surface
 
         // Apply redistribution
@@ -173,7 +173,7 @@ struct SawtoothRedistributionTests {
         let Ti_after = redistributed.ionTemperature.value.asArray(Float.self)
 
         // Find index beyond mixing radius
-        var outerIndex = nCells - 1
+        var outerIndex = cellCount - 1
         for (i, rho) in rhoNorm.enumerated() {
             if rho > rhoMix {
                 outerIndex = i
@@ -182,8 +182,8 @@ struct SawtoothRedistributionTests {
         }
 
         // Check that far outer region is unchanged (allowing small numerical errors)
-        if outerIndex < nCells - 1 {
-            let outerDifference = abs(Ti_after[nCells - 1] - Ti_before[nCells - 1])
+        if outerIndex < cellCount - 1 {
+            let outerDifference = abs(Ti_after[cellCount - 1] - Ti_before[cellCount - 1])
             #expect(outerDifference < 1.0, "Outer region temperature should be nearly unchanged")
         }
     }
@@ -191,12 +191,12 @@ struct SawtoothRedistributionTests {
     // MARK: - Helper Functions
 
     /// Create simple circular geometry for testing
-    private func createTestGeometry(nCells: Int) -> Geometry {
+    private func createTestGeometry(cellCount: Int) -> Geometry {
         let majorRadius: Float = 6.2  // ITER-like
         let minorRadius: Float = 2.0
 
         // Simple radial grid
-        let radii = MLXArray.linspace(Float(0.0), minorRadius, count: nCells)
+        let radii = MLXArray.linspace(Float(0.0), minorRadius, count: cellCount)
 
         // Simple volume: V(r) ∝ r² for circular cross-section
         let pi: Float = .pi
@@ -207,20 +207,20 @@ struct SawtoothRedistributionTests {
         let safetyFactor = Float(1.0) + Float(2.5) * rhoNorm * rhoNorm
 
         // Geometry coefficients (simplified)
-        let g0 = MLXArray.ones([nCells])
-        let g1 = MLXArray.ones([nCells])
-        let g2 = radii
-        let g3 = radii * radii
+        let fluxSurfaceMetric = MLXArray.ones([cellCount])
+        let majorRadiusMetric = MLXArray.ones([cellCount])
+        let shapeMetric = radii
+        let minorRadiusMetric = radii * radii
 
         return Geometry(
             majorRadius: majorRadius,
             minorRadius: minorRadius,
             toroidalField: 5.3,
             volume: EvaluatedArray(evaluating: volume),
-            g0: EvaluatedArray(evaluating: g0),
-            g1: EvaluatedArray(evaluating: g1),
-            g2: EvaluatedArray(evaluating: g2),
-            g3: EvaluatedArray(evaluating: g3),
+            fluxSurfaceMetric: EvaluatedArray(evaluating: fluxSurfaceMetric),
+            majorRadiusMetric: EvaluatedArray(evaluating: majorRadiusMetric),
+            shapeMetric: EvaluatedArray(evaluating: shapeMetric),
+            minorRadiusMetric: EvaluatedArray(evaluating: minorRadiusMetric),
             radii: EvaluatedArray(evaluating: radii),
             safetyFactor: EvaluatedArray(evaluating: safetyFactor),
             type: .circular
@@ -228,7 +228,7 @@ struct SawtoothRedistributionTests {
     }
 
     /// Create peaked profiles for testing
-    private func createPeakedProfiles(nCells: Int, geometry: Geometry) -> CoreProfiles {
+    private func createPeakedProfiles(cellCount: Int, geometry: Geometry) -> CoreProfiles {
         let rhoNorm = geometry.radii.value / geometry.minorRadius
 
         // Highly peaked parabolic temperature profile
@@ -239,7 +239,7 @@ struct SawtoothRedistributionTests {
         let ne = 1.2e20 * (1.0 - 0.5 * rhoNorm * rhoNorm)  // 1.2×10²⁰ m⁻³ on axis
 
         // Parabolic poloidal flux
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         return CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),

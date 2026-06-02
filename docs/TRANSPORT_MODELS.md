@@ -13,9 +13,9 @@ swift-Gotenx provides three transport models with increasing physics fidelity.
   "transport": {
     "modelType": "constant",
     "parameters": {
-      "chi_ion": 1.0,
-      "chi_electron": 1.0,
-      "particle_diffusivity": 0.5
+      "ionHeatDiffusivity": 1.0,
+      "electronHeatDiffusivity": 1.0,
+      "particleDiffusivity": 0.5
     }
   }
 }
@@ -89,8 +89,8 @@ Where:
   "transport": {
     "modelType": "qlknn",
     "parameters": {
-      "Zeff": 1.5,
-      "min_chi": 0.01
+      "effectiveCharge": 1.5,
+      "minimumHeatDiffusivity": 0.01
     }
   }
 }
@@ -100,15 +100,15 @@ Where:
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `Zeff` | Float | 1.0 | Effective charge for collisionality calculation |
-| `min_chi` | Float | 0.01 | Minimum transport coefficient floor [m²/s] |
+| `effectiveCharge` | Float | 1.0 | Effective charge for collisionality calculation |
+| `minimumHeatDiffusivity` | Float | 0.01 | Minimum transport coefficient floor [m²/s] |
 
-**Zeff values**:
+**effectiveCharge values**:
 - 1.0: Pure deuterium plasma
 - 1.5: Typical D-T mixture with impurities
 - 2.0-3.0: Higher impurity content
 
-**min_chi**: Prevents numerical issues when QLKNN predicts very low transport (e.g., in ITB regions).
+**minimumHeatDiffusivity**: Prevents numerical issues when QLKNN predicts very low transport (e.g., in ITB regions).
 
 ### Physics
 

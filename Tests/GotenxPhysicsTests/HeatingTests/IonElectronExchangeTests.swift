@@ -4,8 +4,8 @@ import MLX
 @testable import GotenxPhysics
 
 @Test("Ion-electron exchange equilibration")
-func testEquilibration() {
-    let exchange = IonElectronExchange(Zeff: 1.5, ionMass: 2.014)
+func testEquilibration() throws {
+    let exchange = IonElectronExchange(effectiveCharge: 1.5, ionMass: 2.014)
 
     let ne = MLXArray.full([100], values: MLXArray(Float(5e19)))
     var Te = MLXArray.full([100], values: MLXArray(Float(10000.0)))  // 10 keV
@@ -13,19 +13,19 @@ func testEquilibration() {
 
     // Use much smaller time step for numerical stability
     // Characteristic equilibration time ~ microseconds
-    let dt: Float = 1e-7  // 0.1 microseconds
-    let nSteps = 10000
+    let timeStep: Float = 1e-7  // 0.1 microseconds
+    let stepCount = 10000
 
     // Simulate equilibration using forward Euler
-    for _ in 0..<nSteps {
-        let Q_ie = try! exchange.compute(ne: ne, Te: Te, Ti: Ti)
+    for _ in 0..<stepCount {
+        let Q_ie = try exchange.compute(electronDensity: ne, electronTemperature: Te, ionTemperature: Ti)
 
-        // Energy balance: dE/dt = Q
+        // Energy balance: dE/timeStep = Q
         // E = (3/2) * n * k_B * T
-        // dT/dt = Q / ((3/2) * n * k_B)
+        // dT/timeStep = Q / ((3/2) * n * k_B)
         // Fixed: Added missing (3/2) factor
-        Te = Te - dt * Q_ie / ((3.0/2.0) * ne * PhysicsConstants.eV)
-        Ti = Ti + dt * Q_ie / ((3.0/2.0) * ne * PhysicsConstants.eV)
+        Te = Te - timeStep * Q_ie / ((3.0/2.0) * ne * PhysicsConstants.electronVolt)
+        Ti = Ti + timeStep * Q_ie / ((3.0/2.0) * ne * PhysicsConstants.electronVolt)
     }
 
     // Should equilibrate within 100 eV
@@ -45,8 +45,8 @@ func testCollisionFrequencyDensityScaling() {
     let ne2 = MLXArray([Float(2e19)])
     let Te = MLXArray([Float(1000.0)])
 
-    let nu1 = exchange.computeCollisionFrequency(ne: ne1, Te: Te)
-    let nu2 = exchange.computeCollisionFrequency(ne: ne2, Te: Te)
+    let nu1 = exchange.computeCollisionFrequency(electronDensity: ne1, electronTemperature: Te)
+    let nu2 = exchange.computeCollisionFrequency(electronDensity: ne2, electronTemperature: Te)
 
     let ratio_array = nu2 / nu1
     eval(ratio_array)  // Evaluate before calling .item()
@@ -65,8 +65,8 @@ func testCollisionFrequencyTemperatureScaling() {
     let Te1 = MLXArray([Float(1000.0)])
     let Te2 = MLXArray([Float(2000.0)])
 
-    let nu1 = exchange.computeCollisionFrequency(ne: ne, Te: Te1)
-    let nu2 = exchange.computeCollisionFrequency(ne: ne, Te: Te2)
+    let nu1 = exchange.computeCollisionFrequency(electronDensity: ne, electronTemperature: Te1)
+    let nu2 = exchange.computeCollisionFrequency(electronDensity: ne, electronTemperature: Te2)
 
     let ratio_array = nu2 / nu1
     eval(ratio_array)  // Evaluate before calling .item()
@@ -78,21 +78,21 @@ func testCollisionFrequencyTemperatureScaling() {
 }
 
 @Test("Energy conservation")
-func testEnergyConservation() {
+func testEnergyConservation() throws {
     let exchange = IonElectronExchange()
 
     let ne = MLXArray([Float(5e19)])
     let Te = MLXArray([Float(8000.0)])
     let Ti = MLXArray([Float(6000.0)])
 
-    let Q_ie = try! exchange.compute(ne: ne, Te: Te, Ti: Ti)
+    let Q_ie = try exchange.compute(electronDensity: ne, electronTemperature: Te, ionTemperature: Ti)
     eval(Q_ie)  // Evaluate before calling .item()
 
     // Q_ie should be positive (heating ions) when Te > Ti
     #expect(Q_ie.item(Float.self) > 0, "Power should flow from electrons to ions when Te > Ti")
 
     // Test opposite case
-    let Q_ie_reverse = try! exchange.compute(ne: ne, Te: Ti, Ti: Te)
+    let Q_ie_reverse = try exchange.compute(electronDensity: ne, electronTemperature: Ti, ionTemperature: Te)
     eval(Q_ie_reverse)  // Evaluate before calling .item()
     #expect(Q_ie_reverse.item(Float.self) < 0, "Power should flow from ions to electrons when Ti > Te")
 
@@ -110,22 +110,22 @@ func testCoulombLogarithm() {
     let ne = MLXArray([Float(1e20)])
     let Te = MLXArray([Float(10000.0)])  // 10 keV
 
-    let lnLambda = exchange.computeCoulombLogarithm(ne: ne, Te: Te)
-    eval(lnLambda)  // Evaluate before calling .item()
-    let value = lnLambda.item(Float.self)
+    let coulombLogarithm = exchange.computeCoulombLogarithm(electronDensity: ne, electronTemperature: Te)
+    eval(coulombLogarithm)  // Evaluate before calling .item()
+    let value = coulombLogarithm.item(Float.self)
 
     // Coulomb logarithm should be in range [10, 20] for typical plasmas
     #expect(value > 10.0 && value < 20.0, "Coulomb logarithm should be reasonable: ln(Λ) = \(value)")
 }
 
 @Test("Zero temperature difference gives zero exchange")
-func testZeroExchange() {
+func testZeroExchange() throws {
     let exchange = IonElectronExchange()
 
     let ne = MLXArray([Float(1e20)])
     let T = MLXArray([Float(5000.0)])
 
-    let Q_ie = try! exchange.compute(ne: ne, Te: T, Ti: T)
+    let Q_ie = try exchange.compute(electronDensity: ne, electronTemperature: T, ionTemperature: T)
     eval(Q_ie)  // Evaluate before calling .item()
 
     #expect(abs(Q_ie.item(Float.self)) < 1e-6, "No exchange when temperatures are equal")

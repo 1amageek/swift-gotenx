@@ -64,33 +64,33 @@ let array = MLXArray([1.0, 2.0], dtype: .float32)
 
 **❌ WRONG - `repeating:` does NOT exist**:
 ```swift
-let Ti = MLXArray(repeating: 5000.0, [nCells])  // ❌ Compilation error
+let Ti = MLXArray(repeating: 5000.0, [cellCount])  // ❌ Compilation error
 ```
 
 **✅ CORRECT - Use `MLXArray.full()`**:
 ```swift
-let Ti = MLXArray.full([nCells], values: MLXArray(5000.0))
+let Ti = MLXArray.full([cellCount], values: MLXArray(5000.0))
 ```
 
 **❌ WRONG - `linspace` is NOT a standalone function**:
 ```swift
-let psi = MLXArray(linspace(0.0, 1.0, count: nCells))  // ❌ Compilation error
+let psi = MLXArray(linspace(0.0, 1.0, count: cellCount))  // ❌ Compilation error
 ```
 
 **✅ CORRECT - Use `MLXArray.linspace()`**:
 ```swift
-let psi = MLXArray.linspace(0.0, 1.0, count: nCells)
+let psi = MLXArray.linspace(0.0, 1.0, count: cellCount)
 ```
 
 #### Standard Initialization Methods
 
 ```swift
 // 1. Fill with constant value
-let ones = MLXArray.full([nCells], values: MLXArray(1.0))
+let ones = MLXArray.full([cellCount], values: MLXArray(1.0))
 
 // 2. Zeros and ones
-let zeros = MLXArray.zeros([nCells])
-let ones = MLXArray.ones([nCells])
+let zeros = MLXArray.zeros([cellCount])
+let ones = MLXArray.ones([cellCount])
 
 // 3. Linearly spaced values
 let linspace = MLXArray.linspace(0.0, 1.0, count: 100)
@@ -199,15 +199,15 @@ public func computeOhmicHeating(
 }
 
 public func computeTransport(...) -> TransportCoefficients {
-    let chi_i = exp(-1000.0 / Ti)  // lazy
-    let chi_e = exp(-1000.0 / Te)  // lazy
-    let D = chi_e * 0.5            // lazy
+    let ionHeatDiffusivity = exp(-1000.0 / Ti)  // lazy
+    let electronHeatDiffusivity = exp(-1000.0 / Te)  // lazy
+    let D = electronHeatDiffusivity * 0.5            // lazy
 
     // EvaluatedArray() calls eval() - optimal timing
     // At this point, all operations are fused
     return TransportCoefficients(
-        chiIon: EvaluatedArray(evaluating: chi_i),
-        chiElectron: EvaluatedArray(evaluating: chi_e),
+        ionHeatDiffusivity: EvaluatedArray(evaluating: ionHeatDiffusivity),
+        electronHeatDiffusivity: EvaluatedArray(evaluating: electronHeatDiffusivity),
         particleDiffusivity: EvaluatedArray(evaluating: D)
     )
 }
@@ -402,15 +402,15 @@ public struct CoreProfiles: Sendable {
 ## Configuration System
 
 Hierarchical priority (highest to lowest):
-1. CLI arguments (`--mesh-ncells 200`)
-2. Environment variables (`GOTENX_MESH_NCELLS=150`)
+1. CLI arguments (`--mesh-cell-count 200`)
+2. Environment variables (`GOTENX_MESH_CELL_COUNT=150`)
 3. JSON file
 4. Default values
 
 ```swift
 let configReader = try await GotenxConfigReader.create(
     jsonPath: "config.json",
-    cliOverrides: ["runtime.static.mesh.nCells": "200"]
+    cliOverrides: ["runtime.static.mesh.cellCount": "200"]
 )
 let config = try await configReader.fetchConfiguration()
 ```

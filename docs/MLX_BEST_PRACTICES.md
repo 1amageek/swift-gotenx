@@ -42,15 +42,15 @@ With eval(), results are materialized, preventing the graph from accumulating ac
 ```swift
 // ✅ CORRECT: Chain operations, eval at the end
 func computeTransport(Ti: MLXArray, Te: MLXArray) -> (MLXArray, MLXArray) {
-    let chiIon = exp(-1000.0 / Ti)          // Lazy
-    let chiElectron = exp(-1000.0 / Te)     // Lazy
+    let ionHeatDiffusivity = exp(-1000.0 / Ti)          // Lazy
+    let electronHeatDiffusivity = exp(-1000.0 / Te)     // Lazy
     // Return lazy arrays - caller decides when to eval
-    return (chiIon, chiElectron)
+    return (ionHeatDiffusivity, electronHeatDiffusivity)
 }
 
 // Caller evaluates when needed
-let (chiIon, chiElectron) = computeTransport(Ti, Te)
-eval(chiIon, chiElectron)  // ✅ Eval when values are needed
+let (ionHeatDiffusivity, electronHeatDiffusivity) = computeTransport(Ti, Te)
+eval(ionHeatDiffusivity, electronHeatDiffusivity)  // ✅ Eval when values are needed
 ```
 
 ### 2. Before wrapping in EvaluatedArray (automatic)
@@ -58,8 +58,8 @@ eval(chiIon, chiElectron)  // ✅ Eval when values are needed
 ```swift
 // ✅ CORRECT: EvaluatedArray.init() calls eval() internally
 return TransportCoefficients(
-    chiIon: EvaluatedArray(evaluating: chiIon),  // eval() called here
-    chiElectron: EvaluatedArray(evaluating: chiElectron)
+    ionHeatDiffusivity: EvaluatedArray(evaluating: ionHeatDiffusivity),  // eval() called here
+    electronHeatDiffusivity: EvaluatedArray(evaluating: electronHeatDiffusivity)
 )
 ```
 
@@ -157,18 +157,18 @@ let source = SourceTerms(
 
 ```swift
 // Compute multiple results
-let chiIon = exp(-1000.0 / Ti)
-let chiElectron = exp(-1000.0 / Te)
-let diffusivity = chiElectron * 0.5
+let ionHeatDiffusivity = exp(-1000.0 / Ti)
+let electronHeatDiffusivity = exp(-1000.0 / Te)
+let diffusivity = electronHeatDiffusivity * 0.5
 
 // Batch evaluate (more efficient than 3 separate eval() calls)
-eval(chiIon, chiElectron, diffusivity)
+eval(ionHeatDiffusivity, electronHeatDiffusivity, diffusivity)
 
 return TransportCoefficients(
-    chiIon: EvaluatedArray(evaluating: chiIon),
-    chiElectron: EvaluatedArray(evaluating: chiElectron),
+    ionHeatDiffusivity: EvaluatedArray(evaluating: ionHeatDiffusivity),
+    electronHeatDiffusivity: EvaluatedArray(evaluating: electronHeatDiffusivity),
     particleDiffusivity: EvaluatedArray(evaluating: diffusivity),
-    convectionVelocity: .zeros([nCells])
+    convectionVelocity: .zeros([cellCount])
 )
 ```
 

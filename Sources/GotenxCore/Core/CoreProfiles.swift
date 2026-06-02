@@ -36,6 +36,40 @@ public struct CoreProfiles: Sendable, Equatable {
     }
 }
 
+extension CoreProfiles {
+    public func validateNumerics(expectedCellCount: Int? = nil) throws {
+        let cellCount = ionTemperature.shape.first ?? 0
+        guard cellCount > 0 else {
+            throw NumericalValidationError.invalidValue(
+                field: "CoreProfiles",
+                reason: "cell count must be positive"
+            )
+        }
+
+        if let expectedCellCount {
+            try NumericalValidation.validateShape(
+                ionTemperature.value,
+                field: "ionTemperature",
+                expected: [expectedCellCount]
+            )
+        }
+
+        try validateProfileShape(ionTemperature.value, field: "ionTemperature", cellCount: cellCount)
+        try validateProfileShape(electronTemperature.value, field: "electronTemperature", cellCount: cellCount)
+        try validateProfileShape(electronDensity.value, field: "electronDensity", cellCount: cellCount)
+        try validateProfileShape(poloidalFlux.value, field: "poloidalFlux", cellCount: cellCount)
+
+        try NumericalValidation.validatePositive(ionTemperature.value, field: "ionTemperature")
+        try NumericalValidation.validatePositive(electronTemperature.value, field: "electronTemperature")
+        try NumericalValidation.validatePositive(electronDensity.value, field: "electronDensity")
+        try NumericalValidation.validateFinite(poloidalFlux.value, field: "poloidalFlux")
+    }
+
+    private func validateProfileShape(_ array: MLXArray, field: String, cellCount: Int) throws {
+        try NumericalValidation.validateShape(array, field: field, expected: [cellCount])
+    }
+}
+
 // MARK: - Safety Factor Calculation
 
 extension CoreProfiles {
@@ -56,7 +90,7 @@ extension CoreProfiles {
     /// **Parameters**:
     /// - geometry: Tokamak geometry
     ///
-    /// **Returns**: Safety factor profile, shape [nCells]
+    /// **Returns**: Safety factor profile, shape [cellCount]
     ///
     /// **References**:
     /// - Wesson, "Tokamak Physics" (1987), Chapter 3
@@ -93,13 +127,13 @@ extension CoreProfiles {
     ///
     /// **Formula**:
     /// ```
-    /// ŝ = (r/q) dq/dr
+    /// ŝ = (r/q) dq/radialSpacing
     /// ```
     ///
     /// **Parameters**:
     /// - geometry: Tokamak geometry
     ///
-    /// **Returns**: Magnetic shear profile, shape [nCells]
+    /// **Returns**: Magnetic shear profile, shape [cellCount]
     ///
     /// **References**:
     /// - Wesson, "Tokamak Physics" (1987)
@@ -122,22 +156,22 @@ extension CoreProfiles {
     /// but included here to avoid circular dependencies.
     ///
     /// **Parameters**:
-    /// - psi: Flux or any profile [nCells]
-    /// - radii: Radial grid points [nCells]
-    /// - cellDistances: Distance between cell centers [nCells-1]
+    /// - psi: Flux or any profile [cellCount]
+    /// - radii: Radial grid points [cellCount]
+    /// - cellDistances: Distance between cell centers [cellCount-1]
     ///
-    /// **Returns**: Gradient at cell centers [nCells]
+    /// **Returns**: Gradient at cell centers [cellCount]
     private func computeFluxGradient(psi: MLXArray, radii: MLXArray, cellDistances: MLXArray) -> MLXArray {
-        let nCells = psi.shape[0]
+        let cellCount = psi.shape[0]
 
         // Compute differences: Δψ = ψ[i+1] - ψ[i]
-        let dPsi = psi[1...] - psi[..<(nCells - 1)]  // [nCells-1]
+        let dPsi = psi[1...] - psi[..<(cellCount - 1)]  // [cellCount-1]
 
         // Add epsilon to prevent division by zero
-        let dr_safe = cellDistances + 1e-10  // [nCells-1]
+        let dr_safe = cellDistances + 1e-10  // [cellCount-1]
 
         // Gradient at interior faces
-        let gradFaces = dPsi / dr_safe  // [nCells-1]
+        let gradFaces = dPsi / dr_safe  // [cellCount-1]
 
         // Interpolate to cell centers (GPU-first, no CPU transfer)
         // - Boundary cells: use nearest face value
@@ -146,16 +180,16 @@ extension CoreProfiles {
         // Left boundary cell (i=0): use gradFaces[0]
         let gradCell0 = gradFaces[0..<1]  // [1]
 
-        // Interior cells (i=1...nCells-2): average of adjacent faces
+        // Interior cells (i=1...cellCount-2): average of adjacent faces
         // gradCell[i] = (gradFaces[i-1] + gradFaces[i]) / 2
-        let leftFaces = gradFaces[0..<(nCells - 2)]   // [nCells-2]
-        let rightFaces = gradFaces[1..<(nCells - 1)]  // [nCells-2]
-        let gradInterior = (leftFaces + rightFaces) / 2.0  // [nCells-2]
+        let leftFaces = gradFaces[0..<(cellCount - 2)]   // [cellCount-2]
+        let rightFaces = gradFaces[1..<(cellCount - 1)]  // [cellCount-2]
+        let gradInterior = (leftFaces + rightFaces) / 2.0  // [cellCount-2]
 
-        // Right boundary cell (i=nCells-1): use gradFaces[nCells-2]
-        let gradCellN = gradFaces[(nCells - 2)..<(nCells - 1)]  // [1]
+        // Right boundary cell (i=cellCount-1): use gradFaces[cellCount-2]
+        let gradCellN = gradFaces[(cellCount - 2)..<(cellCount - 1)]  // [1]
 
-        // Concatenate: [1] + [nCells-2] + [1] = [nCells]
+        // Concatenate: [1] + [cellCount-2] + [1] = [cellCount]
         let gradCells = concatenated([gradCell0, gradInterior, gradCellN], axis: 0)
 
         return gradCells

@@ -29,6 +29,7 @@ public struct ConfigurationValidator {
         // These validations have hard errors only (no warnings)
         try validateTimeRange(config.time)
         try validateBoundaries(config.runtime.dynamic.boundaries)
+        try config.runtime.dynamic.transport.validateParameterKeys()
         try validateSources(config.runtime.dynamic.sources)
 
         // Cross-component validation
@@ -72,29 +73,29 @@ public struct ConfigurationValidator {
             )
         }
 
-        guard time.initialDt > 0 else {
+        guard time.initialTimeStep > 0 else {
             throw ConfigurationError.invalidValue(
-                key: "time.initialDt",
-                value: "\(time.initialDt)",
+                key: "time.initialTimeStep",
+                value: "\(time.initialTimeStep)",
                 reason: "Initial timestep must be positive"
             )
         }
 
         if let adaptive = time.adaptive {
-            // effectiveMinDt must be positive
-            guard adaptive.effectiveMinDt > 0 else {
+            // effectiveMinimumTimeStep must be positive
+            guard adaptive.effectiveMinimumTimeStep > 0 else {
                 throw ConfigurationError.invalidValue(
-                    key: "time.adaptive.effectiveMinDt",
-                    value: "\(adaptive.effectiveMinDt)",
+                    key: "time.adaptive.effectiveMinimumTimeStep",
+                    value: "\(adaptive.effectiveMinimumTimeStep)",
                     reason: "Min timestep must be positive"
                 )
             }
 
-            // maxDt must be greater than effectiveMinDt
-            guard adaptive.effectiveMinDt < adaptive.maxDt else {
+            // maximumTimeStep must be greater than effectiveMinimumTimeStep
+            guard adaptive.effectiveMinimumTimeStep < adaptive.maximumTimeStep else {
                 throw ConfigurationError.invalidValue(
                     key: "time.adaptive",
-                    value: "min=\(adaptive.effectiveMinDt), max=\(adaptive.maxDt)",
+                    value: "min=\(adaptive.effectiveMinimumTimeStep), max=\(adaptive.maximumTimeStep)",
                     reason: "Min timestep must be less than max timestep"
                 )
             }
@@ -108,10 +109,10 @@ public struct ConfigurationValidator {
                 )
             }
 
-            // Warning: initialDt should be within adaptive range
-            if time.initialDt < adaptive.effectiveMinDt || time.initialDt > adaptive.maxDt {
-                print("⚠️  Warning: initialDt (\(time.initialDt)s) is outside adaptive range")
-                print("   Adaptive range: [\(adaptive.effectiveMinDt), \(adaptive.maxDt)]s")
+            // Warning: initialTimeStep should be within adaptive range
+            if time.initialTimeStep < adaptive.effectiveMinimumTimeStep || time.initialTimeStep > adaptive.maximumTimeStep {
+                print("⚠️  Warning: initialTimeStep (\(time.initialTimeStep)s) is outside adaptive range")
+                print("   Adaptive range: [\(adaptive.effectiveMinimumTimeStep), \(adaptive.maximumTimeStep)]s")
                 print("   Timestep will be clamped to this range")
             }
         }
@@ -135,10 +136,10 @@ public struct ConfigurationValidator {
             )
         }
 
-        guard boundaries.density > 0 else {
+        guard boundaries.electronDensity > 0 else {
             throw ConfigurationError.invalidValue(
-                key: "boundaries.density",
-                value: "\(boundaries.density)",
+                key: "boundaries.electronDensity",
+                value: "\(boundaries.electronDensity)",
                 reason: "Density must be positive"
             )
         }
@@ -170,7 +171,7 @@ public struct ConfigurationValidator {
     /// Cross-component consistency checks
     private static func validateConsistency(_ config: SimulationConfiguration) throws {
         // Check: If current evolution is enabled, appropriate sources must be configured
-        if config.runtime.static.evolution.current {
+        if config.runtime.static.evolution.poloidalFlux {
             guard config.runtime.dynamic.sources.ohmicHeating else {
                 throw ConfigurationError.inconsistency(
                     reason: "Current evolution requires Ohmic heating to be enabled"
@@ -195,7 +196,7 @@ public struct ConfigurationValidator {
         )
 
         // Density range
-        try validateDensityRange(density: boundary.density)
+        try validateDensityRange(density: boundary.electronDensity)
 
         // Magnetic field range
         try validateMagneticFieldRange(toroidalField: mesh.toroidalField)
@@ -286,16 +287,16 @@ public struct ConfigurationValidator {
         let transport = config.runtime.dynamic.transport
         let sources = config.runtime.dynamic.sources
         let boundary = config.runtime.dynamic.boundaries
-        let dt = config.time.initialDt
+        let timeStep = config.time.initialTimeStep
 
         // Calculate derived quantities
-        let cellSpacing = mesh.minorRadius / Float(mesh.nCells)
+        let cellSpacing = mesh.minorRadius / Float(mesh.cellCount)
         let volume = 2.0 * Float.pi * Float.pi * mesh.majorRadius * mesh.minorRadius * mesh.minorRadius
 
         // CFL condition for transport
         try validateCFLCondition(
             transport: transport,
-            dt: dt,
+            timeStep: timeStep,
             cellSpacing: cellSpacing
         )
 
@@ -304,10 +305,10 @@ public struct ConfigurationValidator {
             try validateECRHStability(
                 ecrh: ecrh,
                 initialTemp: boundary.electronTemperature,
-                density: boundary.density,
+                density: boundary.electronDensity,
                 volume: volume,
                 minorRadius: mesh.minorRadius,
-                dt: dt,
+                timeStep: timeStep,
                 cellSpacing: cellSpacing
             )
         }
@@ -315,22 +316,22 @@ public struct ConfigurationValidator {
         if let gasPuff = sources.gasPuff {
             try validateGasPuffStability(
                 gasPuff: gasPuff,
-                initialDensity: boundary.density,
+                initialDensity: boundary.electronDensity,
                 volume: volume,
-                dt: dt
+                timeStep: timeStep
             )
         }
 
         // Timestep validity
         try validateDiffusionTimeScale(
             transport: transport,
-            dt: dt,
+            timeStep: timeStep,
             minorRadius: mesh.minorRadius
         )
 
         // Mesh resolution
         try validateMeshResolution(
-            nCells: mesh.nCells,
+            cellCount: mesh.cellCount,
             initialProfile: config.runtime.dynamic.initialProfile
         )
 
@@ -343,93 +344,90 @@ public struct ConfigurationValidator {
 
     private static func validateCFLCondition(
         transport: TransportConfig,
-        dt: Float,
+        timeStep: Float,
         cellSpacing: Float
     ) throws {
-        // Only the constant-transport model carries chi as explicit configuration
+        // Only the constant-transport model carries heat diffusivity as explicit configuration
         // parameters. Self-computing models (Bohm-GyroBohm, QLKNN, density-transition)
         // derive transport coefficients at runtime, so a static CFL check from config
         // parameters does not apply — runtime adaptive timestepping handles stability.
-        // (Previously this validation unconditionally required chi_ion/chi_electron,
-        // contradicting its own suggestion to "use a model that computes it".)
         guard transport.modelType == .constant else {
             return
         }
 
         // Use optional API - explicit missing value handling
-        guard let chiIon = transport.parameter("chi_ion") else {
+        guard let ionHeatDiffusivity = transport.parameter("ionHeatDiffusivity") else {
             throw ConfigurationValidationError.missingRequiredParameter(
-                parameter: "chi_ion",
+                parameter: "ionHeatDiffusivity",
                 modelType: transport.modelType,
-                suggestion: "Specify chi_ion in transport.parameters or use a model that computes it (e.g., bohmGyrobohm, qlknn)"
+                suggestion: "Specify ionHeatDiffusivity in transport.parameters or use a model that computes it (e.g., bohmGyrobohm, qlknn)"
             )
         }
 
-        guard let chiElectron = transport.parameter("chi_electron") else {
+        guard let electronHeatDiffusivity = transport.parameter("electronHeatDiffusivity") else {
             throw ConfigurationValidationError.missingRequiredParameter(
-                parameter: "chi_electron",
+                parameter: "electronHeatDiffusivity",
                 modelType: transport.modelType,
-                suggestion: "Specify chi_electron in transport.parameters or use a model that computes it (e.g., bohmGyrobohm, qlknn)"
+                suggestion: "Specify electronHeatDiffusivity in transport.parameters or use a model that computes it (e.g., bohmGyrobohm, qlknn)"
             )
         }
 
-        // particle_diffusivity is optional for some models
-        let particleDiff = transport.parameter("particle_diffusivity", default: 0.0)
+        let particleDiffusivity = transport.parameter("particleDiffusivity", default: 0.0)
 
         // Validation only - no default provisioning
-        if chiIon <= 0 {
+        if ionHeatDiffusivity <= 0 {
             throw ConfigurationValidationError.invalidParameter(
-                parameter: "chi_ion",
-                value: chiIon,
+                parameter: "ionHeatDiffusivity",
+                value: ionHeatDiffusivity,
                 reason: "Must be positive"
             )
         }
 
-        if chiElectron <= 0 {
+        if electronHeatDiffusivity <= 0 {
             throw ConfigurationValidationError.invalidParameter(
-                parameter: "chi_electron",
-                value: chiElectron,
+                parameter: "electronHeatDiffusivity",
+                value: electronHeatDiffusivity,
                 reason: "Must be positive"
             )
         }
 
-        if particleDiff < 0 {
+        if particleDiffusivity < 0 {
             throw ConfigurationValidationError.invalidParameter(
-                parameter: "particle_diffusivity",
-                value: particleDiff,
+                parameter: "particleDiffusivity",
+                value: particleDiffusivity,
                 reason: "Must be non-negative"
             )
         }
 
         // Compute CFL numbers
-        let CFL_ion = chiIon * dt / (cellSpacing * cellSpacing)
-        let CFL_electron = chiElectron * dt / (cellSpacing * cellSpacing)
-        let CFL_particle = particleDiff * dt / (cellSpacing * cellSpacing)
+        let ionCFL = ionHeatDiffusivity * timeStep / (cellSpacing * cellSpacing)
+        let electronCFL = electronHeatDiffusivity * timeStep / (cellSpacing * cellSpacing)
+        let particleCFL = particleDiffusivity * timeStep / (cellSpacing * cellSpacing)
 
-        if CFL_ion > 0.5 {
+        if ionCFL > 0.5 {
             throw ConfigurationValidationError.cflViolation(
-                parameter: "chi_ion",
-                cfl: CFL_ion,
+                parameter: "ionHeatDiffusivity",
+                cfl: ionCFL,
                 limit: 0.5,
-                suggestion: "Reduce chi_ion to \(chiIon * 0.5 / CFL_ion) m²/s or decrease dt to \(dt * 0.5 / CFL_ion) s"
+                suggestion: "Reduce ionHeatDiffusivity to \(ionHeatDiffusivity * 0.5 / ionCFL) m²/s or decrease timeStep to \(timeStep * 0.5 / ionCFL) s"
             )
         }
 
-        if CFL_electron > 0.5 {
+        if electronCFL > 0.5 {
             throw ConfigurationValidationError.cflViolation(
-                parameter: "chi_electron",
-                cfl: CFL_electron,
+                parameter: "electronHeatDiffusivity",
+                cfl: electronCFL,
                 limit: 0.5,
-                suggestion: "Reduce chi_electron to \(chiElectron * 0.5 / CFL_electron) m²/s or decrease dt to \(dt * 0.5 / CFL_electron) s"
+                suggestion: "Reduce electronHeatDiffusivity to \(electronHeatDiffusivity * 0.5 / electronCFL) m²/s or decrease timeStep to \(timeStep * 0.5 / electronCFL) s"
             )
         }
 
-        if CFL_particle > 0.5 {
+        if particleCFL > 0.5 {
             throw ConfigurationValidationError.cflViolation(
-                parameter: "particle_diffusivity",
-                cfl: CFL_particle,
+                parameter: "particleDiffusivity",
+                cfl: particleCFL,
                 limit: 0.5,
-                suggestion: "Reduce particle_diffusivity to \(particleDiff * 0.5 / CFL_particle) m²/s or decrease dt to \(dt * 0.5 / CFL_particle) s"
+                suggestion: "Reduce particleDiffusivity to \(particleDiffusivity * 0.5 / particleCFL) m²/s or decrease timeStep to \(timeStep * 0.5 / particleCFL) s"
             )
         }
     }
@@ -440,28 +438,28 @@ public struct ConfigurationValidator {
         density: Float,
         volume: Float,
         minorRadius: Float,
-        dt: Float,
+        timeStep: Float,
         cellSpacing: Float
     ) throws {
         // Estimate peak power density (Gaussian profile)
         let sigma = ecrh.depositionWidth / 3.0
-        let rho_dep = ecrh.depositionRho
+        let rho_dep = ecrh.normalizedDepositionRadius
         let peakRadiusFraction = sigma / minorRadius
         let peakVolumeFraction = max(0.1, 2.0 * rho_dep * peakRadiusFraction)
         let peakPowerDensity = ecrh.totalPower / (volume * peakVolumeFraction)
 
         // Estimate temperature change per timestep
-        // Energy equation: (3/2) n_e dT/dt = Q/e → dT/dt = (2/3) Q/(n_e e)
+        // Energy equation: (3/2) n_e dT/timeStep = Q/e → dT/timeStep = (2/3) Q/(n_e e)
         let elementaryCharge: Float = 1.602e-19
         let tempChangeRate_eV = (2.0/3.0) * peakPowerDensity / (density * elementaryCharge)
-        let tempChange = tempChangeRate_eV * dt
+        let tempChange = tempChangeRate_eV * timeStep
         let changeRatio = tempChange / initialTemp
 
         if changeRatio > 0.5 {
             throw ConfigurationValidationError.unstableTimestep(
                 parameter: "ECRH heating",
                 changeRatio: changeRatio,
-                suggestion: "Reduce ECRH totalPower to \(ecrh.totalPower * 0.5 / changeRatio) W or decrease dt to \(dt * 0.5 / changeRatio) s"
+                suggestion: "Reduce ECRH totalPower to \(ecrh.totalPower * 0.5 / changeRatio) W or decrease timeStep to \(timeStep * 0.5 / changeRatio) s"
             )
         }
 
@@ -472,7 +470,7 @@ public struct ConfigurationValidator {
                 parameter: "ECRH depositionWidth",
                 value: ecrh.depositionWidth,
                 minimum: minWidthForResolution,
-                suggestion: "Increase depositionWidth to \(minWidthForResolution) or increase nCells to \(Int(3.0 * minorRadius / ecrh.depositionWidth))"
+                suggestion: "Increase depositionWidth to \(minWidthForResolution) or increase cellCount to \(Int(3.0 * minorRadius / ecrh.depositionWidth))"
             )
         }
     }
@@ -481,10 +479,10 @@ public struct ConfigurationValidator {
         gasPuff: GasPuffConfig,
         initialDensity: Float,
         volume: Float,
-        dt: Float
+        timeStep: Float
     ) throws {
         // Estimate density change per timestep
-        let particlesAdded = gasPuff.puffRate * dt
+        let particlesAdded = gasPuff.puffRate * timeStep
         let densityChange = particlesAdded / volume
         let changeRatio = densityChange / initialDensity
 
@@ -492,41 +490,45 @@ public struct ConfigurationValidator {
             throw ConfigurationValidationError.unstableTimestep(
                 parameter: "Gas puff",
                 changeRatio: changeRatio,
-                suggestion: "Reduce puffRate to \(gasPuff.puffRate * 0.2 / changeRatio) particles/s or decrease dt to \(dt * 0.2 / changeRatio) s"
+                suggestion: "Reduce puffRate to \(gasPuff.puffRate * 0.2 / changeRatio) particles/s or decrease timeStep to \(timeStep * 0.2 / changeRatio) s"
             )
         }
     }
 
     private static func validateDiffusionTimeScale(
         transport: TransportConfig,
-        dt: Float,
+        timeStep: Float,
         minorRadius: Float
     ) throws {
-        let chi_max = max(
-            transport.parameters["chi_ion"] ?? 1.0,
-            transport.parameters["chi_electron"] ?? 1.0
+        guard transport.modelType == .constant else {
+            return
+        }
+
+        let maximumHeatDiffusivity = max(
+            try transport.requireParameter("ionHeatDiffusivity"),
+            try transport.requireParameter("electronHeatDiffusivity")
         )
 
-        let tau_diffusion = minorRadius * minorRadius / chi_max
+        let diffusionTimeScale = minorRadius * minorRadius / maximumHeatDiffusivity
 
-        if dt > tau_diffusion {
+        if timeStep > diffusionTimeScale {
             throw ConfigurationValidationError.timestepTooLarge(
-                dt: dt,
-                timeScale: tau_diffusion,
-                suggestion: "Decrease dt to \(tau_diffusion / 10) s"
+                timeStep: timeStep,
+                timeScale: diffusionTimeScale,
+                suggestion: "Decrease timeStep to \(diffusionTimeScale / 10) s"
             )
         }
     }
 
     private static func validateMeshResolution(
-        nCells: Int,
+        cellCount: Int,
         initialProfile: InitialProfileConfig
     ) throws {
-        if nCells < 50 {
+        if cellCount < 50 {
             throw ConfigurationValidationError.insufficientMeshResolution(
-                nCells: nCells,
+                cellCount: cellCount,
                 minimum: 50,
-                suggestion: "Increase nCells to at least 50"
+                suggestion: "Increase cellCount to at least 50"
             )
         }
     }
@@ -568,7 +570,7 @@ public struct ConfigurationValidator {
         if config.runtime.dynamic.transport.modelType == .qlknn {
             try validateQLKNNRange(
                 electronTemp: config.runtime.dynamic.boundaries.electronTemperature,
-                density: config.runtime.dynamic.boundaries.density
+                density: config.runtime.dynamic.boundaries.electronDensity
             )
         }
 
@@ -629,7 +631,7 @@ public struct ConfigurationValidator {
             let volume = 2.0 * Float.pi * Float.pi * mesh.majorRadius * mesh.minorRadius * mesh.minorRadius
             let minorRadius = mesh.minorRadius
             let sigma = ecrh.depositionWidth / 3.0
-            let rho_dep = ecrh.depositionRho
+            let rho_dep = ecrh.normalizedDepositionRadius
             let peakRadiusFraction = sigma / minorRadius
             let peakVolumeFraction = max(0.1, 2.0 * rho_dep * peakRadiusFraction)
             let peakPowerDensity = ecrh.totalPower / (volume * peakVolumeFraction)
@@ -669,15 +671,13 @@ public struct ConfigurationValidator {
         return warnings
     }
 
-    private static func collectTransportWarnings(_ config: SimulationConfiguration) -> [ConfigurationValidationWarning] {
-        var warnings: [ConfigurationValidationWarning] = []
+    private static func collectTransportWarnings(_: SimulationConfiguration) -> [ConfigurationValidationWarning] {
         // Transport-related warnings (none defined yet)
-        return warnings
+        return []
     }
 
     private static func collectBoundaryWarnings(_ config: SimulationConfiguration) -> [ConfigurationValidationWarning] {
         var warnings: [ConfigurationValidationWarning] = []
-        let boundary = config.runtime.dynamic.boundaries
         let initialProfile = config.runtime.dynamic.initialProfile
 
         // Flat profile warning
@@ -694,35 +694,38 @@ public struct ConfigurationValidator {
 
     private static func collectTimestepWarnings(_ config: SimulationConfiguration) -> [ConfigurationValidationWarning] {
         var warnings: [ConfigurationValidationWarning] = []
-        let dt = config.time.initialDt
+        let timeStep = config.time.initialTimeStep
         let transport = config.runtime.dynamic.transport
         let mesh = config.runtime.static.mesh
 
+        guard transport.modelType == .constant,
+              let ionHeatDiffusivity = transport.parameter("ionHeatDiffusivity"),
+              let electronHeatDiffusivity = transport.parameter("electronHeatDiffusivity") else {
+            return warnings
+        }
+
         // Calculate CFL-limited maximum timestep
-        let chi_max = max(
-            transport.parameters["chi_ion"] ?? 1.0,
-            transport.parameters["chi_electron"] ?? 1.0
-        )
-        let cellSpacing = mesh.minorRadius / Float(mesh.nCells)
-        let dt_cfl_max = 0.5 * cellSpacing * cellSpacing / chi_max
+        let maximumHeatDiffusivity = max(ionHeatDiffusivity, electronHeatDiffusivity)
+        let cellSpacing = mesh.minorRadius / Float(mesh.cellCount)
+        let maximumCFLTimeStep = 0.5 * cellSpacing * cellSpacing / maximumHeatDiffusivity
 
         // Calculate diffusion time scale
-        let tau_diffusion = mesh.minorRadius * mesh.minorRadius / chi_max
+        let diffusionTimeScale = mesh.minorRadius * mesh.minorRadius / maximumHeatDiffusivity
 
         // Only warn about small timestep if it's much smaller than CFL limit
         // (i.e., not limited by CFL condition)
-        if dt < dt_cfl_max / 5.0 && dt < tau_diffusion / 200 {
+        if timeStep < maximumCFLTimeStep / 5.0 && timeStep < diffusionTimeScale / 200 {
             warnings.append(.timestepTooSmall(
-                dt: dt,
-                timeScale: tau_diffusion,
-                suggestion: "Consider increasing dt to \(min(dt_cfl_max * 0.9, tau_diffusion / 10)) s for better efficiency (CFL limit: \(dt_cfl_max) s)"
+                timeStep: timeStep,
+                timeScale: diffusionTimeScale,
+                suggestion: "Consider increasing timeStep to \(min(maximumCFLTimeStep * 0.9, diffusionTimeScale / 10)) s for better efficiency (CFL limit: \(maximumCFLTimeStep) s)"
             ))
         }
 
         // Warn about extremely small timesteps (< 1 μs)
-        if dt < 1e-6 {
+        if timeStep < 1e-6 {
             warnings.append(.timestepTooSmall(
-                dt: dt,
+                timeStep: timeStep,
                 timeScale: 1e-6,
                 suggestion: "Timestep < 1 μs may cause excessive computation time"
             ))
@@ -737,11 +740,11 @@ public struct ConfigurationValidator {
         let initialProfile = config.runtime.dynamic.initialProfile
 
         // Excessive mesh resolution
-        if mesh.nCells > 500 {
+        if mesh.cellCount > 500 {
             warnings.append(.excessiveMeshResolution(
-                nCells: mesh.nCells,
+                cellCount: mesh.cellCount,
                 maximum: 500,
-                suggestion: "Consider reducing nCells to ~200 for better performance"
+                suggestion: "Consider reducing cellCount to ~200 for better performance"
             ))
         }
 
@@ -750,12 +753,12 @@ public struct ConfigurationValidator {
         let exponent = initialProfile.temperatureExponent
         if exponent > 1.0 {
             let recommendedCells = max(50, Int(3.0 * exponent))
-            if mesh.nCells < recommendedCells {
+            if mesh.cellCount < recommendedCells {
                 warnings.append(.insufficientGradientResolution(
-                    nCells: mesh.nCells,
+                    cellCount: mesh.cellCount,
                     recommended: recommendedCells,
                     profileExponent: exponent,
-                    suggestion: "Increase nCells to \(recommendedCells) to resolve gradient scale length L_T ~ a/\(Int(exponent))"
+                    suggestion: "Increase cellCount to \(recommendedCells) to resolve gradient scale length L_T ~ a/\(Int(exponent))"
                 ))
             }
         }
@@ -763,9 +766,8 @@ public struct ConfigurationValidator {
         return warnings
     }
 
-    private static func collectModelWarnings(_ config: SimulationConfiguration) -> [ConfigurationValidationWarning] {
-        var warnings: [ConfigurationValidationWarning] = []
+    private static func collectModelWarnings(_: SimulationConfiguration) -> [ConfigurationValidationWarning] {
         // Model-specific warnings can be added here
-        return warnings
+        return []
     }
 }

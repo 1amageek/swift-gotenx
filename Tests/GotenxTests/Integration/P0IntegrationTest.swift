@@ -19,35 +19,35 @@ struct P0IntegrationTest {
     // MARK: - Test Configuration
 
     /// Create P0 static configuration
-    func makeP0StaticConfig() -> StaticRuntimeParams {
+    func makeP0StaticConfig() -> StaticRuntimeParameters {
         let meshConfig = MeshConfig(
-            nCells: 25,
+            cellCount: 25,
             majorRadius: 6.2,
             minorRadius: 2.0,
             toroidalField: 5.3,
             geometryType: .circular
         )
 
-        return StaticRuntimeParams(
+        return StaticRuntimeParameters(
             mesh: meshConfig,
             evolveIonHeat: true,
             evolveElectronHeat: true,
-            evolveDensity: false,   // P0: fix density
-            evolveCurrent: false,    // P0: fix current
+            evolveElectronDensity: false,   // P0: fix density
+            evolvePoloidalFlux: false,    // P0: fix current
             solverType: .linear,
             theta: 1.0,             // Fully implicit
             solverTolerance: 1e-6,
-            solverMaxIterations: 100
+            solverMaximumIterations: 100
         )
     }
 
     /// Create P0 dynamic configuration
-    func makeP0DynamicConfig() -> DynamicRuntimeParams {
-        let transportParams = TransportParameters(
+    func makeP0DynamicConfig() throws -> DynamicRuntimeParameters {
+        let transportParameters = try TransportParameters(
             modelType: .constant,
-            params: [
-                "chi_ion": 1.0,
-                "chi_electron": 1.0
+            parameters: [
+                "ionHeatDiffusivity": 1.0,
+                "electronHeatDiffusivity": 1.0
             ]
         )
 
@@ -77,19 +77,19 @@ struct P0IntegrationTest {
             currentDensity: .constant(0.0)
         )
 
-        return DynamicRuntimeParams(
-            dt: 1e-4,  // 0.1 ms
+        return DynamicRuntimeParameters(
+            timeStep: 1e-4,  // 0.1 ms
             boundaryConditions: boundaryConditions,
             profileConditions: profileConditions,
-            sourceParams: [:],
-            transportParams: transportParams
+            sourceParameters: [:],
+            transportParameters: transportParameters
         )
     }
 
     /// Create initial profiles for P0
-    func makeInitialProfiles(nCells: Int) -> CoreProfiles {
+    func makeInitialProfiles(cellCount: Int) -> CoreProfiles {
         // Parabolic temperature profiles
-        let rho = MLXArray(0..<nCells).asType(.float32) / Float(nCells - 1)
+        let rho = MLXArray(0..<cellCount).asType(.float32) / Float(cellCount - 1)
 
         let Ti_peak: Float = 10000.0
         let Te_peak: Float = 10000.0
@@ -106,7 +106,7 @@ struct P0IntegrationTest {
         let ne = n0 * (1.0 - 0.9 * rho * rho)
 
         // Fixed poloidal flux
-        let psi = MLXArray.zeros([nCells])
+        let psi = MLXArray.zeros([cellCount])
 
         return CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -121,23 +121,23 @@ struct P0IntegrationTest {
     @Test("P0 single time step execution")
     func testP0SingleTimeStep() throws {
         // Setup
-        let staticParams = makeP0StaticConfig()
-        let dynamicParams = makeP0DynamicConfig()
-        let geometry = Geometry(config: staticParams.mesh)
-        let initialProfiles = makeInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeP0StaticConfig()
+        let dynamicParameters = try makeP0DynamicConfig()
+        let geometry = Geometry(config: staticParameters.mesh)
+        let initialProfiles = makeInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         // Create physics models
         let transportModel = ConstantTransportModel(
-            chiIon: 1.0,
-            chiElectron: 1.0
+            ionHeatDiffusivity: 1.0,
+            electronHeatDiffusivity: 1.0
         )
 
         // Inline zero source model for the minimal transport benchmark.
         struct SimpleZeroSource: SourceModel {
             let name = "zero"
-            func computeTerms(profiles: CoreProfiles, geometry: Geometry, params: SourceParameters) -> SourceTerms {
-                let nCells = profiles.ionTemperature.shape[0]
-                let zeros = EvaluatedArray.zeros([nCells])
+            func computeTerms(profiles: CoreProfiles, geometry: Geometry, parameters: SourceParameters) -> SourceTerms {
+                let cellCount = profiles.ionTemperature.shape[0]
+                let zeros = EvaluatedArray.zeros([cellCount])
                 return SourceTerms(
                     ionHeating: zeros,
                     electronHeating: zeros,
@@ -150,9 +150,9 @@ struct P0IntegrationTest {
 
         // Create solver
         let solver = LinearSolver(
-            nCorrectorSteps: staticParams.solverMaxIterations,
-            usePereversevCorrector: true,
-            theta: staticParams.theta
+            correctorStepCount: staticParameters.solverMaximumIterations,
+            usesPereverzevCorrector: true,
+            theta: staticParameters.theta
         )
 
         // Define coefficients callback
@@ -160,64 +160,64 @@ struct P0IntegrationTest {
             let transport = transportModel.computeCoefficients(
                 profiles: profiles,
                 geometry: geom,
-                params: dynamicParams.transportParams
+                parameters: dynamicParameters.transportParameters
             )
 
             let sources = sourceModel.computeTerms(
                 profiles: profiles,
                 geometry: geom,
-                params: SourceParameters(modelType: "ohmic", params: [:])
+                parameters: SourceParameters(modelType: "ohmic", parameters: [:])
             )
 
             return buildBlock1DCoeffs(
                 transport: transport,
                 sources: sources,
                 geometry: geom,
-                staticParams: staticParams,
+                staticParameters: staticParameters,
                 profiles: profiles
             )
         }
 
         // Extract boundary conditions
-        let tiBC = dynamicParams.boundaryConditions.ionTemperature
-        let teBC = dynamicParams.boundaryConditions.electronTemperature
-        let neBC = dynamicParams.boundaryConditions.electronDensity
-        let psiBC = dynamicParams.boundaryConditions.poloidalFlux
+        let tiBC = dynamicParameters.boundaryConditions.ionTemperature
+        let teBC = dynamicParameters.boundaryConditions.electronTemperature
+        let neBC = dynamicParameters.boundaryConditions.electronDensity
+        let psiBC = dynamicParameters.boundaryConditions.poloidalFlux
 
         // Create CellVariable tuple
         let xOld = (
             CellVariable(
                 value: initialProfiles.ionTemperature.value,
-                dr: staticParams.mesh.dr,
-                leftFaceGradConstraint: extractGradient(tiBC.left),
+                radialSpacing: staticParameters.mesh.radialSpacing,
+                leftFaceGradientConstraint: extractGradient(tiBC.left),
                 rightFaceConstraint: extractValue(tiBC.right)
             ),
             CellVariable(
                 value: initialProfiles.electronTemperature.value,
-                dr: staticParams.mesh.dr,
-                leftFaceGradConstraint: extractGradient(teBC.left),
+                radialSpacing: staticParameters.mesh.radialSpacing,
+                leftFaceGradientConstraint: extractGradient(teBC.left),
                 rightFaceConstraint: extractValue(teBC.right)
             ),
             CellVariable(
                 value: initialProfiles.electronDensity.value,
-                dr: staticParams.mesh.dr,
-                leftFaceGradConstraint: extractGradient(neBC.left),
+                radialSpacing: staticParameters.mesh.radialSpacing,
+                leftFaceGradientConstraint: extractGradient(neBC.left),
                 rightFaceConstraint: extractValue(neBC.right)
             ),
             CellVariable(
                 value: initialProfiles.poloidalFlux.value,
-                dr: staticParams.mesh.dr,
+                radialSpacing: staticParameters.mesh.radialSpacing,
                 leftFaceConstraint: extractValue(psiBC.left),
-                rightFaceGradConstraint: extractGradient(psiBC.right)
+                rightFaceGradientConstraint: extractGradient(psiBC.right)
             )
         )
 
         // Execute single time step
         let result = solver.solve(
-            dt: dynamicParams.dt,
-            staticParams: staticParams,
-            dynamicParamsT: dynamicParams,
-            dynamicParamsTplusDt: dynamicParams,
+            timeStep: dynamicParameters.timeStep,
+            staticParameters: staticParameters,
+            dynamicParamsT: dynamicParameters,
+            dynamicParamsTplusDt: dynamicParameters,
             geometryT: geometry,
             geometryTplusDt: geometry,
             xOld: xOld,

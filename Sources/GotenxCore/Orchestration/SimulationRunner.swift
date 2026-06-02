@@ -52,7 +52,7 @@ public actor SimulationRunner: SimulationRunnable {
         let metalDevice = try MetalAccelerationPolicy.requireMetal4Device()
 
         // Create static runtime parameters
-        let staticParams = try config.runtime.static.toRuntimeParams()
+        let staticParameters = try config.runtime.static.runtimeParameters()
 
         // Get ProfileConditions from DynamicConfig
         let profileConditions = config.runtime.dynamic.toProfileConditions()
@@ -79,7 +79,7 @@ public actor SimulationRunner: SimulationRunnable {
 
         // Initialize orchestrator with provided models
         self.orchestrator = await SimulationOrchestrator(
-            staticParams: staticParams,
+            staticParameters: staticParameters,
             initialProfiles: serializableProfiles,
             transport: transportModel,
             sources: sourceModels,
@@ -89,8 +89,8 @@ public actor SimulationRunner: SimulationRunnable {
         )
 
         print("✓ Simulation initialized")
-        print("  Mesh: \(staticParams.mesh.nCells) cells")
-        print("  Solver: \(staticParams.solverType)")
+        print("  Mesh: \(staticParameters.mesh.cellCount) cells")
+        print("  Solver: \(staticParameters.solverType)")
         print("  Transport: \(config.runtime.dynamic.transport.modelType)")
         print("  Metal: \(metalDevice.name) (Metal 4)")
         if !mhdModelsToUse.isEmpty {
@@ -115,13 +115,13 @@ public actor SimulationRunner: SimulationRunnable {
         let dynamicConfig = config.runtime.dynamic
 
         // Create dynamic parameters
-        let dynamicParams = dynamicConfig.toDynamicRuntimeParams(dt: timeConfig.initialDt)
+        let dynamicParameters = dynamicConfig.dynamicRuntimeParameters(timeStep: timeConfig.initialTimeStep)
 
         let endTime = timeConfig.end
 
         print("\n🚀 Starting simulation")
         print("  Time range: [\(timeConfig.start), \(timeConfig.end)] s")
-        print("  Initial dt: \(timeConfig.initialDt) s")
+        print("  Initial timeStep: \(timeConfig.initialTimeStep) s")
 
         // Start background task for progress monitoring
         let progressTask: Task<Void, Never>? = if let callback = progressCallback {
@@ -130,7 +130,7 @@ public actor SimulationRunner: SimulationRunnable {
                 while !Task.isCancelled {
                     iterationCount += 1
 
-                    let progress = await orchestrator.getProgress()
+                    let progress = await orchestrator.progress()
 
                     let fraction = progress.currentTime / endTime
                     callback(fraction, progress)
@@ -157,14 +157,14 @@ public actor SimulationRunner: SimulationRunnable {
         }
 
         // Always stop progress monitoring, including when the run throws — otherwise the
-        // background task keeps polling getProgress() and invoking the UI/log callback
+        // background task keeps polling progress() and invoking the UI/log callback
         // after the simulation has already failed.
         defer { progressTask?.cancel() }
 
         // Run simulation via orchestrator
         let result = try await orchestrator.run(
             until: endTime,
-            dynamicParams: dynamicParams,
+            dynamicParameters: dynamicParameters,
             saveInterval: nil  // Could be made configurable
         )
 
@@ -216,7 +216,7 @@ public actor SimulationRunner: SimulationRunnable {
     ///
     /// - Returns: true if simulation is currently paused
     public func isPaused() async -> Bool {
-        await orchestrator?.getIsPaused() ?? false
+        await orchestrator?.isPaused() ?? false
     }
 
     /// Generate initial profiles from ProfileConditions
@@ -232,26 +232,26 @@ public actor SimulationRunner: SimulationRunnable {
         mesh: MeshConfig,
         profileConditions: ProfileConditions
     ) throws -> CoreProfiles {
-        let nCells = mesh.nCells
+        let cellCount = mesh.cellCount
 
         // Generate normalized radial coordinate [0, 1]
-        var rNorm = [Float](repeating: 0.0, count: nCells)
-        for i in 0..<nCells {
-            rNorm[i] = Float(i) / Float(nCells - 1)
+        var rNorm = [Float](repeating: 0.0, count: cellCount)
+        for i in 0..<cellCount {
+            rNorm[i] = Float(i) / Float(cellCount - 1)
         }
 
         // Evaluate profiles using ProfileConditions
-        var ti = [Float](repeating: 0.0, count: nCells)
-        var te = [Float](repeating: 0.0, count: nCells)
-        var ne = [Float](repeating: 0.0, count: nCells)
+        var ti = [Float](repeating: 0.0, count: cellCount)
+        var te = [Float](repeating: 0.0, count: cellCount)
+        var ne = [Float](repeating: 0.0, count: cellCount)
 
-        for i in 0..<nCells {
+        for i in 0..<cellCount {
             ti[i] = profileConditions.ionTemperature.evaluate(at: rNorm[i])
             te[i] = profileConditions.electronTemperature.evaluate(at: rNorm[i])
             ne[i] = profileConditions.electronDensity.evaluate(at: rNorm[i])
         }
 
-        // Phase 1a: Check for missing electron temperature (Sprint 1 robustness)
+        // Check for missing electron temperature.
         // If Te is zero/missing, use physically sound fallback Te = Ti
         let te_max = te.max() ?? 0.0
         if te_max <= 0.0 {
@@ -261,13 +261,13 @@ public actor SimulationRunner: SimulationRunnable {
 
         // Apply the same density floor used by the coefficient builder.
         let ne_floor: Float = 1e18
-        for i in 0..<nCells {
+        for i in 0..<cellCount {
             ne[i] = max(ne[i], ne_floor)
         }
 
         // Poloidal flux: initially zero (physical initial condition)
         // Note: In Phase 2, this could be made configurable via ProfileConditions
-        let psi = [Float](repeating: 0.0, count: nCells)
+        let psi = [Float](repeating: 0.0, count: cellCount)
 
         // Create evaluated arrays
         let evaluated = EvaluatedArray.evaluatingBatch([
@@ -284,9 +284,10 @@ public actor SimulationRunner: SimulationRunnable {
             poloidalFlux: evaluated[3]
         )
 
-        // Phase 1a: Validate initial profiles (Sprint 1 robustness)
-        // Critical: Ensures no NaN/Inf/negative values enter simulation
-        guard let validatedProfiles = ValidatedProfiles.validateMinimal(profiles) else {
+        let validatedProfiles: ValidatedProfiles
+        do {
+            validatedProfiles = try ValidatedProfiles.validate(profiles)
+        } catch {
             // User-configuration-derived failure: surface it as a typed error so the
             // app/CLI can report it, instead of crashing the process with fatalError.
             throw SimulationError.invalidConfiguration("""
@@ -294,18 +295,18 @@ public actor SimulationRunner: SimulationRunnable {
                 - Ti range: [\(ti.min() ?? Float.nan), \(ti.max() ?? Float.nan)] eV
                 - Te range: [\(te.min() ?? Float.nan), \(te.max() ?? Float.nan)] eV
                 - ne range: [\(ne.min() ?? Float.nan), \(ne.max() ?? Float.nan)] m⁻³
+                - Error: \(error)
                 """)
         }
 
-        // Convert back to CoreProfiles (validation passed)
         return validatedProfiles.toCoreProfiles()
     }
 
     /// Adapt timestep based on stability criteria
     private func adaptTimestep(
         currentDt: Float,
-        minDt: Float,
-        maxDt: Float,
+        minimumTimeStep: Float,
+        maximumTimeStep: Float,
         safetyFactor: Float
     ) -> Float {
         // Simple adaptive scheme: could be enhanced with error estimation
@@ -315,7 +316,7 @@ public actor SimulationRunner: SimulationRunnable {
         newDt *= safetyFactor
 
         // Clamp to limits
-        newDt = max(minDt, min(maxDt, newDt))
+        newDt = max(minimumTimeStep, min(maximumTimeStep, newDt))
 
         return newDt
     }
@@ -366,10 +367,10 @@ public enum SimulationError: Error, LocalizedError {
     case invalidBoundaryConditions(String)
 
     /// Mesh resolution too coarse
-    case meshTooCoarse(nCells: Int, minimum: Int)
+    case meshTooCoarse(cellCount: Int, minimum: Int)
 
     /// Time step too small
-    case timeStepTooSmall(dt: Float, minimum: Float)
+    case timeStepTooSmall(timeStep: Float, minimum: Float)
 
     // MARK: - LocalizedError
 
@@ -396,11 +397,11 @@ public enum SimulationError: Error, LocalizedError {
         case .invalidBoundaryConditions(let msg):
             return "Invalid boundary conditions: \(msg)"
 
-        case .meshTooCoarse(let nCells, let minimum):
-            return "Mesh too coarse: \(nCells) cells (minimum: \(minimum))"
+        case .meshTooCoarse(let cellCount, let minimum):
+            return "Mesh too coarse: \(cellCount) cells (minimum: \(minimum))"
 
-        case .timeStepTooSmall(let dt, let minimum):
-            return "Time step too small: \(dt)s (minimum: \(minimum))"
+        case .timeStepTooSmall(let timeStep, let minimum):
+            return "Time step too small: \(timeStep)s (minimum: \(minimum))"
         }
     }
 

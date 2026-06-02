@@ -6,6 +6,8 @@ import Foundation
 /// Critical configuration validation errors that prevent simulation
 public enum ConfigurationValidationError: Error, LocalizedError {
     case missingRequiredParameter(parameter: String, modelType: TransportModelType, suggestion: String)
+    case unknownTransportParameter(parameter: String, modelType: TransportModelType, allowed: [String])
+    case transportModelMismatch(expected: TransportModelType, actual: TransportModelType)
     case invalidParameter(parameter: String, value: Float, reason: String)
     case unstableTimestep(parameter: String, changeRatio: Float, suggestion: String)
     case cflViolation(parameter: String, cfl: Float, limit: Float, suggestion: String)
@@ -15,8 +17,8 @@ public enum ConfigurationValidationError: Error, LocalizedError {
     case invalidGeometry(parameter: String, value: Float, limit: Float, suggestion: String)
     case negativeTransportCoefficient(parameter: String, value: Float)
     case invalidFuelMix(dFraction: Float, tFraction: Float, suggestion: String)
-    case timestepTooLarge(dt: Float, timeScale: Float, suggestion: String)
-    case insufficientMeshResolution(nCells: Int, minimum: Int, suggestion: String)
+    case timestepTooLarge(timeStep: Float, timeScale: Float, suggestion: String)
+    case insufficientMeshResolution(cellCount: Int, minimum: Int, suggestion: String)
 
     public var errorDescription: String? {
         switch self {
@@ -25,6 +27,20 @@ public enum ConfigurationValidationError: Error, LocalizedError {
             ERROR: Missing required parameter - \(param)
               Model type: \(modelType)
               Suggestion: \(suggestion)
+            """
+
+        case .unknownTransportParameter(let param, let modelType, let allowed):
+            return """
+            ERROR: Unknown transport parameter - \(param)
+              Model type: \(modelType)
+              Allowed parameters: \(allowed.joined(separator: ", "))
+            """
+
+        case .transportModelMismatch(let expected, let actual):
+            return """
+            ERROR: Transport model mismatch
+              Expected model type: \(expected)
+              Actual model type: \(actual)
             """
 
         case .invalidParameter(let param, let value, let reason):
@@ -92,18 +108,18 @@ public enum ConfigurationValidationError: Error, LocalizedError {
               Suggestion: \(suggestion)
             """
 
-        case .timestepTooLarge(let dt, let timeScale, let suggestion):
+        case .timestepTooLarge(let timeStep, let timeScale, let suggestion):
             return """
             ERROR: Timestep too large
-              Current dt: \(String(format: "%.2e", dt)) s
+              Current timeStep: \(String(format: "%.2e", timeStep)) s
               Physics time scale: \(String(format: "%.2e", timeScale)) s
               Suggestion: \(suggestion)
             """
 
-        case .insufficientMeshResolution(let nCells, let minimum, let suggestion):
+        case .insufficientMeshResolution(let cellCount, let minimum, let suggestion):
             return """
             ERROR: Insufficient mesh resolution
-              Current nCells: \(nCells)
+              Current cellCount: \(cellCount)
               Minimum: \(minimum)
               Suggestion: \(suggestion)
             """
@@ -122,6 +138,12 @@ public enum ConfigurationValidationError: Error, LocalizedError {
              .timestepTooLarge(_, _, let suggestion),
              .insufficientMeshResolution(_, _, let suggestion):
             return suggestion
+
+        case .unknownTransportParameter(_, _, let allowed):
+            return "Use one of the model-specific parameters: \(allowed.joined(separator: ", "))"
+
+        case .transportModelMismatch(let expected, _):
+            return "Use transport parameters whose modelType is \(expected)"
 
         case .invalidParameter(_, _, let reason):
             return reason

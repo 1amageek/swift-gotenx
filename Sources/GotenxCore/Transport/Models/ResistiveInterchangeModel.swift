@@ -36,7 +36,7 @@ public struct ResistiveInterchangeModel: TransportModel {
     /// RI coefficient C_RI (dimensionless)
     ///
     /// **Typical value**: 0.1 - 1.0 (empirical, to be tuned)
-    public let coefficientRI: Float
+    public let riCoefficient: Float
 
     /// Gradient drive exponent α
     ///
@@ -48,10 +48,10 @@ public struct ResistiveInterchangeModel: TransportModel {
     /// **Typical value**: 0.01 - 0.05
     public let betaCritical: Float
 
-    /// Effective charge Z_eff for Spitzer resistivity
+    /// Effective charge effectiveCharge for Spitzer resistivity
     ///
     /// **Default**: 1.0 (pure deuterium)
-    public let Z_eff: Float
+    public let effectiveCharge: Float
 
     /// Ion mass number (1=H, 2=D, 3=T)
     ///
@@ -63,32 +63,23 @@ public struct ResistiveInterchangeModel: TransportModel {
     /// Initialize RI transport model
     ///
     /// - Parameters:
-    ///   - coefficientRI: RI coefficient C_RI (default: 0.5)
+    ///   - riCoefficient: RI coefficient C_RI (default: 0.5)
     ///   - gradientExponent: Gradient drive exponent α (default: 1.5)
     ///   - betaCritical: Critical beta β_crit (default: 0.02)
-    ///   - Z_eff: Effective charge (default: 1.0)
+    ///   - effectiveCharge: Effective charge (default: 1.0)
     ///   - ionMassNumber: Ion mass number (default: 2.0 for D)
     public init(
-        coefficientRI: Float = 0.5,
+        riCoefficient: Float = 0.5,
         gradientExponent: Float = 1.5,
         betaCritical: Float = 0.02,
-        Z_eff: Float = 1.0,
+        effectiveCharge: Float = 1.0,
         ionMassNumber: Float = 2.0
     ) {
-        self.coefficientRI = coefficientRI
+        self.riCoefficient = riCoefficient
         self.gradientExponent = gradientExponent
         self.betaCritical = betaCritical
-        self.Z_eff = Z_eff
+        self.effectiveCharge = effectiveCharge
         self.ionMassNumber = ionMassNumber
-    }
-
-    /// Initialize from parameters dictionary
-    public init(params: TransportParameters) {
-        self.coefficientRI = params.params["ri_coefficient"] ?? 0.5
-        self.gradientExponent = params.params["ri_gradient_exponent"] ?? 1.5
-        self.betaCritical = params.params["ri_beta_critical"] ?? 0.02
-        self.Z_eff = params.params["z_eff"] ?? 1.0
-        self.ionMassNumber = params.params["ion_mass_number"] ?? 2.0
     }
 
     // MARK: - TransportModel Protocol
@@ -96,9 +87,9 @@ public struct ResistiveInterchangeModel: TransportModel {
     public func computeCoefficients(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: TransportParameters
+        parameters: TransportParameters
     ) -> TransportCoefficients {
-        let nCells = profiles.ionTemperature.shape[0]
+        let cellCount = profiles.ionTemperature.shape[0]
         let radii = geometry.radii.value
 
         // Extract profiles
@@ -109,7 +100,7 @@ public struct ResistiveInterchangeModel: TransportModel {
         let eta = PlasmaPhysics.spitzerResistivity(
             Te_eV: Te_eV,
             ne_m3: ne_m3,
-            Z_eff: Z_eff
+            effectiveCharge: effectiveCharge
         )
 
         // Compute resistive diffusion time
@@ -122,7 +113,7 @@ public struct ResistiveInterchangeModel: TransportModel {
         let B_total = PlasmaPhysics.totalMagneticField(
             toroidalField: geometry.toroidalField,
             poloidalField: geometry.poloidalField?.value,
-            nCells: nCells
+            cellCount: cellCount
         )
 
         // Compute ion sound Larmor radius
@@ -163,10 +154,10 @@ public struct ResistiveInterchangeModel: TransportModel {
         let D = chi_RI / 3.0
 
         return TransportCoefficients(
-            evaluatingChiIon: chi_RI,
-            chiElectron: chi_RI,
+            ionHeatDiffusivity: chi_RI,
+            electronHeatDiffusivity: chi_RI,
             particleDiffusivity: D,
-            convectionVelocity: MLXArray.zeros([nCells])
+            convectionVelocity: MLXArray.zeros([cellCount])
         )
     }
 
@@ -202,7 +193,7 @@ public struct ResistiveInterchangeModel: TransportModel {
         // Prevent division by very small tau_R
         let tau_R_safe = clip(tau_R, min: MLXArray(Float(1e-6)), max: MLXArray(Float(1e6)))
 
-        let chi_base = MLXArray(Float(coefficientRI)) * (rho_s_squared / tau_R_safe)
+        let chi_base = MLXArray(Float(riCoefficient)) * (rho_s_squared / tau_R_safe)
 
         // Clip intermediate result to prevent overflow in subsequent operations
         let chi_base_safe = clip(chi_base, min: MLXArray(Float(1e-8)), max: MLXArray(Float(100.0)))

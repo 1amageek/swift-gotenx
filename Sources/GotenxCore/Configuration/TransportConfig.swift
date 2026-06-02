@@ -11,7 +11,13 @@ public struct TransportConfig: Codable, Sendable, Equatable {
     /// Model-specific parameters
     public let parameters: [String: Float]
 
-    public init(modelType: TransportModelType, parameters: [String: Float] = [:]) {
+    public init(modelType: TransportModelType, parameters: [String: Float] = [:]) throws {
+        self.modelType = modelType
+        self.parameters = parameters
+        try validate()
+    }
+
+    private init(uncheckedModelType modelType: TransportModelType, parameters: [String: Float]) {
         self.modelType = modelType
         self.parameters = parameters
     }
@@ -27,6 +33,7 @@ public struct TransportConfig: Codable, Sendable, Equatable {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         self.modelType = try container.decode(TransportModelType.self, forKey: .modelType)
         self.parameters = try container.decodeIfPresent([String: Float].self, forKey: .parameters) ?? [:]
+        try validate()
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -34,6 +41,7 @@ public struct TransportConfig: Codable, Sendable, Equatable {
         try container.encode(modelType, forKey: .modelType)
         try container.encode(parameters, forKey: .parameters)
     }
+
 }
 
 /// Transport model types
@@ -42,24 +50,94 @@ public enum TransportModelType: String, Codable, Sendable, CaseIterable {
     case bohmGyrobohm
     case qlknn
     case densityTransition
+
+    /// Parameter keys consumed by each transport model.
+    public var allowedParameterKeys: Set<String> {
+        switch self {
+        case .constant:
+            return [
+                "ionHeatDiffusivity",
+                "electronHeatDiffusivity",
+                "particleDiffusivity",
+                "convectionVelocity"
+            ]
+        case .bohmGyrobohm:
+            return [
+                "bohmCoefficient",
+                "gyroBohmCoefficient",
+                "ionMassNumber"
+            ]
+        case .qlknn:
+            return [
+                "effectiveCharge",
+                "minimumHeatDiffusivity"
+            ]
+        case .densityTransition:
+            return [
+                "riCoefficient",
+                "transitionDensity",
+                "transitionWidth",
+                "ionMassNumber"
+            ]
+        }
+    }
 }
 
 // MARK: - Parameter Access
 
 extension TransportConfig {
+    /// Default constant transport configuration with explicit required coefficients.
+    public static let defaultConstant = TransportConfig(
+        uncheckedModelType: .constant,
+        parameters: [
+            "ionHeatDiffusivity": 1.0,
+            "electronHeatDiffusivity": 1.0,
+            "particleDiffusivity": 0.0,
+            "convectionVelocity": 0.0
+        ]
+    )
+
+    /// Validate model-specific parameter names and required parameters.
+    public func validate() throws {
+        try validateParameterKeys()
+        try transportParameters().validateParameterValues()
+        try validateRequiredParameters()
+    }
+
+    /// Validate that all parameter keys are consumed by the selected model.
+    public func validateParameterKeys() throws {
+        try transportParameters().validateParameterKeys()
+    }
+
+    /// Validate required parameters for models that cannot infer physical defaults.
+    public func validateRequiredParameters() throws {
+        guard modelType == .constant else {
+            return
+        }
+
+        _ = try requireParameter(
+            "ionHeatDiffusivity",
+            suggestion: "Specify ionHeatDiffusivity in transport.parameters"
+        )
+        _ = try requireParameter(
+            "electronHeatDiffusivity",
+            suggestion: "Specify electronHeatDiffusivity in transport.parameters"
+        )
+    }
+
     /// Get parameter value (returns nil if missing)
     ///
     /// Use this when you need to handle missing values explicitly.
     ///
-    /// - Parameter key: Parameter key (e.g., "chi_ion")
+    /// - Parameter key: Parameter key (for example, `ionHeatDiffusivity`)
     /// - Returns: Parameter value or nil if not found
     ///
     /// Example:
     /// ```swift
-    /// if let chiIon = transport.parameter("chi_ion") {
-    ///     print("chi_ion = \(chiIon) m²/s")
+    /// if let ionHeatDiffusivity = transport.parameter("ionHeatDiffusivity") {
+    ///     print("ionHeatDiffusivity = \(ionHeatDiffusivity) m²/s")
     /// } else {
-    ///     print("chi_ion not specified")
+    ///     print("ionHeatDiffusivity not specified")
     /// }
     /// ```
     public func parameter(_ key: String) -> Float? {
@@ -70,13 +148,13 @@ extension TransportConfig {
     ///
     /// Use this for parameters that are mandatory for the model.
     ///
-    /// - Parameter key: Parameter key (e.g., "chi_ion")
+    /// - Parameter key: Parameter key (for example, `ionHeatDiffusivity`)
     /// - Returns: Parameter value
     /// - Throws: ConfigurationError.missingRequired if parameter not found
     ///
     /// Example:
     /// ```swift
-    /// let chiIon = try transport.requireParameter("chi_ion")
+    /// let ionHeatDiffusivity = try transport.requireParameter("ionHeatDiffusivity")
     /// ```
     public func requireParameter(_ key: String) throws -> Float {
         guard let value = parameters[key] else {
@@ -87,19 +165,31 @@ extension TransportConfig {
         return value
     }
 
+    /// Get required model parameter with a model-specific recovery suggestion.
+    public func requireParameter(_ key: String, suggestion: String) throws -> Float {
+        guard let value = parameters[key] else {
+            throw ConfigurationValidationError.missingRequiredParameter(
+                parameter: key,
+                modelType: modelType,
+                suggestion: suggestion
+            )
+        }
+
+        return value
+    }
+
     /// Get parameter with explicit default
     ///
     /// Use this when you have a context-independent fallback value.
     ///
     /// - Parameters:
-    ///   - key: Parameter key (e.g., "chi_ion")
+    ///   - key: Parameter key (for example, `ionHeatDiffusivity`)
     ///   - defaultValue: Fallback value
     /// - Returns: Parameter value or default
     ///
     /// Example:
     /// ```swift
-    /// // particle_diffusivity is optional for some models
-    /// let particleDiff = transport.parameter("particle_diffusivity", default: 0.0)
+    /// let particleDiffusivity = transport.parameter("particleDiffusivity", default: 0.0)
     /// ```
     public func parameter(_ key: String, default defaultValue: Float) -> Float {
         parameters[key] ?? defaultValue
@@ -110,10 +200,17 @@ extension TransportConfig {
 
 extension TransportConfig {
     /// Convert to TransportParameters for runtime
-    public func toTransportParameters() -> TransportParameters {
+    public func transportParameters() -> TransportParameters {
         TransportParameters(
-            modelType: modelType,
-            params: parameters
+            uncheckedModelType: modelType,
+            parameters: parameters
         )
+    }
+}
+
+extension TransportParameters {
+    fileprivate init(uncheckedModelType modelType: TransportModelType, parameters: [String: Float]) {
+        self.modelType = modelType
+        self.parameters = parameters
     }
 }

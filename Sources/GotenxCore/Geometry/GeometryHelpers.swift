@@ -17,58 +17,58 @@ public func computeVolume(_ mesh: MeshConfig) -> MLXArray {
     return 2.0 * Float.pi * Float.pi * rMajor * rMinor * rMinor
 }
 
-/// Compute geometric coefficient g0 for FVM
+/// Compute geometric coefficient fluxSurfaceMetric for FVM
 ///
-/// g0 = (R0 + r·cos(θ))² for circular geometry
+/// fluxSurfaceMetric = (R0 + r·cos(θ))² for circular geometry
 ///
 /// - Parameter mesh: Mesh configuration
-/// - Returns: Lazy MLXArray of shape [nFaces] (caller wraps in EvaluatedArray)
-public func computeG0(_ mesh: MeshConfig) -> MLXArray {
+/// - Returns: Lazy MLXArray of shape [faceCount] (caller wraps in EvaluatedArray)
+public func computeFluxSurfaceMetric(_ mesh: MeshConfig) -> MLXArray {
     // Grid points (face-centered)
-    let r = MLXArray.linspace(0.0, mesh.minorRadius, count: mesh.nCells + 1)
+    let r = MLXArray.linspace(0.0, mesh.minorRadius, count: mesh.cellCount + 1)
 
-    // g0 = (R0 + r)² for circular geometry (assuming θ=0)
+    // fluxSurfaceMetric = (R0 + r)² for circular geometry (assuming θ=0)
     let rMajor = MLXArray(mesh.majorRadius)
     return (rMajor + r) * (rMajor + r)
 }
 
-/// Compute geometric coefficient g1 for FVM
+/// Compute geometric coefficient majorRadiusMetric for FVM
 ///
-/// g1 = R0 + r·cos(θ) for circular geometry
+/// majorRadiusMetric = R0 + r·cos(θ) for circular geometry
 ///
 /// - Parameter mesh: Mesh configuration
-/// - Returns: Lazy MLXArray of shape [nFaces] (caller wraps in EvaluatedArray)
-public func computeG1(_ mesh: MeshConfig) -> MLXArray {
+/// - Returns: Lazy MLXArray of shape [faceCount] (caller wraps in EvaluatedArray)
+public func computeMajorRadiusMetric(_ mesh: MeshConfig) -> MLXArray {
     // Grid points (face-centered)
-    let r = MLXArray.linspace(0.0, mesh.minorRadius, count: mesh.nCells + 1)
+    let r = MLXArray.linspace(0.0, mesh.minorRadius, count: mesh.cellCount + 1)
 
-    // g1 = R0 + r for circular geometry (assuming θ=0)
+    // majorRadiusMetric = R0 + r for circular geometry (assuming θ=0)
     let rMajor = MLXArray(mesh.majorRadius)
     return rMajor + r
 }
 
-/// Compute geometric coefficient g2 for FVM
+/// Compute geometric coefficient shapeMetric for FVM
 ///
-/// g2 = 1 for circular geometry
+/// shapeMetric = 1 for circular geometry
 ///
 /// - Parameter mesh: Mesh configuration
-/// - Returns: Lazy MLXArray of shape [nFaces] (caller wraps in EvaluatedArray)
-public func computeG2(_ mesh: MeshConfig) -> MLXArray {
-    // g2 = 1 for circular geometry
-    return MLXArray.ones([mesh.nCells + 1])
+/// - Returns: Lazy MLXArray of shape [faceCount] (caller wraps in EvaluatedArray)
+public func computeShapeMetric(_ mesh: MeshConfig) -> MLXArray {
+    // shapeMetric = 1 for circular geometry
+    return MLXArray.ones([mesh.cellCount + 1])
 }
 
-/// Compute geometric coefficient g3 for FVM
+/// Compute geometric coefficient minorRadiusMetric for FVM
 ///
-/// g3 = r for circular geometry
+/// minorRadiusMetric = r for circular geometry
 ///
 /// - Parameter mesh: Mesh configuration
-/// - Returns: Lazy MLXArray of shape [nFaces] (caller wraps in EvaluatedArray)
-public func computeG3(_ mesh: MeshConfig) -> MLXArray {
+/// - Returns: Lazy MLXArray of shape [faceCount] (caller wraps in EvaluatedArray)
+public func computeMinorRadiusMetric(_ mesh: MeshConfig) -> MLXArray {
     // Grid points (face-centered)
-    let r = MLXArray.linspace(0.0, mesh.minorRadius, count: mesh.nCells + 1)
+    let r = MLXArray.linspace(0.0, mesh.minorRadius, count: mesh.cellCount + 1)
 
-    // g3 = r for circular geometry
+    // minorRadiusMetric = r for circular geometry
     return r
 }
 
@@ -80,34 +80,34 @@ public func computeG3(_ mesh: MeshConfig) -> MLXArray {
 ///
 /// - Parameters:
 ///   - mesh: Mesh configuration
-///   - q0: Safety factor at axis (default: 1.0)
-///   - qEdge: Safety factor at edge (default: 3.5)
+///   - axisSafetyFactor: Safety factor at axis (default: 1.0)
+///   - edgeSafetyFactor: Safety factor at edge (default: 3.5)
 ///   - alpha: Profile shape parameter (default: 2.0 for parabolic)
-/// - Returns: Lazy MLXArray of shape [nCells] (caller wraps in EvaluatedArray)
+/// - Returns: Lazy MLXArray of shape [cellCount] (caller wraps in EvaluatedArray)
 public func computeSafetyFactor(
     _ mesh: MeshConfig,
-    q0: Float = 1.0,
-    qEdge: Float = 3.5,
+    axisSafetyFactor: Float = 1.0,
+    edgeSafetyFactor: Float = 3.5,
     alpha: Float = 2.0
 ) -> MLXArray {
     // Cell-centered radial coordinates
-    let dr = mesh.dr
-    let r = (MLXArray(0..<mesh.nCells).asType(.float32) + 0.5) * dr
+    let radialSpacing = mesh.radialSpacing
+    let r = (MLXArray(0..<mesh.cellCount).asType(.float32) + 0.5) * radialSpacing
 
     // Normalized radius
     let rNorm = r / mesh.minorRadius
 
     // q(r) = q₀ + (q_edge - q₀) * (r/a)^α
-    return q0 + (qEdge - q0) * pow(rNorm, alpha)
+    return axisSafetyFactor + (edgeSafetyFactor - axisSafetyFactor) * pow(rNorm, alpha)
 }
 
 /// Compute cell-centered radial coordinates
 ///
 /// - Parameter mesh: Mesh configuration
-/// - Returns: Lazy MLXArray of shape [nCells] (caller wraps in EvaluatedArray)
+/// - Returns: Lazy MLXArray of shape [cellCount] (caller wraps in EvaluatedArray)
 public func computeRadii(_ mesh: MeshConfig) -> MLXArray {
-    let dr = mesh.dr
-    return (MLXArray(0..<mesh.nCells).asType(.float32) + 0.5) * dr
+    let radialSpacing = mesh.radialSpacing
+    return (MLXArray(0..<mesh.cellCount).asType(.float32) + 0.5) * radialSpacing
 }
 
 // MARK: - Geometry Construction
@@ -116,25 +116,25 @@ public func computeRadii(_ mesh: MeshConfig) -> MLXArray {
 ///
 /// - Parameters:
 ///   - mesh: Mesh configuration
-///   - q0: Safety factor at axis (default: 1.0)
-///   - qEdge: Safety factor at edge (default: 3.5)
+///   - axisSafetyFactor: Safety factor at axis (default: 1.0)
+///   - edgeSafetyFactor: Safety factor at edge (default: 3.5)
 /// - Returns: Geometry with evaluated arrays
 public func createGeometry(
     from mesh: MeshConfig,
-    q0: Float = 1.0,
-    qEdge: Float = 3.5
+    axisSafetyFactor: Float = 1.0,
+    edgeSafetyFactor: Float = 3.5
 ) -> Geometry {
     Geometry(
         majorRadius: mesh.majorRadius,
         minorRadius: mesh.minorRadius,
         toroidalField: mesh.toroidalField,
         volume: EvaluatedArray(evaluating: computeVolume(mesh)),
-        g0: EvaluatedArray(evaluating: computeG0(mesh)),
-        g1: EvaluatedArray(evaluating: computeG1(mesh)),
-        g2: EvaluatedArray(evaluating: computeG2(mesh)),
-        g3: EvaluatedArray(evaluating: computeG3(mesh)),
+        fluxSurfaceMetric: EvaluatedArray(evaluating: computeFluxSurfaceMetric(mesh)),
+        majorRadiusMetric: EvaluatedArray(evaluating: computeMajorRadiusMetric(mesh)),
+        shapeMetric: EvaluatedArray(evaluating: computeShapeMetric(mesh)),
+        minorRadiusMetric: EvaluatedArray(evaluating: computeMinorRadiusMetric(mesh)),
         radii: EvaluatedArray(evaluating: computeRadii(mesh)),
-        safetyFactor: EvaluatedArray(evaluating: computeSafetyFactor(mesh, q0: q0, qEdge: qEdge)),
+        safetyFactor: EvaluatedArray(evaluating: computeSafetyFactor(mesh, axisSafetyFactor: axisSafetyFactor, edgeSafetyFactor: edgeSafetyFactor)),
         poloidalField: nil,
         currentDensity: nil,
         type: mesh.geometryType
@@ -179,7 +179,7 @@ public struct TimeEvolvingGeometryProvider: GeometryProvider {
 
         // Scale minor radius and field with time
         let evolvedMesh = MeshConfig(
-            nCells: baseMesh.nCells,
+            cellCount: baseMesh.cellCount,
             majorRadius: baseMesh.majorRadius,
             minorRadius: baseMesh.minorRadius * scale,
             toroidalField: baseMesh.toroidalField / scale,  // Flux conservation

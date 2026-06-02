@@ -18,7 +18,7 @@ import MLX
 /// - Porcelli model for sawtooth trigger (1996)
 /// - TORAX: arXiv:2406.06718v2
 public struct SawtoothModel: MHDModel {
-    public let params: SawtoothParameters
+    public let parameters: SawtoothParameters
 
     /// Trigger model (detects when crash should occur)
     private let trigger: SimpleSawtoothTrigger
@@ -26,20 +26,20 @@ public struct SawtoothModel: MHDModel {
     /// Redistribution model (applies profile flattening with conservation)
     private let redistribution: SimpleSawtoothRedistribution
 
-    public init(params: SawtoothParameters) {
-        self.params = params
+    public init(parameters: SawtoothParameters) {
+        self.parameters = parameters
 
         // Create trigger model from parameters
         self.trigger = SimpleSawtoothTrigger(
-            minimumRadius: params.minimumRadius,
-            sCritical: params.sCritical,
-            minCrashInterval: params.minCrashInterval
+            minimumRadius: parameters.minimumRadius,
+            sCritical: parameters.sCritical,
+            minimumCrashInterval: parameters.minimumCrashInterval
         )
 
         // Create redistribution model from parameters
         self.redistribution = SimpleSawtoothRedistribution(
-            flatteningFactor: params.flatteningFactor,
-            mixingRadiusMultiplier: params.mixingRadiusMultiplier
+            flatteningFactor: parameters.flatteningFactor,
+            mixingRadiusMultiplier: parameters.mixingRadiusMultiplier
         )
     }
 
@@ -47,13 +47,13 @@ public struct SawtoothModel: MHDModel {
         to profiles: CoreProfiles,
         geometry: Geometry,
         time: Float,
-        dt: Float
+        timeStep: Float
     ) -> CoreProfiles {
         // Check if sawtooth crash should occur
         let (triggered, rhoQ1) = trigger.shouldTrigger(
             profiles: profiles,
             geometry: geometry,
-            dt: dt
+            timeStep: timeStep
         )
 
         guard triggered, let rhoQ1 = rhoQ1 else {

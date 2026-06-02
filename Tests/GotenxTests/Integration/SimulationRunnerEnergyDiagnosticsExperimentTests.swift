@@ -7,10 +7,10 @@ struct SimulationRunnerEnergyDiagnosticsExperimentTests {
 
     @Test("Runner energy diagnostics are consistent with final-state source metadata", .timeLimit(.minutes(1)))
     func runnerEnergyDiagnosticsUseFinalStateSources() async throws {
-        let config = Self.makeConfig()
+        let config = try Self.makeConfig()
         let transport = ConstantTransportModel(
-            chiIon: 1.0,
-            chiElectron: 1.0,
+            ionHeatDiffusivity: 1.0,
+            electronHeatDiffusivity: 1.0,
             particleDiffusivity: 0.0
         )
         let source = TemperatureScaledDiagnosticSource()
@@ -25,19 +25,19 @@ struct SimulationRunnerEnergyDiagnosticsExperimentTests {
         let runnerDerived = try #require(finalTimePoint.derived)
 
         #expect(abs(finalTimePoint.time - config.time.end) < 1e-8)
-        #expect(runnerDerived.W_thermal > 0)
-        #expect(runnerDerived.W_ion > 0)
-        #expect(runnerDerived.W_electron > 0)
-        #expect(runnerDerived.P_auxiliary > 0)
-        #expect(runnerDerived.P_ohmic > 0)
-        #expect(runnerDerived.tau_E > 0)
+        #expect(runnerDerived.thermalEnergy > 0)
+        #expect(runnerDerived.ionThermalEnergy > 0)
+        #expect(runnerDerived.electronThermalEnergy > 0)
+        #expect(runnerDerived.auxiliaryPower > 0)
+        #expect(runnerDerived.ohmicPower > 0)
+        #expect(runnerDerived.energyConfinementTime > 0)
 
         let finalProfiles = CoreProfiles(from: result.finalProfiles)
         let geometry = Geometry(config: config.runtime.static.mesh)
         let finalSources = source.computeTerms(
             profiles: finalProfiles,
             geometry: geometry,
-            params: SourceParameters(modelType: "composite")
+            parameters: SourceParameters(modelType: "composite")
         )
         let recomputed = DerivedQuantitiesComputer.compute(
             profiles: finalProfiles,
@@ -45,31 +45,31 @@ struct SimulationRunnerEnergyDiagnosticsExperimentTests {
             sources: finalSources
         )
 
-        #expect(Self.relativeDifference(runnerDerived.W_thermal, recomputed.W_thermal) < 1e-5)
-        #expect(Self.relativeDifference(runnerDerived.P_auxiliary, recomputed.P_auxiliary) < 1e-5)
-        #expect(Self.relativeDifference(runnerDerived.P_ohmic, recomputed.P_ohmic) < 1e-5)
-        #expect(Self.relativeDifference(runnerDerived.tau_E, recomputed.tau_E) < 1e-5)
+        #expect(Self.relativeDifference(runnerDerived.thermalEnergy, recomputed.thermalEnergy) < 1e-5)
+        #expect(Self.relativeDifference(runnerDerived.auxiliaryPower, recomputed.auxiliaryPower) < 1e-5)
+        #expect(Self.relativeDifference(runnerDerived.ohmicPower, recomputed.ohmicPower) < 1e-5)
+        #expect(Self.relativeDifference(runnerDerived.energyConfinementTime, recomputed.energyConfinementTime) < 1e-5)
 
-        let heatingPower = runnerDerived.P_auxiliary + runnerDerived.P_ohmic + runnerDerived.P_alpha
-        let expectedTauE = runnerDerived.W_thermal / heatingPower
-        #expect(Self.relativeDifference(runnerDerived.tau_E, expectedTauE) < 1e-5)
+        let heatingPower = runnerDerived.auxiliaryPower + runnerDerived.ohmicPower + runnerDerived.alphaPower
+        let expectedTauE = runnerDerived.thermalEnergy / heatingPower
+        #expect(Self.relativeDifference(runnerDerived.energyConfinementTime, expectedTauE) < 1e-5)
 
         print(
             """
             ENERGY DIAGNOSTICS EXPERIMENT:
-              W_thermal=\(runnerDerived.W_thermal) MJ
-              P_auxiliary=\(runnerDerived.P_auxiliary) MW
-              P_ohmic=\(runnerDerived.P_ohmic) MW
-              tau_E=\(runnerDerived.tau_E) s
+              thermalEnergy=\(runnerDerived.thermalEnergy) MJ
+              auxiliaryPower=\(runnerDerived.auxiliaryPower) MW
+              ohmicPower=\(runnerDerived.ohmicPower) MW
+              energyConfinementTime=\(runnerDerived.energyConfinementTime) s
               final_time=\(finalTimePoint.time) s
               steps=\(result.statistics.totalSteps)
             """
         )
     }
 
-    private static func makeConfig() -> SimulationConfiguration {
+    private static func makeConfig() throws -> SimulationConfiguration {
         let mesh = MeshConfig(
-            nCells: 30,
+            cellCount: 30,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5,
@@ -83,15 +83,15 @@ struct SimulationRunnerEnergyDiagnosticsExperimentTests {
                     evolution: EvolutionConfig(
                         ionHeat: true,
                         electronHeat: true,
-                        density: false,
-                        current: false
+                        electronDensity: false,
+                        poloidalFlux: false
                     ),
                     solver: SolverConfig(
                         type: "newton",
                         tolerance: 1e-6,
                         tolerances: nil,
                         physicalThresholds: .default,
-                        maxIterations: 30
+                        maximumIterations: 30
                     ),
                     scheme: SchemeConfig(theta: 1.0, usePereverzev: false)
                 ),
@@ -99,15 +99,15 @@ struct SimulationRunnerEnergyDiagnosticsExperimentTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 1000,
                         electronTemperature: 1000,
-                        density: 1e19,
+                        electronDensity: 1e19,
                         type: .dirichlet
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 1.0,
-                            "chi_electron": 1.0,
-                            "particle_diffusivity": 0.0
+                            "ionHeatDiffusivity": 1.0,
+                            "electronHeatDiffusivity": 1.0,
+                            "particleDiffusivity": 0.0
                         ]
                     ),
                     sources: SourcesConfig(
@@ -123,13 +123,13 @@ struct SimulationRunnerEnergyDiagnosticsExperimentTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 5e-4,
-                initialDt: 1e-4,
+                initialTimeStep: 1e-4,
                 adaptive: AdaptiveTimestepConfig(
-                    minDt: 1e-6,
-                    minDtFraction: nil,
-                    maxDt: 1e-4,
+                    minimumTimeStep: 1e-6,
+                    minimumTimeStepFraction: nil,
+                    maximumTimeStep: 1e-4,
                     safetyFactor: 0.9,
-                    maxTimestepGrowth: 1.0
+                    maximumTimeStepGrowth: 1.0
                 )
             )
         )
@@ -146,7 +146,7 @@ private struct TemperatureScaledDiagnosticSource: SourceModel {
     func computeTerms(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: SourceParameters
+        parameters: SourceParameters
     ) -> SourceTerms {
         let terms = makeTerms(profiles: profiles)
         let volumes = GeometricFactors.from(geometry: geometry).cellVolumes.value
@@ -182,20 +182,20 @@ private struct TemperatureScaledDiagnosticSource: SourceModel {
     func computeTermsForSolver(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: SourceParameters
+        parameters: SourceParameters
     ) -> SourceTerms {
         makeTerms(profiles: profiles)
     }
 
     private func makeTerms(profiles: CoreProfiles) -> SourceTerms {
-        let nCells = profiles.ionTemperature.shape[0]
+        let cellCount = profiles.ionTemperature.shape[0]
         let ionHeating = profiles.ionTemperature.value * 0.0002
         let electronHeating = profiles.electronTemperature.value * 0.0004
         let evaluated = EvaluatedArray.evaluatingBatch([
             ionHeating,
             electronHeating,
-            MLXArray.zeros([nCells]),
-            MLXArray.zeros([nCells])
+            MLXArray.zeros([cellCount]),
+            MLXArray.zeros([cellCount])
         ])
 
         return SourceTerms(

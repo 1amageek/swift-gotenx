@@ -25,20 +25,20 @@ import Foundation
 ///   - **Pro**: Simpler, matches Python TORAX, adequate for slow density evolution
 ///   - **Con**: May have small energy conservation errors during rapid density changes
 ///
-/// The `transientCoeff` field in `EquationCoeffs` contains n_e(r) to properly weight the time derivative.
+/// The `transientCoefficient` field in `EquationCoeffs` contains n_e(r) to properly weight the time derivative.
 ///
 /// - Parameters:
 ///   - transport: Transport coefficients (chi, D, V)
 ///   - sources: Source terms (heating, particles, current)
 ///   - geometry: Tokamak geometry
-///   - staticParams: Static runtime parameters
+///   - staticParameters: Static runtime parameters
 ///   - profiles: Current core profiles used for spatial density weighting
 /// - Returns: Block coefficients with per-equation structure
 public func buildBlock1DCoeffs(
     transport: TransportCoefficients,
     sources: SourceTerms,
     geometry: Geometry,
-    staticParams: StaticRuntimeParams,
+    staticParameters: StaticRuntimeParameters,
     profiles: CoreProfiles
 ) -> Block1DCoeffs {
     // Build geometric factors (shared across equations)
@@ -49,7 +49,7 @@ public func buildBlock1DCoeffs(
         transport: transport,
         sources: sources,
         geometry: geometry,
-        staticParams: staticParams,
+        staticParameters: staticParameters,
         profiles: profiles
     )
 
@@ -57,7 +57,7 @@ public func buildBlock1DCoeffs(
         transport: transport,
         sources: sources,
         geometry: geometry,
-        staticParams: staticParams,
+        staticParameters: staticParameters,
         profiles: profiles
     )
 
@@ -65,7 +65,7 @@ public func buildBlock1DCoeffs(
         transport: transport,
         sources: sources,
         geometry: geometry,
-        staticParams: staticParams,
+        staticParameters: staticParameters,
         profiles: profiles
     )
 
@@ -73,7 +73,7 @@ public func buildBlock1DCoeffs(
         transport: transport,
         sources: sources,
         geometry: geometry,
-        staticParams: staticParams,
+        staticParameters: staticParameters,
         profiles: profiles
     )
 
@@ -97,27 +97,27 @@ private func buildIonEquationCoeffs(
     transport: TransportCoefficients,
     sources: SourceTerms,
     geometry: Geometry,
-    staticParams: StaticRuntimeParams,
+    staticParameters: StaticRuntimeParameters,
     profiles: CoreProfiles
 ) -> EquationCoeffs {
-    let nCells = geometry.nCells
-    let nFaces = nCells + 1
+    let cellCount = geometry.cellCount
+    let faceCount = cellCount + 1
 
     // Interpolate transport coefficients to faces
-    let chiIonFaces = interpolateToFaces(transport.chiIon.value, mode: .harmonic)  // [nFaces]
+    let ionHeatDiffusivityFaces = interpolateToFaces(transport.ionHeatDiffusivity.value, mode: .harmonic)  // [faceCount]
 
     // Use the actual density profile with a physical floor.
-    // The floor prevents division by zero in non-conservation form (dT/dt = rhs / n_e).
+    // The floor prevents division by zero in non-conservation form (dT/timeStep = rhs / n_e).
     let ne_floor: Float = 1e18  // [m⁻³]
-    let ne_cell = maximum(profiles.electronDensity.value, MLXArray(ne_floor))  // [nCells] - actual spatial profile with floor
-    let ne_face = interpolateToFaces(ne_cell, mode: .harmonic)  // [nFaces]
+    let ne_cell = maximum(profiles.electronDensity.value, MLXArray(ne_floor))  // [cellCount] - actual spatial profile with floor
+    let ne_face = interpolateToFaces(ne_cell, mode: .harmonic)  // [faceCount]
 
     // Diffusion coefficient: d = n_e * χ_i (with spatial variation!)
-    let dFace = chiIonFaces * ne_face  // [nFaces]
+    let faceDiffusionCoefficient = ionHeatDiffusivityFaces * ne_face  // [faceCount]
 
     // Convection velocity: v = n_e * V_i
     // For now, assume no ion heat convection (V_i = 0)
-    let vFace = MLXArray.zeros([nFaces])  // [nFaces]
+    let faceConvectionVelocity = MLXArray.zeros([faceCount])  // [faceCount]
 
     // Source term: Q_i - Q_exchange
     // SourceTerms provides heating in [MW/m³].
@@ -129,22 +129,22 @@ private func buildIonEquationCoeffs(
     //   Source:     Must be [eV/(m³·s)]
     //
     // Conversion: 1 MW/m³ = 6.2415090744×10²⁴ eV/(m³·s)
-    let sourceCell = UnitConversions.megawattsToEvDensity(sources.ionHeating.value)  // [eV/(m³·s)]
-    // Q_exchange is implicit coupling term (handled via sourceMatCell)
+    let cellSource = UnitConversions.megawattsToElectronVoltDensity(sources.ionHeating.value)  // [eV/(m³·s)]
+    // Q_exchange is implicit coupling term (handled via cellSourceMatrixCoefficient)
 
     // Source matrix coefficient: -Q_exchange coupling
     // For now, assume decoupled (explicit exchange in source)
-    let sourceMatCell = MLXArray.zeros([nCells])  // [nCells]
+    let cellSourceMatrixCoefficient = MLXArray.zeros([cellCount])  // [cellCount]
 
     // Transient coefficient: n_e (with spatial variation!)
-    let transientCoeff = ne_cell  // [nCells] - actual density profile
+    let transientCoefficient = ne_cell  // [cellCount] - actual density profile
 
     return EquationCoeffs(
-        evaluatingDface: dFace,
-        vFace: vFace,
-        sourceCell: sourceCell,
-        sourceMatCell: sourceMatCell,
-        transientCoeff: transientCoeff
+        faceDiffusionCoefficient: faceDiffusionCoefficient,
+        faceConvectionVelocity: faceConvectionVelocity,
+        cellSource: cellSource,
+        cellSourceMatrixCoefficient: cellSourceMatrixCoefficient,
+        transientCoefficient: transientCoefficient
     )
 }
 
@@ -157,27 +157,27 @@ private func buildElectronEquationCoeffs(
     transport: TransportCoefficients,
     sources: SourceTerms,
     geometry: Geometry,
-    staticParams: StaticRuntimeParams,
+    staticParameters: StaticRuntimeParameters,
     profiles: CoreProfiles
 ) -> EquationCoeffs {
-    let nCells = geometry.nCells
-    let nFaces = nCells + 1
+    let cellCount = geometry.cellCount
+    let faceCount = cellCount + 1
 
     // Interpolate transport coefficients to faces
-    let chiElectronFaces = interpolateToFaces(transport.chiElectron.value, mode: .harmonic)  // [nFaces]
+    let electronHeatDiffusivityFaces = interpolateToFaces(transport.electronHeatDiffusivity.value, mode: .harmonic)  // [faceCount]
 
     // Use the actual density profile with a physical floor.
-    // The floor prevents division by zero in non-conservation form (dT/dt = rhs / n_e).
+    // The floor prevents division by zero in non-conservation form (dT/timeStep = rhs / n_e).
     let ne_floor: Float = 1e18  // [m⁻³]
-    let ne_cell = maximum(profiles.electronDensity.value, MLXArray(ne_floor))  // [nCells] - actual spatial profile with floor
-    let ne_face = interpolateToFaces(ne_cell, mode: .harmonic)  // [nFaces]
+    let ne_cell = maximum(profiles.electronDensity.value, MLXArray(ne_floor))  // [cellCount] - actual spatial profile with floor
+    let ne_face = interpolateToFaces(ne_cell, mode: .harmonic)  // [faceCount]
 
     // Diffusion coefficient: d = n_e * χ_e (with spatial variation!)
-    let dFace = chiElectronFaces * ne_face  // [nFaces]
+    let faceDiffusionCoefficient = electronHeatDiffusivityFaces * ne_face  // [faceCount]
 
     // Convection velocity: v = n_e * V_e
     // For now, assume no electron heat convection (V_e = 0)
-    let vFace = MLXArray.zeros([nFaces])  // [nFaces]
+    let faceConvectionVelocity = MLXArray.zeros([faceCount])  // [faceCount]
 
     // Source term: Q_e + Q_ohmic (Q_exchange handled via coupling)
     // SourceTerms provides heating in [MW/m³].
@@ -189,20 +189,20 @@ private func buildElectronEquationCoeffs(
     //   Source:     Must be [eV/(m³·s)]
     //
     // Conversion: 1 MW/m³ = 6.2415090744×10²⁴ eV/(m³·s)
-    let sourceCell = UnitConversions.megawattsToEvDensity(sources.electronHeating.value)  // [eV/(m³·s)]
+    let cellSource = UnitConversions.megawattsToElectronVoltDensity(sources.electronHeating.value)  // [eV/(m³·s)]
 
     // Source matrix coefficient
-    let sourceMatCell = MLXArray.zeros([nCells])  // [nCells]
+    let cellSourceMatrixCoefficient = MLXArray.zeros([cellCount])  // [cellCount]
 
     // Transient coefficient: n_e (with spatial variation!)
-    let transientCoeff = ne_cell  // [nCells] - actual density profile
+    let transientCoefficient = ne_cell  // [cellCount] - actual density profile
 
     return EquationCoeffs(
-        evaluatingDface: dFace,
-        vFace: vFace,
-        sourceCell: sourceCell,
-        sourceMatCell: sourceMatCell,
-        transientCoeff: transientCoeff
+        faceDiffusionCoefficient: faceDiffusionCoefficient,
+        faceConvectionVelocity: faceConvectionVelocity,
+        cellSource: cellSource,
+        cellSourceMatrixCoefficient: cellSourceMatrixCoefficient,
+        transientCoefficient: transientCoefficient
     )
 }
 
@@ -215,37 +215,36 @@ private func buildDensityEquationCoeffs(
     transport: TransportCoefficients,
     sources: SourceTerms,
     geometry: Geometry,
-    staticParams: StaticRuntimeParams,
+    staticParameters: StaticRuntimeParameters,
     profiles: CoreProfiles
 ) -> EquationCoeffs {
-    let nCells = geometry.nCells
-    let nFaces = nCells + 1
+    let cellCount = geometry.cellCount
 
     // Interpolate particle diffusivity to faces
-    let DFaces = interpolateToFaces(transport.particleDiffusivity.value, mode: .harmonic)  // [nFaces]
+    let DFaces = interpolateToFaces(transport.particleDiffusivity.value, mode: .harmonic)  // [faceCount]
 
     // Diffusion coefficient
-    let dFace = DFaces  // [nFaces]
+    let faceDiffusionCoefficient = DFaces  // [faceCount]
 
     // Convection velocity
-    let VFaces = interpolateToFaces(transport.convectionVelocity.value, mode: .arithmetic)  // [nFaces]
-    let vFace = VFaces  // [nFaces]
+    let VFaces = interpolateToFaces(transport.convectionVelocity.value, mode: .arithmetic)  // [faceCount]
+    let faceConvectionVelocity = VFaces  // [faceCount]
 
     // Source term
-    let sourceCell = sources.particleSource.value  // [nCells]
+    let cellSource = sources.particleSource.value  // [cellCount]
 
     // Source matrix coefficient
-    let sourceMatCell = MLXArray.zeros([nCells])  // [nCells]
+    let cellSourceMatrixCoefficient = MLXArray.zeros([cellCount])  // [cellCount]
 
     // Transient coefficient: 1.0 (continuity equation)
-    let transientCoeff = MLXArray.ones([nCells])  // [nCells]
+    let transientCoefficient = MLXArray.ones([cellCount])  // [cellCount]
 
     return EquationCoeffs(
-        evaluatingDface: dFace,
-        vFace: vFace,
-        sourceCell: sourceCell,
-        sourceMatCell: sourceMatCell,
-        transientCoeff: transientCoeff
+        faceDiffusionCoefficient: faceDiffusionCoefficient,
+        faceConvectionVelocity: faceConvectionVelocity,
+        cellSource: cellSource,
+        cellSourceMatrixCoefficient: cellSourceMatrixCoefficient,
+        transientCoefficient: transientCoefficient
     )
 }
 
@@ -263,21 +262,21 @@ private func buildFluxEquationCoeffs(
     transport: TransportCoefficients,
     sources: SourceTerms,
     geometry: Geometry,
-    staticParams: StaticRuntimeParams,
+    staticParameters: StaticRuntimeParameters,
     profiles: CoreProfiles
 ) -> EquationCoeffs {
-    let nCells = geometry.nCells
-    let nFaces = nCells + 1
+    let cellCount = geometry.cellCount
+    let faceCount = cellCount + 1
 
     // 1. Temperature-dependent resistivity (Spitzer formula with neoclassical correction)
     let eta_cell = computeSpitzerResistivity(
-        Te: profiles.electronTemperature.value,
+        electronTemperature: profiles.electronTemperature.value,
         geometry: geometry
     )
-    let dFace = interpolateToFaces(eta_cell, mode: .harmonic)  // [nFaces]
+    let faceDiffusionCoefficient = interpolateToFaces(eta_cell, mode: .harmonic)  // [faceCount]
 
     // No convection for flux
-    let vFace = MLXArray.zeros([nFaces])  // [nFaces]
+    let faceConvectionVelocity = MLXArray.zeros([faceCount])  // [faceCount]
 
     // 2. Bootstrap current from pressure gradients
     let J_bootstrap = computeBootstrapCurrent(
@@ -289,21 +288,21 @@ private func buildFluxEquationCoeffs(
     // Note: J_bootstrap is in A/m², J_external is in MA/m²
     // Convert J_bootstrap to MA/m² before adding
     let J_external = sources.currentSource.value  // [MA/m²]
-    let sourceCell = J_bootstrap / 1e6 + J_external  // [MA/m²]
+    let cellSource = J_bootstrap / 1e6 + J_external  // [MA/m²]
 
     // Source matrix coefficient
-    let sourceMatCell = MLXArray.zeros([nCells])  // [nCells]
+    let cellSourceMatrixCoefficient = MLXArray.zeros([cellCount])  // [cellCount]
 
     // Transient coefficient: L_p (poloidal inductance)
     // For simplicity, use 1.0 (properly should be μ₀ R₀)
-    let transientCoeff = MLXArray.ones([nCells])  // [nCells]
+    let transientCoefficient = MLXArray.ones([cellCount])  // [cellCount]
 
     return EquationCoeffs(
-        evaluatingDface: dFace,
-        vFace: vFace,
-        sourceCell: sourceCell,
-        sourceMatCell: sourceMatCell,
-        transientCoeff: transientCoeff
+        faceDiffusionCoefficient: faceDiffusionCoefficient,
+        faceConvectionVelocity: faceConvectionVelocity,
+        cellSource: cellSource,
+        cellSourceMatrixCoefficient: cellSourceMatrixCoefficient,
+        transientCoefficient: transientCoefficient
     )
 }
 
@@ -331,28 +330,28 @@ private enum InterpolationMode {
 /// Interpolate cell-centered values to faces
 ///
 /// - Parameters:
-///   - cellValues: Values at cell centers [nCells]
+///   - cellValues: Values at cell centers [cellCount]
 ///   - mode: Interpolation mode (arithmetic or harmonic)
-/// - Returns: Values at cell faces [nFaces]
+/// - Returns: Values at cell faces [faceCount]
 private func interpolateToFaces(_ cellValues: MLXArray, mode: InterpolationMode) -> MLXArray {
     let values = stopGradient(cellValues)
-    let nCells = values.shape[0]
+    let cellCount = values.shape[0]
 
     // Interior faces
-    let leftCells = values[0..<(nCells - 1)]   // [nCells-1]
-    let rightCells = values[1..<nCells]        // [nCells-1]
+    let leftCells = values[0..<(cellCount - 1)]   // [cellCount-1]
+    let rightCells = values[1..<cellCount]        // [cellCount-1]
 
     let interiorFaces: MLXArray
     switch mode {
     case .arithmetic:
         // Simple average
-        interiorFaces = (leftCells + rightCells) / 2.0  // [nCells-1]
+        interiorFaces = (leftCells + rightCells) / 2.0  // [cellCount-1]
 
     case .harmonic:
         // Harmonic mean in reciprocal form avoids Float32 overflow when
         // densities are around 1e20 m^-3.
         let reciprocalSum = 1.0 / (leftCells + 1e-30) + 1.0 / (rightCells + 1e-30)
-        interiorFaces = 2.0 / (reciprocalSum + 1e-30)  // [nCells-1]
+        interiorFaces = 2.0 / (reciprocalSum + 1e-30)  // [cellCount-1]
     }
 
     // Boundary faces use adjacent cell values. Keep interpolation on MLX, but freeze
@@ -361,7 +360,7 @@ private func interpolateToFaces(_ cellValues: MLXArray, mode: InterpolationMode)
     return concatenated([
         values[0..<1],
         interiorFaces,
-        values[(nCells - 1)..<nCells]
+        values[(cellCount - 1)..<cellCount]
     ], axis: 0)
 }
 
@@ -371,33 +370,33 @@ private func interpolateToFaces(_ cellValues: MLXArray, mode: InterpolationMode)
 ///
 /// **Formula**:
 /// ```
-/// η_Spitzer = 5.2 × 10⁻⁵ * Z_eff * ln(Λ) / T_e^(3/2)  [Ω·m]
+/// η_Spitzer = 5.2 × 10⁻⁵ * effectiveCharge * ln(Λ) / T_e^(3/2)  [Ω·m]
 /// η_neo = η_Spitzer * (1 + 1.46 * √ε)  [neoclassical correction]
 /// ```
 ///
 /// **Parameters**:
-/// - Te: Electron temperature [eV], shape [nCells]
+/// - electronTemperature: Electron temperature [eV], shape [cellCount]
 /// - geometry: Tokamak geometry
 ///
-/// **Returns**: Resistivity [Ω·m], shape [nCells]
+/// **Returns**: Resistivity [Ω·m], shape [cellCount]
 ///
 /// **References**:
 /// - Spitzer & Härm, "Transport Phenomena in a Completely Ionized Gas", Phys. Rev. 89, 977 (1953)
 /// - NRL Plasma Formulary (2019)
 ///
 /// **Implementation Note**:
-/// Uses default Zeff = 1.5 (typical for ITER with low-Z impurities).
-/// Future enhancement: extract Zeff from TransportParameters.params if available.
+/// Uses default effectiveCharge = 1.5 (typical for ITER with low-Z impurities).
+/// Future enhancement: extract effectiveCharge from TransportParameters.parameters if available.
 private func computeSpitzerResistivity(
-    Te: MLXArray,
+    electronTemperature: MLXArray,
     geometry: Geometry
 ) -> MLXArray {
     // Default parameters (consistent with OhmicHeating.swift)
-    let Zeff: Float = 1.5        // Effective charge (deuterium + low-Z impurities)
+    let effectiveCharge: Float = 1.5        // Effective charge (deuterium + low-Z impurities)
     let coulombLog: Float = 17.0  // Coulomb logarithm (typical for tokamak core)
 
-    // Spitzer resistivity: η = 5.2e-5 * Zeff * ln(Λ) / T_e^(3/2)
-    let eta_spitzer = 5.2e-5 * Zeff * coulombLog / pow(Te, 1.5)
+    // Spitzer resistivity: η = 5.2e-5 * effectiveCharge * ln(Λ) / T_e^(3/2)
+    let eta_spitzer = 5.2e-5 * effectiveCharge * coulombLog / pow(electronTemperature, 1.5)
 
     // Neoclassical correction for trapped particles
     // Inverse aspect ratio: ε = r/R₀
@@ -429,7 +428,7 @@ private func computeSpitzerResistivity(
 /// - profiles: Current core profiles
 /// - geometry: Tokamak geometry
 ///
-/// **Returns**: Bootstrap current density [A/m²], shape [nCells]
+/// **Returns**: Bootstrap current density [A/m²], shape [cellCount]
 ///
 /// **References**:
 /// - Sauter et al., PoP 6, 2834 (1999), Eqs. 13-14, Table I
@@ -442,7 +441,7 @@ private func computeBootstrapCurrent(
     let ne = profiles.electronDensity.value
 
     // 1. Total pressure: P = n_e (T_i + T_e) * e
-    let P = ne * (Ti + Te) * UnitConversions.eV  // [Pa]
+    let P = ne * (Ti + Te) * UnitConversions.electronVolt  // [Pa]
 
     // 2. Pressure gradient: ∇P [Pa/m]
     let geoFactors = GeometricFactors.from(geometry: geometry)
@@ -450,8 +449,8 @@ private func computeBootstrapCurrent(
 
     // 3. Normalized collisionality ν*
     let nu_star = CollisionalityHelpers.computeNormalizedCollisionality(
-        Te: Te,
-        ne: ne,
+        electronTemperature: Te,
+        electronDensity: ne,
         geometry: geometry
     )
 
@@ -463,9 +462,9 @@ private func computeBootstrapCurrent(
     let ft = 1.0 - sqrt(1.0 - epsilon_safe)
 
     // 5. Sauter coefficients L₃₁, L₃₂, L₃₄
-    let L31 = computeSauterL31(nu_star: nu_star, ft: ft)
-    let L32 = computeSauterL32(nu_star: nu_star, ft: ft)
-    let L34 = computeSauterL34(nu_star: nu_star, ft: ft)
+    let L31 = computeSauterL31(normalizedCollisionality: nu_star, ft: ft)
+    let L32 = computeSauterL32(normalizedCollisionality: nu_star, ft: ft)
+    let L34 = computeSauterL34(normalizedCollisionality: nu_star, ft: ft)
 
     // 6. Pressure anisotropy parameter α (assume isotropic: α = 0)
     let alpha = MLXArray.zeros(like: Te)
@@ -493,12 +492,12 @@ private func computeBootstrapCurrent(
 /// ```
 ///
 /// - Parameters:
-///   - nu_star: Normalized collisionality [dimensionless]
+///   - normalizedCollisionality: Normalized collisionality [dimensionless]
 ///   - ft: Trapped fraction [dimensionless]
 /// - Returns: L₃₁ coefficient [dimensionless]
-private func computeSauterL31(nu_star: MLXArray, ft: MLXArray) -> MLXArray {
+private func computeSauterL31(normalizedCollisionality: MLXArray, ft: MLXArray) -> MLXArray {
     let ft_safe = ft + 1e-10
-    let nu_safe = nu_star + 1e-10
+    let nu_safe = normalizedCollisionality + 1e-10
 
     let numerator = (1.0 + 0.15 / ft_safe) - 0.22 / (1.0 + 0.01 * nu_safe)
     let denominator = 1.0 + 0.5 * sqrt(nu_safe)
@@ -509,23 +508,23 @@ private func computeSauterL31(nu_star: MLXArray, ft: MLXArray) -> MLXArray {
 /// Compute Sauter L₃₂ coefficient (pressure anisotropy correction)
 ///
 /// - Parameters:
-///   - nu_star: Normalized collisionality [dimensionless]
+///   - normalizedCollisionality: Normalized collisionality [dimensionless]
 ///   - ft: Trapped fraction [dimensionless]
 /// - Returns: L₃₂ coefficient [dimensionless]
-private func computeSauterL32(nu_star: MLXArray, ft: MLXArray) -> MLXArray {
+private func computeSauterL32(normalizedCollisionality: MLXArray, ft: MLXArray) -> MLXArray {
     // Simplified: L₃₂ ≈ 0.05
-    return MLXArray.full(nu_star.shape, values: MLXArray(0.05))
+    return MLXArray.full(normalizedCollisionality.shape, values: MLXArray(0.05))
 }
 
 /// Compute Sauter L₃₄ coefficient (second-order pressure anisotropy)
 ///
 /// - Parameters:
-///   - nu_star: Normalized collisionality [dimensionless]
+///   - normalizedCollisionality: Normalized collisionality [dimensionless]
 ///   - ft: Trapped fraction [dimensionless]
 /// - Returns: L₃₄ coefficient [dimensionless]
-private func computeSauterL34(nu_star: MLXArray, ft: MLXArray) -> MLXArray {
+private func computeSauterL34(normalizedCollisionality: MLXArray, ft: MLXArray) -> MLXArray {
     // Simplified: L₃₄ ≈ 0.01
-    return MLXArray.full(nu_star.shape, values: MLXArray(0.01))
+    return MLXArray.full(normalizedCollisionality.shape, values: MLXArray(0.01))
 }
 
 /// Compute gradient with epsilon regularization
@@ -533,26 +532,26 @@ private func computeSauterL34(nu_star: MLXArray, ft: MLXArray) -> MLXArray {
 /// **Formula**: ∇f ≈ (f[i+1] - f[i]) / Δr
 ///
 /// **Parameters**:
-/// - profile: Profile values [nCells]
-/// - cellDistances: Distance between cell centers [nCells-1]
+/// - profile: Profile values [cellCount]
+/// - cellDistances: Distance between cell centers [cellCount-1]
 ///
-/// **Returns**: Gradient at cell centers [nCells]
+/// **Returns**: Gradient at cell centers [cellCount]
 ///
 /// **Implementation**:
 /// - Interior cells: central differencing
 /// - Boundary cells: one-sided differencing
 /// - Epsilon regularization prevents division by zero
 private func computeGradient(_ profile: MLXArray, cellDistances: MLXArray) -> MLXArray {
-    let nCells = profile.shape[0]
+    let cellCount = profile.shape[0]
 
     // Compute differences: Δf = f[i+1] - f[i]
-    let df = profile[1...] - profile[..<(nCells - 1)]  // [nCells-1]
+    let df = profile[1...] - profile[..<(cellCount - 1)]  // [cellCount-1]
 
     // Add epsilon to prevent division by zero
-    let dr_safe = cellDistances + 1e-10  // [nCells-1]
+    let dr_safe = cellDistances + 1e-10  // [cellCount-1]
 
     // Gradient at interior faces
-    let gradFaces = df / dr_safe  // [nCells-1]
+    let gradFaces = df / dr_safe  // [cellCount-1]
 
     // Interpolate to cell centers (GPU-first, no CPU transfer)
     // - Boundary cells: use nearest face value
@@ -561,16 +560,16 @@ private func computeGradient(_ profile: MLXArray, cellDistances: MLXArray) -> ML
     // Left boundary cell (i=0): use gradFaces[0]
     let gradCell0 = gradFaces[0..<1]  // [1]
 
-    // Interior cells (i=1...nCells-2): average of adjacent faces
+    // Interior cells (i=1...cellCount-2): average of adjacent faces
     // gradCell[i] = (gradFaces[i-1] + gradFaces[i]) / 2
-    let leftFaces = gradFaces[0..<(nCells - 2)]   // [nCells-2]
-    let rightFaces = gradFaces[1..<(nCells - 1)]  // [nCells-2]
-    let gradInterior = (leftFaces + rightFaces) / 2.0  // [nCells-2]
+    let leftFaces = gradFaces[0..<(cellCount - 2)]   // [cellCount-2]
+    let rightFaces = gradFaces[1..<(cellCount - 1)]  // [cellCount-2]
+    let gradInterior = (leftFaces + rightFaces) / 2.0  // [cellCount-2]
 
-    // Right boundary cell (i=nCells-1): use gradFaces[nCells-2]
-    let gradCellN = gradFaces[(nCells - 2)..<(nCells - 1)]  // [1]
+    // Right boundary cell (i=cellCount-1): use gradFaces[cellCount-2]
+    let gradCellN = gradFaces[(cellCount - 2)..<(cellCount - 1)]  // [1]
 
-    // Concatenate: [1] + [nCells-2] + [1] = [nCells]
+    // Concatenate: [1] + [cellCount-2] + [1] = [cellCount]
     let gradCells = concatenated([gradCell0, gradInterior, gradCellN], axis: 0)
 
     return gradCells

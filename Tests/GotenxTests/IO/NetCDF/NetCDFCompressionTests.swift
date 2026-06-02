@@ -44,7 +44,7 @@ struct NetCDFCompressionTests {
         ]
 
         // Write realistic test data (100 time points × 100 radial points)
-        let nTime = 100
+        let timeCount = 100
         let nRho = 100
 
         // Create variables with metadata and write data
@@ -61,11 +61,11 @@ struct NetCDFCompressionTests {
             try variable.setAttribute("coordinates", "time rho_tor_norm")
 
             // Generate realistic data for this variable
-            let data: [Float] = (0..<(nTime * nRho)).map { i in
+            let data: [Float] = (0..<(timeCount * nRho)).map { i in
                 let timeIdx = i / nRho
                 let rhoIdx = i % nRho
                 let rho = Float(rhoIdx) / Float(nRho - 1)  // 0.0 → 1.0
-                let time = Float(timeIdx) / Float(nTime - 1)  // 0.0 → 1.0
+                let time = Float(timeIdx) / Float(timeCount - 1)  // 0.0 → 1.0
 
                 // Realistic profiles for each variable
                 switch varSpec.name {
@@ -91,7 +91,7 @@ struct NetCDFCompressionTests {
             }
 
             // Write data
-            try variable.write(data, offset: [0, 0], count: [nTime, nRho])
+            try variable.write(data, offset: [0, 0], count: [timeCount, nRho])
         }
 
         file.sync()
@@ -148,9 +148,9 @@ struct NetCDFCompressionTests {
 
         // Generate test data (4 variables × 1000 time × 100 rho = 400,000 floats per variable)
         // This simulates a realistic TORAX run (1000+ timesteps common for 2s simulation)
-        let nTime = 1000
+        let timeCount = 1000
         let nRho = 100
-        let totalPoints = nTime * nRho
+        let totalPoints = timeCount * nRho
 
         // Realistic plasma data: Quasi-steady-state with very slow temporal evolution
         // Actual TORAX simulations often show near-constant profiles for large time ranges
@@ -169,7 +169,7 @@ struct NetCDFCompressionTests {
 
         do {
             let file = try NetCDF.create(path: uncompressedPath, overwriteExisting: true)
-            let timeDim = try file.createDimension(name: "time", length: nTime)
+            let timeDim = try file.createDimension(name: "time", length: timeCount)
             let rhoDim = try file.createDimension(name: "rho_tor_norm", length: nRho)
 
             // Create 4 variables with chunking but NO compression
@@ -186,7 +186,7 @@ struct NetCDFCompressionTests {
                 // NO compression (defineDeflate not called)
 
                 // Write data
-                try variable.write(testData, offset: [0, 0], count: [nTime, nRho])
+                try variable.write(testData, offset: [0, 0], count: [timeCount, nRho])
             }
 
             file.sync()
@@ -197,7 +197,7 @@ struct NetCDFCompressionTests {
 
         do {
             let file = try NetCDF.create(path: compressedPath, overwriteExisting: true)
-            let timeDim = try file.createDimension(name: "time", length: nTime)
+            let timeDim = try file.createDimension(name: "time", length: timeCount)
             let rhoDim = try file.createDimension(name: "rho_tor_norm", length: nRho)
 
             // Create 4 variables with DEFLATE compression
@@ -213,11 +213,11 @@ struct NetCDFCompressionTests {
 
                 // Optional: Define chunking for better compression
                 // Use multi-slice chunks to expose temporal redundancy while keeping chunk size manageable
-                let chunkTime = min(256, nTime)
+                let chunkTime = min(256, timeCount)
                 try variable.defineChunking(chunking: .chunked, chunks: [chunkTime, nRho])
 
                 // Write data
-                try variable.write(testData, offset: [0, 0], count: [nTime, nRho])
+                try variable.write(testData, offset: [0, 0], count: [timeCount, nRho])
             }
 
             file.sync()
@@ -251,7 +251,7 @@ struct NetCDFCompressionTests {
             return
         }
 
-        let readData = try tiVar.asType(Float.self)!.read(offset: [0, 0], count: [nTime, nRho])
+        let readData = try tiVar.asType(Float.self)!.read(offset: [0, 0], count: [timeCount, nRho])
 
         // Verify first and last points match
         #expect(abs(readData[0] - testData[0]) < 1e-5, "First data point should match")
@@ -264,8 +264,8 @@ struct NetCDFCompressionTests {
     ///
     /// Test different chunking patterns for time-series data:
     /// - Time-slice chunks: [1, nRho] - Optimized for spatial profile access
-    /// - Multi-slice chunks: [min(256, nTime), nRho] - Balanced compression vs. seek cost (recommended)
-    /// - Full-time chunks: [nTime, 1] - Optimized for time evolution at single location
+    /// - Multi-slice chunks: [min(256, timeCount), nRho] - Balanced compression vs. seek cost (recommended)
+    /// - Full-time chunks: [timeCount, 1] - Optimized for time evolution at single location
     @Test("Compare chunking strategies")
     func testChunkingStrategies() throws {
         let tempDir = FileManager.default.temporaryDirectory
@@ -277,49 +277,49 @@ struct NetCDFCompressionTests {
         removeTestItemIfExists(atPath: multiSlicePath)
         removeTestItemIfExists(atPath: fullTimePath)
 
-        let nTime = 100
+        let timeCount = 100
         let nRho = 100
-        let testData: [Float] = (0..<(nTime * nRho)).map { Float($0) }
+        let testData: [Float] = (0..<(timeCount * nRho)).map { Float($0) }
 
         // Strategy 1: Time-slice chunks [1, nRho]
         do {
             let file = try NetCDF.create(path: timeSlicePath, overwriteExisting: true)
-            let timeDim = try file.createDimension(name: "time", length: nTime)
+            let timeDim = try file.createDimension(name: "time", length: timeCount)
             let rhoDim = try file.createDimension(name: "rho", length: nRho)
 
             var variable = try file.createVariable(name: "data", type: Float.self, dimensions: [timeDim, rhoDim])
             try variable.defineChunking(chunking: .chunked, chunks: [1, nRho])
             try variable.defineDeflate(enable: true, level: 6, shuffle: true)
-            try variable.write(testData, offset: [0, 0], count: [nTime, nRho])
+            try variable.write(testData, offset: [0, 0], count: [timeCount, nRho])
 
             file.sync()
         }
 
-        // Strategy 2: Multi-slice chunks [min(256, nTime), nRho]
+        // Strategy 2: Multi-slice chunks [min(256, timeCount), nRho]
         do {
             let file = try NetCDF.create(path: multiSlicePath, overwriteExisting: true)
-            let timeDim = try file.createDimension(name: "time", length: nTime)
+            let timeDim = try file.createDimension(name: "time", length: timeCount)
             let rhoDim = try file.createDimension(name: "rho", length: nRho)
 
             var variable = try file.createVariable(name: "data", type: Float.self, dimensions: [timeDim, rhoDim])
-            let chunkTime = min(256, nTime)
+            let chunkTime = min(256, timeCount)
             try variable.defineChunking(chunking: .chunked, chunks: [chunkTime, nRho])
             try variable.defineDeflate(enable: true, level: 6, shuffle: true)
-            try variable.write(testData, offset: [0, 0], count: [nTime, nRho])
+            try variable.write(testData, offset: [0, 0], count: [timeCount, nRho])
 
             file.sync()
         }
 
-        // Strategy 3: Full-time chunks [nTime, 1]
+        // Strategy 3: Full-time chunks [timeCount, 1]
         do {
             let file = try NetCDF.create(path: fullTimePath, overwriteExisting: true)
-            let timeDim = try file.createDimension(name: "time", length: nTime)
+            let timeDim = try file.createDimension(name: "time", length: timeCount)
             let rhoDim = try file.createDimension(name: "rho", length: nRho)
 
             var variable = try file.createVariable(name: "data", type: Float.self, dimensions: [timeDim, rhoDim])
-            try variable.defineChunking(chunking: .chunked, chunks: [nTime, 1])
+            try variable.defineChunking(chunking: .chunked, chunks: [timeCount, 1])
             try variable.defineDeflate(enable: true, level: 6, shuffle: true)
-            try variable.write(testData, offset: [0, 0], count: [nTime, nRho])
+            try variable.write(testData, offset: [0, 0], count: [timeCount, nRho])
 
             file.sync()
         }
@@ -330,8 +330,8 @@ struct NetCDFCompressionTests {
 
         print("✅ Chunking strategy comparison:")
         print("   Time-slice [1, \(nRho)]: \(timeSliceSize) bytes")
-        print("   Multi-slice [\(min(256, nTime)), \(nRho)]: \(multiSliceSize) bytes")
-        print("   Full-time [\(nTime), 1]:  \(fullTimeSize) bytes")
+        print("   Multi-slice [\(min(256, timeCount)), \(nRho)]: \(multiSliceSize) bytes")
+        print("   Full-time [\(timeCount), 1]:  \(fullTimeSize) bytes")
         print("   Recommendation: Multi-slice chunks balance compression and access latency")
 
         // Both should be reasonably small (no strict requirement, just comparison)

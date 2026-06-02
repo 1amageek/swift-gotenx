@@ -2,7 +2,7 @@
   "runtime": {
     "static": {
       "mesh": {
-        "nCells": 100
+        "cellCount": 100
       },
       "timeConfig": {
         "duration": 2.0,
@@ -16,10 +16,10 @@
       "transport": {
         "modelType": "densityTransition",
         "parameters": {
-          "transition_density": 2.5e19,
-          "transition_width": 0.5e19,
-          "ion_mass_number": 2.0,
-          "ri_coefficient": 0.5
+          "transitionDensity": 2.5e19,
+          "transitionWidth": 0.5e19,
+          "ionMassNumber": 2.0,
+          "riCoefficient": 0.5
         }
       },
       "sources": {

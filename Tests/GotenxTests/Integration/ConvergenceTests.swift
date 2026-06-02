@@ -21,9 +21,9 @@ struct ConvergenceTests {
         // Test with 3 grid resolutions
         let gridSizes = [10, 20, 40]
 
-        for nCells in gridSizes {
+        for cellCount in gridSizes {
             let meshConfig = MeshConfig(
-                nCells: nCells,
+                cellCount: cellCount,
                 majorRadius: majorRadius,
                 minorRadius: minorRadius,
                 toroidalField: 5.0
@@ -31,40 +31,40 @@ struct ConvergenceTests {
             let geometry = Geometry(config: meshConfig)
 
             // Create profiles
-            let Ti = MLXArray.linspace(Float(10000.0), Float(100.0), count: nCells)
-            let ne = MLXArray.full([nCells], values: MLXArray(Float(1e20)))
+            let Ti = MLXArray.linspace(Float(10000.0), Float(100.0), count: cellCount)
+            let ne = MLXArray.full([cellCount], values: MLXArray(Float(1e20)))
 
             let profiles = CoreProfiles(
                 ionTemperature: EvaluatedArray(evaluating: Ti),
                 electronTemperature: EvaluatedArray(evaluating: Ti),
                 electronDensity: EvaluatedArray(evaluating: ne),
-                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             let transport = TransportCoefficients(
-                chiIon: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(1.0)))),
-                chiElectron: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(1.0)))),
-                particleDiffusivity: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(0.5)))),
-                convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeatDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(1.0)))),
+                electronHeatDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(1.0)))),
+                particleDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(0.5)))),
+                convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             let sources = SourceTerms(
-                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
-            let staticParams = StaticRuntimeParams(
+            let staticParameters = StaticRuntimeParameters(
                 mesh: meshConfig,
                 evolveIonHeat: true,
                 evolveElectronHeat: false,
-                evolveDensity: false,
-                evolveCurrent: false,
+                evolveElectronDensity: false,
+                evolvePoloidalFlux: false,
                 solverType: .linear,
                 theta: 1.0,
                 solverTolerance: 1e-6,
-                solverMaxIterations: 100
+                solverMaximumIterations: 100
             )
 
             // Build coefficients - should succeed for all grid sizes
@@ -72,20 +72,20 @@ struct ConvergenceTests {
                 transport: transport,
                 sources: sources,
                 geometry: geometry,
-                staticParams: staticParams,
+                staticParameters: staticParameters,
                 profiles: profiles
             )
 
             // Verify coefficients are physically reasonable
-            let dFace = coeffs.ionCoeffs.dFace.value.asArray(Float.self)
-            for d in dFace {
+            let faceDiffusionCoefficient = coeffs.ionCoeffs.faceDiffusionCoefficient.value.asArray(Float.self)
+            for d in faceDiffusionCoefficient {
                 #expect(d.isFinite)
                 #expect(d >= 0.0)  // Diffusivity non-negative
             }
 
             // Verify shape consistency
-            #expect(coeffs.ionCoeffs.sourceCell.value.shape[0] == nCells)
-            #expect(dFace.count == nCells + 1)  // nFaces
+            #expect(coeffs.ionCoeffs.cellSource.value.shape[0] == cellCount)
+            #expect(faceDiffusionCoefficient.count == cellCount + 1)  // faceCount
         }
     }
 
@@ -102,23 +102,23 @@ struct ConvergenceTests {
         let gridSizes = [40, 80]
         var profiles_grids: [CoreProfiles] = []
 
-        for nCells in gridSizes {
+        for cellCount in gridSizes {
             let meshConfig = MeshConfig(
-                nCells: nCells,
+                cellCount: cellCount,
                 majorRadius: majorRadius,
                 minorRadius: minorRadius,
                 toroidalField: 5.0
             )
 
             // Create identical profiles
-            let Ti = MLXArray.full([nCells], values: MLXArray(Float(5000.0)))
-            let ne = MLXArray.full([nCells], values: MLXArray(Float(1e20)))
+            let Ti = MLXArray.full([cellCount], values: MLXArray(Float(5000.0)))
+            let ne = MLXArray.full([cellCount], values: MLXArray(Float(1e20)))
 
             let profiles = CoreProfiles(
                 ionTemperature: EvaluatedArray(evaluating: Ti),
                 electronTemperature: EvaluatedArray(evaluating: Ti),
                 electronDensity: EvaluatedArray(evaluating: ne),
-                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             profiles_grids.append(profiles)
@@ -144,12 +144,12 @@ struct ConvergenceTests {
         //
         // This verifies time-stepping accuracy
 
-        let nCells = 20
+        let cellCount = 20
         let minorRadius: Float = 1.0
         let majorRadius: Float = 3.0
 
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: majorRadius,
             minorRadius: minorRadius,
             toroidalField: 5.0
@@ -160,43 +160,43 @@ struct ConvergenceTests {
         let timesteps: [Float] = [0.1, 0.05, 0.025]  // [s]
         var final_profiles: [[Float]] = []
 
-        for dt in timesteps {
+        for timeStep in timesteps {
             // Initial condition
-            let Ti = MLXArray.full([nCells], values: MLXArray(Float(5000.0)))
-            let ne = MLXArray.full([nCells], values: MLXArray(Float(1e20)))
+            let Ti = MLXArray.full([cellCount], values: MLXArray(Float(5000.0)))
+            let ne = MLXArray.full([cellCount], values: MLXArray(Float(1e20)))
 
             let profiles = CoreProfiles(
                 ionTemperature: EvaluatedArray(evaluating: Ti),
                 electronTemperature: EvaluatedArray(evaluating: Ti),
                 electronDensity: EvaluatedArray(evaluating: ne),
-                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             // Transport and sources
             let transport = TransportCoefficients(
-                chiIon: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(1.0)))),
-                chiElectron: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(1.0)))),
-                particleDiffusivity: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(0.5)))),
-                convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeatDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(1.0)))),
+                electronHeatDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(1.0)))),
+                particleDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(0.5)))),
+                convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             let sources = SourceTerms(
-                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
-            let staticParams = StaticRuntimeParams(
+            let staticParameters = StaticRuntimeParameters(
                 mesh: meshConfig,
                 evolveIonHeat: true,
                 evolveElectronHeat: false,
-                evolveDensity: false,
-                evolveCurrent: false,
+                evolveElectronDensity: false,
+                evolvePoloidalFlux: false,
                 solverType: .linear,
                 theta: 1.0,  // Implicit Euler
                 solverTolerance: 1e-6,
-                solverMaxIterations: 100
+                solverMaximumIterations: 100
             )
 
             // For verification, just store initial profile
@@ -207,7 +207,7 @@ struct ConvergenceTests {
 
         // Verify profiles are consistent
         #expect(final_profiles.count == 3)
-        #expect(final_profiles[0].count == nCells)
+        #expect(final_profiles[0].count == cellCount)
     }
 
     @Test("Power-law scheme Péclet number accuracy")
@@ -220,12 +220,12 @@ struct ConvergenceTests {
         //
         // This verifies the scheme adapts correctly to convection/diffusion balance
 
-        let nCells = 30
+        let cellCount = 30
         let minorRadius: Float = 1.0
         let majorRadius: Float = 3.0
 
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: majorRadius,
             minorRadius: minorRadius,
             toroidalField: 5.0
@@ -240,43 +240,43 @@ struct ConvergenceTests {
         ]
 
         for testCase in testCases {
-            let D = MLXArray.full([nCells], values: MLXArray(testCase.D))
-            let V = MLXArray.full([nCells], values: MLXArray(testCase.V))
+            let D = MLXArray.full([cellCount], values: MLXArray(testCase.D))
+            let V = MLXArray.full([cellCount], values: MLXArray(testCase.V))
 
             let transport = TransportCoefficients(
-                chiIon: EvaluatedArray(evaluating: D),
-                chiElectron: EvaluatedArray(evaluating: D),
+                ionHeatDiffusivity: EvaluatedArray(evaluating: D),
+                electronHeatDiffusivity: EvaluatedArray(evaluating: D),
                 particleDiffusivity: EvaluatedArray(evaluating: D),
                 convectionVelocity: EvaluatedArray(evaluating: V)
             )
 
-            let Ti = MLXArray.full([nCells], values: MLXArray(Float(5000.0)))
-            let ne = MLXArray.full([nCells], values: MLXArray(Float(1e20)))
+            let Ti = MLXArray.full([cellCount], values: MLXArray(Float(5000.0)))
+            let ne = MLXArray.full([cellCount], values: MLXArray(Float(1e20)))
 
             let profiles = CoreProfiles(
                 ionTemperature: EvaluatedArray(evaluating: Ti),
                 electronTemperature: EvaluatedArray(evaluating: Ti),
                 electronDensity: EvaluatedArray(evaluating: ne),
-                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             let sources = SourceTerms(
-                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
-            let staticParams = StaticRuntimeParams(
+            let staticParameters = StaticRuntimeParameters(
                 mesh: meshConfig,
                 evolveIonHeat: true,
                 evolveElectronHeat: false,
-                evolveDensity: false,
-                evolveCurrent: false,
+                evolveElectronDensity: false,
+                evolvePoloidalFlux: false,
                 solverType: .linear,
                 theta: 1.0,
                 solverTolerance: 1e-6,
-                solverMaxIterations: 100
+                solverMaximumIterations: 100
             )
 
             // Build coefficients (will use power-law scheme internally)
@@ -284,27 +284,27 @@ struct ConvergenceTests {
                 transport: transport,
                 sources: sources,
                 geometry: geometry,
-                staticParams: staticParams,
+                staticParameters: staticParameters,
                 profiles: profiles
             )
 
             // Verify convection coefficients are present
-            let vFace = coeffs.ionCoeffs.vFace.value.asArray(Float.self)
-            let dFace = coeffs.ionCoeffs.dFace.value.asArray(Float.self)
+            let faceConvectionVelocity = coeffs.ionCoeffs.faceConvectionVelocity.value.asArray(Float.self)
+            let faceDiffusionCoefficient = coeffs.ionCoeffs.faceDiffusionCoefficient.value.asArray(Float.self)
 
             // All values should be finite
-            for v in vFace {
+            for v in faceConvectionVelocity {
                 #expect(v.isFinite)
             }
 
-            for d in dFace {
+            for d in faceDiffusionCoefficient {
                 #expect(d.isFinite)
                 #expect(d >= 0.0)  // Diffusivity must be non-negative
             }
 
             // Verify coefficients are physically meaningful
-            let avgD = dFace.reduce(0.0, +) / Float(dFace.count)
-            let avgV_abs = vFace.map { abs($0) }.reduce(0.0, +) / Float(vFace.count)
+            let avgD = faceDiffusionCoefficient.reduce(0.0, +) / Float(faceDiffusionCoefficient.count)
+            let avgV_abs = faceConvectionVelocity.map { abs($0) }.reduce(0.0, +) / Float(faceConvectionVelocity.count)
 
             if testCase.expectedRegime == "diffusion" {
                 // Diffusion-dominated: D >> V
@@ -313,7 +313,7 @@ struct ConvergenceTests {
             } else if testCase.expectedRegime == "convection" {
                 // Convection-dominated: V >> D (in input)
                 #expect(testCase.V > testCase.D)  // Input confirms convection-dominated
-                // Note: vFace may be zero if temperature is uniform (no gradient to advect)
+                // Note: faceConvectionVelocity may be zero if temperature is uniform (no gradient to advect)
             }
         }
     }
@@ -331,9 +331,9 @@ struct ConvergenceTests {
         let gridSizes = [10, 20, 40]
         var bootstrap_fractions = [Float]()
 
-        for nCells in gridSizes {
+        for cellCount in gridSizes {
             let meshConfig = MeshConfig(
-                nCells: nCells,
+                cellCount: cellCount,
                 majorRadius: majorRadius,
                 minorRadius: minorRadius,
                 toroidalField: 5.3
@@ -341,54 +341,54 @@ struct ConvergenceTests {
             let geometry = Geometry(config: meshConfig)
 
             // Peaked profiles (trigger bootstrap)
-            let Ti = MLXArray.linspace(Float(15000.0), Float(1000.0), count: nCells)
-            let Te = MLXArray.linspace(Float(15000.0), Float(1000.0), count: nCells)
-            let ne = MLXArray.linspace(Float(8e19), Float(2e19), count: nCells)
+            let Ti = MLXArray.linspace(Float(15000.0), Float(1000.0), count: cellCount)
+            let Te = MLXArray.linspace(Float(15000.0), Float(1000.0), count: cellCount)
+            let ne = MLXArray.linspace(Float(8e19), Float(2e19), count: cellCount)
 
             let profiles = CoreProfiles(
                 ionTemperature: EvaluatedArray(evaluating: Ti),
                 electronTemperature: EvaluatedArray(evaluating: Te),
                 electronDensity: EvaluatedArray(evaluating: ne),
-                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             let transport = TransportCoefficients(
-                chiIon: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(1.0)))),
-                chiElectron: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(1.0)))),
-                particleDiffusivity: EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(0.5)))),
-                convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeatDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(1.0)))),
+                electronHeatDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(1.0)))),
+                particleDiffusivity: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(0.5)))),
+                convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
             let sources = SourceTerms(
-                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([nCells]))
+                ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
             )
 
-            let staticParams = StaticRuntimeParams(
+            let staticParameters = StaticRuntimeParameters(
                 mesh: meshConfig,
                 evolveIonHeat: false,
                 evolveElectronHeat: false,
-                evolveDensity: false,
-                evolveCurrent: true,
+                evolveElectronDensity: false,
+                evolvePoloidalFlux: true,
                 solverType: .linear,
                 theta: 1.0,
                 solverTolerance: 1e-6,
-                solverMaxIterations: 100
+                solverMaximumIterations: 100
             )
 
             let coeffs = buildBlock1DCoeffs(
                 transport: transport,
                 sources: sources,
                 geometry: geometry,
-                staticParams: staticParams,
+                staticParameters: staticParameters,
                 profiles: profiles
             )
 
             // Compute bootstrap fraction
-            let J_BS = coeffs.fluxCoeffs.sourceCell.value.asArray(Float.self)
-            let avgBootstrap = J_BS.reduce(0.0, +) / Float(nCells)
+            let J_BS = coeffs.fluxCoeffs.cellSource.value.asArray(Float.self)
+            let avgBootstrap = J_BS.reduce(0.0, +) / Float(cellCount)
 
             bootstrap_fractions.append(avgBootstrap)
         }

@@ -18,11 +18,11 @@ public enum ProfileSpec: Sendable, Codable, Equatable {
 
     /// Evaluate profile at normalized radial coordinate
     ///
-    /// - Parameter r: Normalized radial coordinate [0, 1] (0=core, 1=edge)
-    /// - Returns: Profile value at r
-    public func evaluate(at r: Float) -> Float {
+    /// - Parameter normalizedRadius: Normalized radial coordinate [0, 1] (0=core, 1=edge)
+    /// - Returns: Profile value at normalized radius
+    public func evaluate(at normalizedRadius: Float) -> Float {
         // Clamp input to valid range
-        let rClamped = max(0.0, min(1.0, r))
+        let clampedRadius = max(0.0, min(1.0, normalizedRadius))
 
         switch self {
         case .constant(let value):
@@ -30,11 +30,11 @@ public enum ProfileSpec: Sendable, Codable, Equatable {
 
         case .linear(let core, let edge):
             // Linear interpolation: f(r) = core + (edge - core) * r
-            return core + (edge - core) * rClamped
+            return core + (edge - core) * clampedRadius
 
         case .parabolic(let peak, let edge, let exponent):
             // Parabolic profile: f(r) = edge + (peak - edge) * (1 - r^2)^exponent
-            let factor = pow(1.0 - rClamped * rClamped, exponent)
+            let factor = pow(1.0 - clampedRadius * clampedRadius, exponent)
             return edge + (peak - edge) * factor
 
         case .array(let values):
@@ -43,7 +43,7 @@ public enum ProfileSpec: Sendable, Codable, Equatable {
             guard values.count > 1 else { return values[0] }
 
             let n = values.count - 1
-            let idx = rClamped * Float(n)
+            let idx = clampedRadius * Float(n)
             let i0 = Int(floor(idx))
             let i1 = min(i0 + 1, n)
             let frac = idx - Float(i0)

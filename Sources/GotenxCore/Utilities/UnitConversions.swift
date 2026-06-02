@@ -11,7 +11,7 @@ public enum UnitConversions {
 
     /// Elementary charge / electron volt conversion [J/eV]
     /// Used for converting between Joules and electron volts
-    public static let eV: Float = 1.602176634e-19
+    public static let electronVolt: Float = 1.602176634e-19
 
     // MARK: - Power Density Unit Conversions for Temperature Equations
 
@@ -43,7 +43,7 @@ public enum UnitConversions {
     /// **References**:
     /// - PHYSICS_VALIDATION_ISSUES.md Issue 1 (ソース項の単位変換)
     /// - UNIT_SYSTEM_UNIFIED.md (eV/m⁻³ unit standardization)
-    public static let megawattsPerCubicMeterToEvPerCubicMeterPerSecond: Float = 6.2415090744e24
+    public static let megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond: Float = 6.2415090744e24
 
     /// Convert power density from MW/m³ to eV/(m³·s) (scalar version)
     ///
@@ -52,7 +52,7 @@ public enum UnitConversions {
     /// **Example**:
     /// ```swift
     /// let Q_MW: Float = 1.0  // [MW/m³] - heating power density
-    /// let Q_eV = UnitConversions.megawattsToEvDensity(Q_MW)  // [eV/(m³·s)]
+    /// let Q_eV = UnitConversions.megawattsToElectronVoltDensity(Q_MW)  // [eV/(m³·s)]
     /// ```
     ///
     /// **Unit validation**:
@@ -68,8 +68,8 @@ public enum UnitConversions {
     ///
     /// - Parameter megawatts: Power density in [MW/m³]
     /// - Returns: Power density in [eV/(m³·s)]
-    public static func megawattsToEvDensity(_ megawatts: Float) -> Float {
-        return megawatts * megawattsPerCubicMeterToEvPerCubicMeterPerSecond
+    public static func megawattsToElectronVoltDensity(_ megawatts: Float) -> Float {
+        return megawatts * megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond
     }
 
     /// Convert power density from MW/m³ to eV/(m³·s) (array version)
@@ -80,7 +80,7 @@ public enum UnitConversions {
     /// ```swift
     /// // In Block1DCoeffsBuilder.swift:
     /// let Q_MW = sources.ionHeating.value  // [MW/m³]
-    /// let Q_eV = UnitConversions.megawattsToEvDensity(Q_MW)  // [eV/(m³·s)]
+    /// let Q_eV = UnitConversions.megawattsToElectronVoltDensity(Q_MW)  // [eV/(m³·s)]
     /// // Result is wrapped in EvaluatedArray, which calls eval() automatically
     /// ```
     ///
@@ -115,7 +115,7 @@ public enum UnitConversions {
     ///
     /// - Parameter megawatts: Power density array in [MW/m³]
     /// - Returns: Power density array in [eV/(m³·s)] as **Float32 MLXArray**
-    public static func megawattsToEvDensity(_ megawatts: MLXArray) -> MLXArray {
+    public static func megawattsToElectronVoltDensity(_ megawatts: MLXArray) -> MLXArray {
         // **CRITICAL**: Apple Silicon GPU does NOT support Float64
         //
         // Problem: Converting MW/m³ to eV/(m³·s) involves large coefficient (~6.24×10²⁴)
@@ -138,7 +138,7 @@ public enum UnitConversions {
         // - Not justified for this use case (solver tolerance is ~10⁻⁵)
 
         // Conversion coefficient as Float32
-        let coefficient = Float(megawattsPerCubicMeterToEvPerCubicMeterPerSecond)
+        let coefficient = Float(megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond)
 
         // Multiply using MLX operations (stays on same device as input)
         let coeffArray = MLXArray(coefficient)

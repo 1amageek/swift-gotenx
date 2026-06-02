@@ -11,13 +11,13 @@ struct MeshConfigTests {
     @Test("MeshConfig initialization")
     func testInitialization() {
         let mesh = MeshConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
         )
 
-        #expect(mesh.nCells == 100)
+        #expect(mesh.cellCount == 100)
         #expect(mesh.majorRadius == 3.0)
         #expect(mesh.minorRadius == 1.0)
         #expect(mesh.toroidalField == 2.5)
@@ -26,20 +26,20 @@ struct MeshConfigTests {
     @Test("MeshConfig derived properties")
     func testDerivedProperties() {
         let mesh = MeshConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
         )
 
-        #expect(mesh.dr == 0.01)  // 1.0 / 100
+        #expect(mesh.radialSpacing == 0.01)  // 1.0 / 100
         #expect(mesh.aspectRatio == 3.0)  // 3.0 / 1.0
     }
 
     @Test("MeshConfig valid configuration")
     func testValidConfiguration() throws {
         let mesh = MeshConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -49,10 +49,10 @@ struct MeshConfigTests {
         try mesh.validate()
     }
 
-    @Test("MeshConfig invalid nCells (zero)")
+    @Test("MeshConfig invalid cellCount (zero)")
     func testInvalidNCellsZero() {
         let mesh = MeshConfig(
-            nCells: 0,
+            cellCount: 0,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -63,10 +63,10 @@ struct MeshConfigTests {
         }
     }
 
-    @Test("MeshConfig invalid nCells (negative)")
+    @Test("MeshConfig invalid cellCount (negative)")
     func testInvalidNCellsNegative() {
         let mesh = MeshConfig(
-            nCells: -10,
+            cellCount: -10,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -80,7 +80,7 @@ struct MeshConfigTests {
     @Test("MeshConfig warning for few cells")
     func testWarningFewCells() {
         let mesh = MeshConfig(
-            nCells: 5,  // Less than 10
+            cellCount: 5,  // Less than 10
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -94,7 +94,7 @@ struct MeshConfigTests {
     @Test("MeshConfig invalid radius (negative)")
     func testInvalidRadius() {
         let mesh = MeshConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: -3.0,  // Negative
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -108,7 +108,7 @@ struct MeshConfigTests {
     @Test("MeshConfig low aspect ratio warning")
     func testLowAspectRatioWarning() {
         let mesh = MeshConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 1.2,  // Aspect ratio = 1.2 < 1.5
             minorRadius: 1.0,
             toroidalField: 2.5
@@ -122,7 +122,7 @@ struct MeshConfigTests {
     @Test("MeshConfig invalid toroidal field")
     func testInvalidToroidalField() {
         let mesh = MeshConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: -2.5  // Negative
@@ -136,7 +136,7 @@ struct MeshConfigTests {
     @Test("MeshConfig Codable")
     func testCodable() throws {
         let mesh = MeshConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5

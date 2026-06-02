@@ -10,24 +10,24 @@ struct ConservationEnforcerTests {
     // MARK: - Test Helpers
 
     /// Create test profiles
-    private func createProfiles(nCells: Int, Te: Float, Ti: Float, ne: Float) throws -> CoreProfiles {
-        let TeArray = MLXArray(Array(repeating: Te, count: nCells))
-        let TiArray = MLXArray(Array(repeating: Ti, count: nCells))
-        let neArray = MLXArray(Array(repeating: ne, count: nCells))
-        let psi = MLXArray(Array(repeating: Float(0.0), count: nCells))
+    private func createProfiles(cellCount: Int, electronTemperature: Float, ionTemperature: Float, electronDensity: Float) throws -> CoreProfiles {
+        let electronTemperatureArray = MLXArray(Array(repeating: electronTemperature, count: cellCount))
+        let ionTemperatureArray = MLXArray(Array(repeating: ionTemperature, count: cellCount))
+        let electronDensityArray = MLXArray(Array(repeating: electronDensity, count: cellCount))
+        let poloidalFlux = MLXArray(Array(repeating: Float(0.0), count: cellCount))
 
         return CoreProfiles(
-            ionTemperature: EvaluatedArray(evaluating: TiArray),
-            electronTemperature: EvaluatedArray(evaluating: TeArray),
-            electronDensity: EvaluatedArray(evaluating: neArray),
-            poloidalFlux: EvaluatedArray(evaluating: psi)
+            ionTemperature: EvaluatedArray(evaluating: ionTemperatureArray),
+            electronTemperature: EvaluatedArray(evaluating: electronTemperatureArray),
+            electronDensity: EvaluatedArray(evaluating: electronDensityArray),
+            poloidalFlux: EvaluatedArray(evaluating: poloidalFlux)
         )
     }
 
     /// Create geometry
-    private func createGeometry(nCells: Int) -> Geometry {
+    private func createGeometry(cellCount: Int) -> Geometry {
         let config = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 6.2,
             minorRadius: 2.0,
             toroidalField: 5.3
@@ -39,9 +39,9 @@ struct ConservationEnforcerTests {
 
     @Test("Initialize enforcer with single law")
     func testInitializeSingleLaw() throws {
-        let nCells = 25
-        let profiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let profiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [ParticleConservation()],
@@ -55,9 +55,9 @@ struct ConservationEnforcerTests {
 
     @Test("Initialize enforcer with multiple laws")
     func testInitializeMultipleLaws() throws {
-        let nCells = 25
-        let profiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let profiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [
@@ -78,9 +78,9 @@ struct ConservationEnforcerTests {
 
     @Test("Enforce with no drift (no correction needed)")
     func testEnforceNoDrift() throws {
-        let nCells = 25
-        let profiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let profiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [ParticleConservation()],
@@ -104,9 +104,9 @@ struct ConservationEnforcerTests {
 
     @Test("Enforce with small drift (correction applied)")
     func testEnforceSmallDrift() throws {
-        let nCells = 25
-        let initialProfiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let initialProfiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [ParticleConservation(driftTolerance: 0.005)],  // 0.5% tolerance
@@ -116,7 +116,7 @@ struct ConservationEnforcerTests {
         )
 
         // Simulate 1% drift
-        let drifted = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 0.99e20)
+        let drifted = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 0.99e20)
 
         let (corrected, results) = enforcer.enforce(
             profiles: drifted,
@@ -133,9 +133,9 @@ struct ConservationEnforcerTests {
 
     @Test("Enforce multiple laws sequentially")
     func testEnforceMultipleLaws() throws {
-        let nCells = 25
-        let initialProfiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let initialProfiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [
@@ -149,7 +149,7 @@ struct ConservationEnforcerTests {
 
         // Simulate drift in both particle and energy
         // Use 9800 eV (2% reduction) to clearly exceed 1% tolerance
-        let drifted = try createProfiles(nCells: nCells, Te: 9800.0, Ti: 9800.0, ne: 0.99e20)
+        let drifted = try createProfiles(cellCount: cellCount, electronTemperature: 9800.0, ionTemperature: 9800.0, electronDensity: 0.99e20)
 
         let (corrected, results) = enforcer.enforce(
             profiles: drifted,
@@ -171,9 +171,9 @@ struct ConservationEnforcerTests {
 
     @Test("Sequential application: particle then energy")
     func testSequentialApplication() throws {
-        let nCells = 25
-        let initialProfiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let initialProfiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let particleLaw = ParticleConservation()
         let energyLaw = EnergyConservation()
@@ -186,7 +186,7 @@ struct ConservationEnforcerTests {
         )
 
         // Drift: density -1%, temperature -2% (to clearly exceed tolerances)
-        let drifted = try createProfiles(nCells: nCells, Te: 9800.0, Ti: 9800.0, ne: 0.99e20)
+        let drifted = try createProfiles(cellCount: cellCount, electronTemperature: 9800.0, ionTemperature: 9800.0, electronDensity: 0.99e20)
 
         let (corrected, results) = enforcer.enforce(
             profiles: drifted,
@@ -224,9 +224,9 @@ struct ConservationEnforcerTests {
 
     @Test("shouldEnforce check")
     func testShouldEnforce() throws {
-        let nCells = 25
-        let profiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let profiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [ParticleConservation()],
@@ -247,9 +247,9 @@ struct ConservationEnforcerTests {
 
     @Test("Compute current drift")
     func testComputeCurrentDrift() throws {
-        let nCells = 25
-        let initialProfiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let initialProfiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [
@@ -262,7 +262,7 @@ struct ConservationEnforcerTests {
         )
 
         // Simulate drift
-        let drifted = try createProfiles(nCells: nCells, Te: 9900.0, Ti: 9900.0, ne: 0.99e20)
+        let drifted = try createProfiles(cellCount: cellCount, electronTemperature: 9900.0, ionTemperature: 9900.0, electronDensity: 0.99e20)
 
         let drifts = enforcer.computeCurrentDrift(profiles: drifted, geometry: geometry)
 
@@ -275,9 +275,9 @@ struct ConservationEnforcerTests {
 
     @Test("Laws summary")
     func testLawsSummary() throws {
-        let nCells = 25
-        let profiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let profiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [
@@ -301,9 +301,9 @@ struct ConservationEnforcerTests {
 
     @Test("Enforce with large drift (clamped correction)")
     func testEnforceLargeDrift() throws {
-        let nCells = 25
-        let initialProfiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let initialProfiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [ParticleConservation(driftTolerance: 0.005)],
@@ -313,7 +313,7 @@ struct ConservationEnforcerTests {
         )
 
         // Simulate 30% drift (should be clamped to 20%)
-        let drifted = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 0.7e20)
+        let drifted = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 0.7e20)
 
         let (_, results) = enforcer.enforce(
             profiles: drifted,
@@ -328,9 +328,9 @@ struct ConservationEnforcerTests {
 
     @Test("Enforce with empty laws array")
     func testEnforceEmptyLaws() throws {
-        let nCells = 25
-        let profiles = try createProfiles(nCells: nCells, Te: 10000.0, Ti: 10000.0, ne: 1e20)
-        let geometry = createGeometry(nCells: nCells)
+        let cellCount = 25
+        let profiles = try createProfiles(cellCount: cellCount, electronTemperature: 10000.0, ionTemperature: 10000.0, electronDensity: 1e20)
+        let geometry = createGeometry(cellCount: cellCount)
 
         let enforcer = ConservationEnforcer(
             laws: [],

@@ -20,7 +20,7 @@ public struct FlattenedState: Sendable {
     /// Memory layout for state variables
     public struct StateLayout: Sendable, Equatable {
         /// Number of cells
-        public let nCells: Int
+        public let cellCount: Int
 
         /// Range for ion temperature
         public let tiRange: Range<Int>
@@ -36,39 +36,39 @@ public struct FlattenedState: Sendable {
 
         /// Initialize layout
         ///
-        /// - Parameter nCells: Number of cells in grid
+        /// - Parameter cellCount: Number of cells in grid
         /// - Throws: FlattenedStateError if invalid
-        public init(nCells: Int) throws {
-            guard nCells > 0 else {
-                throw FlattenedStateError.invalidCellCount(nCells)
+        public init(cellCount: Int) throws {
+            guard cellCount > 0 else {
+                throw FlattenedStateError.invalidCellCount(cellCount)
             }
 
-            self.nCells = nCells
-            self.tiRange = 0..<nCells
-            self.teRange = nCells..<(2 * nCells)
-            self.neRange = (2 * nCells)..<(3 * nCells)
-            self.psiRange = (3 * nCells)..<(4 * nCells)
+            self.cellCount = cellCount
+            self.tiRange = 0..<cellCount
+            self.teRange = cellCount..<(2 * cellCount)
+            self.neRange = (2 * cellCount)..<(3 * cellCount)
+            self.psiRange = (3 * cellCount)..<(4 * cellCount)
         }
 
         /// Total size of flattened state
-        public var totalSize: Int { 4 * nCells }
+        public var totalSize: Int { 4 * cellCount }
 
         /// Equatable implementation (optimized)
         ///
-        /// Since all ranges are deterministically computed from nCells,
-        /// we only need to compare nCells for equality.
+        /// Since all ranges are deterministically computed from cellCount,
+        /// we only need to compare cellCount for equality.
         public static func == (lhs: StateLayout, rhs: StateLayout) -> Bool {
-            return lhs.nCells == rhs.nCells
+            return lhs.cellCount == rhs.cellCount
         }
 
         /// Validate layout consistency
         ///
         /// - Throws: FlattenedStateError if layout is inconsistent
         public func validate() throws {
-            guard tiRange.count == nCells,
-                  teRange.count == nCells,
-                  neRange.count == nCells,
-                  psiRange.count == nCells else {
+            guard tiRange.count == cellCount,
+                  teRange.count == cellCount,
+                  neRange.count == cellCount,
+                  psiRange.count == cellCount else {
                 throw FlattenedStateError.inconsistentLayout
             }
 
@@ -86,7 +86,7 @@ public struct FlattenedState: Sendable {
         case inconsistentLayout
         case layoutMismatch
         case shapeMismatch(expected: Int, actual: Int)
-        case profileShapeMismatch(expected: Int, Ti: Int, Te: Int, ne: Int, psi: Int)
+        case profileShapeMismatch(expected: Int, ionTemperature: Int, electronTemperature: Int, electronDensity: Int, psi: Int)
     }
 
     // MARK: - Initialization
@@ -98,29 +98,29 @@ public struct FlattenedState: Sendable {
     public init(profiles: CoreProfiles) throws {
         // Capture all shapes before using any profile as the reference.
         let shapes = (
-            Ti: profiles.ionTemperature.shape[0],
-            Te: profiles.electronTemperature.shape[0],
-            ne: profiles.electronDensity.shape[0],
+            ionTemperature: profiles.ionTemperature.shape[0],
+            electronTemperature: profiles.electronTemperature.shape[0],
+            electronDensity: profiles.electronDensity.shape[0],
             psi: profiles.poloidalFlux.shape[0]
         )
 
         // Check that ALL profiles have the same shape (not just Te, ne, psi)
         // This is more logically consistent than using Ti as implicit reference
-        guard shapes.Ti == shapes.Te,
-              shapes.Ti == shapes.ne,
-              shapes.Ti == shapes.psi else {
+        guard shapes.ionTemperature == shapes.electronTemperature,
+              shapes.ionTemperature == shapes.electronDensity,
+              shapes.ionTemperature == shapes.psi else {
             throw FlattenedStateError.profileShapeMismatch(
-                expected: shapes.Ti,
-                Ti: shapes.Ti,
-                Te: shapes.Te,
-                ne: shapes.ne,
+                expected: shapes.ionTemperature,
+                ionTemperature: shapes.ionTemperature,
+                electronTemperature: shapes.electronTemperature,
+                electronDensity: shapes.electronDensity,
                 psi: shapes.psi
             )
         }
 
-        // Now we can safely use any shape as nCells (they're all equal)
-        let nCells = shapes.Ti
-        let layout = try StateLayout(nCells: nCells)
+        // Now we can safely use any shape as cellCount (they're all equal)
+        let cellCount = shapes.ionTemperature
+        let layout = try StateLayout(cellCount: cellCount)
         try layout.validate()
 
         // Extract MLXArrays from EvaluatedArrays and flatten: [Ti; Te; ne; psi]
@@ -206,8 +206,8 @@ public struct FlattenedState: Sendable {
         precondition(reference.layout == layout,
             """
             Layout mismatch in scaled(by:):
-            - reference.nCells = \(reference.layout.nCells)
-            - self.nCells = \(layout.nCells)
+            - reference.cellCount = \(reference.layout.cellCount)
+            - self.cellCount = \(layout.cellCount)
             This indicates a programming error. Ensure both states use the same mesh.
             """)
 
@@ -252,8 +252,8 @@ public struct FlattenedState: Sendable {
         precondition(reference.layout == layout,
             """
             Layout mismatch in unscaled(by:):
-            - reference.nCells = \(reference.layout.nCells)
-            - self.nCells = \(layout.nCells)
+            - reference.cellCount = \(reference.layout.cellCount)
+            - self.cellCount = \(layout.cellCount)
             This indicates a programming error. Ensure both states use the same mesh.
             """)
 
@@ -278,12 +278,12 @@ public struct FlattenedState: Sendable {
     /// **Strategy**: Use absolute values to ensure positive scaling factors,
     /// with minimum floor to prevent division by zero for small values.
     ///
-    /// - Parameter minScale: Minimum scaling factor (default: 1e-10)
+    /// - Parameter minimumScale: Minimum scaling factor (default: 1e-10)
     /// - Returns: Scaling reference state with safe normalization values
-    public func asScalingReference(minScale: Float = 1e-10) -> FlattenedState {
+    public func asScalingReference(minimumScale: Float = 1e-10) -> FlattenedState {
         // Use element-wise MLX operations to keep the data on the active backend.
         let absValues = abs(values.value)
-        let safeScales = maximum(absValues, MLXArray(minScale))
+        let safeScales = maximum(absValues, MLXArray(minimumScale))
         eval(safeScales)
 
         return FlattenedState(
@@ -298,20 +298,20 @@ public struct FlattenedState: Sendable {
     /// This prevents Float32 precision loss when variables span vastly different magnitudes.
     ///
     /// **Problem with asScalingReference()**:
-    /// - psi=0.0 → minScale=1e-10
+    /// - psi=0.0 → minimumScale=1e-10
     /// - ne=2e+19 → 2e+19
     /// - Range: [1e-10, 2e+19] = 19 orders of magnitude → Float32 cannot handle
     ///
     /// **Solution**: Use typical physical scales per variable:
-    /// - Ti, Te: 1e3 eV (1 keV) - typical plasma temperature
-    /// - ne: 1e20 m⁻³ - typical plasma density
+    /// - Ti, electronTemperature: 1e3 eV (1 keV) - typical plasma temperature
+    /// - electronDensity: 1e20 m⁻³ - typical plasma density
     /// - psi: 1.0 Wb - typical poloidal flux scale
     ///
     /// **Result**: All variables normalized to O(1), improving Jacobian conditioning.
     ///
     /// - Returns: Reference state with physically meaningful scales
     public func asPhysicalScalingReference() -> FlattenedState {
-        let nCells = layout.nCells
+        let cellCount = layout.cellCount
 
         // Physical scales (in SI units matching CoreProfiles)
         let tiScale: Float = 1e3  // 1 keV in eV
@@ -321,10 +321,10 @@ public struct FlattenedState: Sendable {
 
         // Create scaling array: [Ti_scale; Te_scale; ne_scale; psi_scale]
         // Use Swift arrays and convert to MLXArray
-        let tiScales = MLXArray(Array(repeating: tiScale, count: nCells))
-        let teScales = MLXArray(Array(repeating: teScale, count: nCells))
-        let neScales = MLXArray(Array(repeating: neScale, count: nCells))
-        let psiScales = MLXArray(Array(repeating: psiScale, count: nCells))
+        let tiScales = MLXArray(Array(repeating: tiScale, count: cellCount))
+        let teScales = MLXArray(Array(repeating: teScale, count: cellCount))
+        let neScales = MLXArray(Array(repeating: neScale, count: cellCount))
+        let psiScales = MLXArray(Array(repeating: psiScale, count: cellCount))
 
         let scaleArray = concatenated([tiScales, teScales, neScales, psiScales], axis: 0)
         eval(scaleArray)
@@ -429,9 +429,9 @@ extension FlattenedState.FlattenedStateError: LocalizedError {
             return """
                 Profile shape mismatch:
                 - Expected: \(expected) cells (from Ti)
-                - Ti: \(Ti) cells
-                - Te: \(Te) cells
-                - ne: \(ne) cells
+                - ionTemperature: \(Ti) cells
+                - electronTemperature: \(Te) cells
+                - electronDensity: \(ne) cells
                 - psi: \(psi) cells
                 Ensure all profile arrays have the same length.
                 """
@@ -441,7 +441,7 @@ extension FlattenedState.FlattenedStateError: LocalizedError {
     public var recoverySuggestion: String? {
         switch self {
         case .invalidCellCount:
-            return "Increase mesh resolution (nCells) to a positive value."
+            return "Increase mesh resolution (cellCount) to a positive value."
 
         case .inconsistentLayout, .layoutMismatch:
             return "This is an internal error. Please file a bug report."

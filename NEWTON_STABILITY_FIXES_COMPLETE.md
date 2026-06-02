@@ -12,7 +12,7 @@
 
 Three critical fixes have been implemented to prevent Newton-Raphson solver instability caused by aggressive timestep increases:
 
-1. ✅ **dt Growth Cap** - Enforces maxTimestepGrowth limit
+1. ✅ **dt Growth Cap** - Enforces maximumTimeStepGrowth limit
 2. ✅ **Early Termination Checks** - Detects unreliable Newton directions
 3. ✅ **Configuration Propagation Bug Fix** - Ensures user configuration is respected
 
@@ -23,7 +23,7 @@ All fixes have been implemented, built successfully, and are ready for testing.
 ## Fix 1: dt Growth Cap Enforcement
 
 ### Problem
-`SimulationOrchestrator.swift:432` calculated new dt via `timeStepCalculator.compute()` but didn't enforce `maxTimestepGrowth`, allowing 4.3× jump (1.5e-4 → 6.4e-4).
+`SimulationOrchestrator.swift:432` calculated new dt via `timeStepCalculator.compute()` but didn't enforce `maximumTimeStepGrowth`, allowing 4.3× jump (1.5e-4 → 6.4e-4).
 
 ### Solution
 Added growth cap enforcement after dt calculation.
@@ -39,7 +39,7 @@ let rawDt = timeStepCalculator.compute(
 )
 
 // ✅ CRITICAL: Enforce dt growth cap to prevent Newton solver instability
-let growthCap = adaptiveConfig.maxTimestepGrowth
+let growthCap = adaptiveConfig.maximumTimeStepGrowth
 let cappedDt = min(rawDt, state.dt * growthCap)
 
 if cappedDt < rawDt {
@@ -135,26 +135,26 @@ Test log shows:
 
 ### Problem
 `SimulationRunner.swift:76-83` was not passing `adaptiveConfig` parameter to `SimulationOrchestrator`, causing it to use `.default` configuration:
-- User configured: `minDt: 1e-5`
-- Actually used: `minDt: 1e-4` (from `.default`)
+- User configured: `minimumTimeStep: 1e-5`
+- Actually used: `minimumTimeStep: 1e-4` (from `.default`)
 - Result: dt retry blocked because `9e-5 < 1e-4`
 
 ### Root Cause Analysis
 ```
 AdaptiveTimestepConfig.default:
-  minDt: nil
-  minDtFraction: 0.001
-  maxDt: 1e-1
+  minimumTimeStep: nil
+  minimumTimeStepFraction: 0.001
+  maximumTimeStep: 1e-1
 
-  effectiveMinDt = maxDt * minDtFraction
+  effectiveMinDt = maximumTimeStep * minimumTimeStepFraction
                  = 1e-1 * 0.001
                  = 1e-4  ← This is what we were seeing!
 
 User configuration:
-  minDt: 1e-5  ← Ignored!
-  maxDt: 1e-3
+  minimumTimeStep: 1e-5  ← Ignored!
+  maximumTimeStep: 1e-3
 
-  effectiveMinDt = minDt  (explicit value takes precedence)
+  effectiveMinDt = minimumTimeStep  (explicit value takes precedence)
                  = 1e-5  ← Should be this!
 ```
 
@@ -186,11 +186,11 @@ self.orchestrator = await SimulationOrchestrator(
 Debug logs should now show:
 ```
 [DEBUG-PRESET] AdaptiveTimestepConfig created:
-[DEBUG-PRESET]   minDt: Optional(1e-05)
+[DEBUG-PRESET]   minimumTimeStep: Optional(1e-05)
 [DEBUG-PRESET]   effectiveMinDt: 1e-05
 
 [DEBUG-INIT] AdaptiveTimestepConfig received:
-[DEBUG-INIT]   minDt: Optional(1e-05)
+[DEBUG-INIT]   minimumTimeStep: Optional(1e-05)
 [DEBUG-INIT]   effectiveMinDt: 1e-05
 
 [DEBUG-TSCALC] TimeStepCalculator init:
@@ -383,7 +383,7 @@ Test showed that 1.2× growth (1.5e-4 → 1.8e-4) caused:
 **Implication**: Problem is highly sensitive to dt changes.
 
 **Potential Solutions**:
-- Use `maxTimestepGrowth: 1.1` (10% growth) or even 1.05 (5% growth)
+- Use `maximumTimeStepGrowth: 1.1` (10% growth) or even 1.05 (5% growth)
 - Implement Jacobian condition number monitoring
 - Add preconditioner to improve conditioning
 
@@ -391,7 +391,7 @@ Test showed that 1.2× growth (1.5e-4 → 1.8e-4) caused:
 
 If retry cascade fails all the way to dt=1e-5 and still doesn't converge:
 - The problem may require dt < 1e-5
-- Consider lowering `minDt` to 1e-6 or 1e-7
+- Consider lowering `minimumTimeStep` to 1e-6 or 1e-7
 - This is acceptable if physically justified
 
 ### 3. Underlying Ill-Conditioning
@@ -438,12 +438,12 @@ But they don't solve the underlying conditioning problem. For that, consider:
    - Test full 5ms simulation
    - Verify all steps converge
    - Measure performance metrics
-   - Consider tuning `maxTimestepGrowth` (1.2 → 1.1 or 1.05)
+   - Consider tuning `maximumTimeStepGrowth` (1.2 → 1.1 or 1.05)
 
 3. **Short-term** (If retry fails at dt=1e-5):
    - Analyze why dt=1e-5 doesn't converge
    - Check Jacobian condition number at dt=1e-5
-   - Consider lowering minDt to 1e-6
+   - Consider lowering minimumTimeStep to 1e-6
    - Evaluate preconditioner implementation priority
 
 4. **Long-term** (Future improvements):
@@ -474,8 +474,8 @@ But they don't solve the underlying conditioning problem. For that, consider:
 
 **Build status**: ✅ Compiled successfully
 
-**Next step**: Rebuild Gotenx app and test to verify retry loop works correctly with minDt=1e-5.
+**Next step**: Rebuild Gotenx app and test to verify retry loop works correctly with minimumTimeStep=1e-5.
 
 The implementation is complete and ready for integration testing. Expected behavior is that Step 2 will now trigger dt retry instead of failing immediately, allowing the simulation to find a stable timestep automatically.
 
-If Step 2 still fails even with retry down to minDt=1e-5, that would indicate the problem requires additional solutions (preconditioner, lower minDt, or different numerical approach), but at least the retry mechanism will be working correctly and providing clear diagnostics.
+If Step 2 still fails even with retry down to minimumTimeStep=1e-5, that would indicate the problem requires additional solutions (preconditioner, lower minimumTimeStep, or different numerical approach), but at least the retry mechanism will be working correctly and providing clear diagnostics.

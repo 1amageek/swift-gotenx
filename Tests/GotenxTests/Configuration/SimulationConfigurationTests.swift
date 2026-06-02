@@ -14,7 +14,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -24,36 +24,36 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(modelType: .constant)
+                    transport: .defaultConstant
                 )
             ),
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.0,
-                initialDt: 1e-3
+                initialTimeStep: 1e-3
             )
         )
 
-        #expect(config.runtime.static.mesh.nCells == 100)
+        #expect(config.runtime.static.mesh.cellCount == 100)
         #expect(config.time.end == 1.0)
     }
 
     @Test("SimulationConfiguration builder pattern")
     func testBuilderPattern() {
         let config = SimulationConfiguration.build { builder in
-            builder.runtime.static.mesh.nCells = 150
+            builder.runtime.static.mesh.cellCount = 150
             builder.runtime.static.mesh.majorRadius = 3.5
             builder.runtime.dynamic.boundaries = BoundaryConfig(
                 ionTemperature: 150.0,
                 electronTemperature: 150.0,
-                density: 1e19
+                electronDensity: 1e19
             )
             builder.time.end = 2.0
         }
 
-        #expect(config.runtime.static.mesh.nCells == 150)
+        #expect(config.runtime.static.mesh.cellCount == 150)
         #expect(config.runtime.static.mesh.majorRadius == 3.5)
         #expect(config.runtime.dynamic.boundaries.ionTemperature == 150.0)
         #expect(config.time.end == 2.0)
@@ -65,7 +65,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -78,16 +78,16 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(modelType: .constant),
+                    transport: .defaultConstant,
                     sources: .default
                 )
             ),
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.0,
-                initialDt: 1e-3
+                initialTimeStep: 1e-3
             ),
             output: .default
         )
@@ -111,7 +111,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -121,14 +121,14 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,
-                            "chi_electron": 0.01,
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     )
                 )
@@ -136,7 +136,7 @@ struct SimulationConfigurationTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.0,
-                initialDt: 1e-6  // Below CFL estimate of 1e-5
+                initialTimeStep: 1e-6  // Below CFL estimate of 1e-5
             )
         )
 
@@ -151,7 +151,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -161,14 +161,14 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,
-                            "chi_electron": 0.01,
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     )
                 )
@@ -176,7 +176,7 @@ struct SimulationConfigurationTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.0,
-                initialDt: 1e-3  // Much larger than CFL estimate
+                initialTimeStep: 1e-3  // Much larger than CFL estimate
             )
         )
 
@@ -190,7 +190,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -200,15 +200,15 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(modelType: .constant)
+                    transport: .defaultConstant
                 )
             ),
             time: TimeConfiguration(
                 start: 1.0,
                 end: 0.5,  // End < Start
-                initialDt: 1e-3
+                initialTimeStep: 1e-3
             )
         )
 
@@ -223,7 +223,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -233,15 +233,15 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: -100.0,  // Negative
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(modelType: .constant)
+                    transport: .defaultConstant
                 )
             ),
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.0,
-                initialDt: 1e-3
+                initialTimeStep: 1e-3
             )
         )
 
@@ -256,7 +256,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -266,9 +266,9 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(modelType: .constant),
+                    transport: .defaultConstant,
                     sources: SourcesConfig(
                         fusionConfig: FusionConfig(
                             deuteriumFraction: 0.7,  // Sum != 1.0
@@ -281,7 +281,7 @@ struct SimulationConfigurationTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.0,
-                initialDt: 1e-3
+                initialTimeStep: 1e-3
             )
         )
 
@@ -296,7 +296,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -306,9 +306,9 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(modelType: .constant)
+                    transport: .defaultConstant
                 )
             ),
             time: TimeConfiguration(end: 1.0)
@@ -318,7 +318,7 @@ struct SimulationConfigurationTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -328,9 +328,9 @@ struct SimulationConfigurationTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 150.0,  // Different dynamic param
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(modelType: .constant)
+                    transport: .defaultConstant
                 )
             ),
             time: TimeConfiguration(end: 1.0)

@@ -51,13 +51,13 @@ public struct QLKNNTransportModel: TransportModel {
         }
     }
 
-    /// Effective charge Z_eff (for collisionality calculation)
-    public let Zeff: Float
+    /// Effective charge effectiveCharge (for collisionality calculation)
+    public let effectiveCharge: Float
 
     /// Minimum transport coefficient floor [m²/s]
     ///
     /// Prevents numerical issues when QLKNN predicts very low transport
-    public let minChi: Float
+    public let minimumHeatDiffusivity: Float
 
     /// Fallback transport model when QLKNN fails
     private let fallback: BohmGyroBohmTransportModel
@@ -67,20 +67,21 @@ public struct QLKNNTransportModel: TransportModel {
     /// Initialize QLKNN transport model
     ///
     /// - Parameters:
-    ///   - Zeff: Effective charge (default: 1.0 for pure deuterium)
-    ///   - minChi: Minimum transport coefficient floor (default: 0.01 m²/s)
+    ///   - effectiveCharge: Effective charge (default: 1.0 for pure deuterium)
+    ///   - minimumHeatDiffusivity: Minimum transport coefficient floor (default: 0.01 m²/s)
     /// - Throws: If QLKNN model fails to load
-    public init(Zeff: Float = 1.0, minChi: Float = 0.01) throws {
+    public init(effectiveCharge: Float = 1.0, minimumHeatDiffusivity: Float = 0.01) throws {
         self.network = SendableQLKNNNetwork(try QLKNNNetwork.loadDefault())
-        self.Zeff = Zeff
-        self.minChi = minChi
+        self.effectiveCharge = effectiveCharge
+        self.minimumHeatDiffusivity = minimumHeatDiffusivity
         self.fallback = BohmGyroBohmTransportModel()
     }
 
-    public init(params: TransportParameters) throws {
+    public init(parameters: TransportParameters) throws {
+        try parameters.validateParameterKeys(for: .qlknn)
         self.network = SendableQLKNNNetwork(try QLKNNNetwork.loadDefault())
-        self.Zeff = params.params["Zeff"] ?? 1.0
-        self.minChi = params.params["min_chi"] ?? 0.01
+        self.effectiveCharge = parameters.parameters["effectiveCharge"] ?? 1.0
+        self.minimumHeatDiffusivity = parameters.parameters["minimumHeatDiffusivity"] ?? 0.01
         self.fallback = BohmGyroBohmTransportModel()
     }
 
@@ -89,20 +90,20 @@ public struct QLKNNTransportModel: TransportModel {
     public func computeCoefficients(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: TransportParameters
+        parameters: TransportParameters
     ) -> TransportCoefficients {
         // Extract profiles as MLXArrays
-        let Ti = profiles.ionTemperature.value
-        let Te = profiles.electronTemperature.value
-        let ne = profiles.electronDensity.value
+        let ionTemperature = profiles.ionTemperature.value
+        let electronTemperature = profiles.electronTemperature.value
+        let electronDensity = profiles.electronDensity.value
         let radii = geometry.radii.value
         let q = geometry.safetyFactor.value
 
         // Compute QLKNN input features
         let inputs = computeQLKNNInputs(
-            Ti: Ti,
-            Te: Te,
-            ne: ne,
+            ionTemperature: ionTemperature,
+            electronTemperature: electronTemperature,
+            electronDensity: electronDensity,
             radii: radii,
             q: q,
             geometry: geometry
@@ -120,27 +121,27 @@ public struct QLKNNTransportModel: TransportModel {
             return fallback.computeCoefficients(
                 profiles: profiles,
                 geometry: geometry,
-                params: params
+                parameters: parameters
             )
         }
 
         // Convert QLKNN outputs to physical transport coefficients
-        let chiIon = computeIonDiffusivity(outputs: outputs, Te: Te, geometry: geometry)
-        let chiElectron = computeElectronDiffusivity(outputs: outputs, Te: Te, geometry: geometry)
-        let particleDiffusivity = computeParticleDiffusivity(outputs: outputs, Te: Te, geometry: geometry)
+        let ionHeatDiffusivity = computeIonDiffusivity(outputs: outputs, electronTemperature: electronTemperature, geometry: geometry)
+        let electronHeatDiffusivity = computeElectronDiffusivity(outputs: outputs, electronTemperature: electronTemperature, geometry: geometry)
+        let particleDiffusivity = computeParticleDiffusivity(outputs: outputs, electronTemperature: electronTemperature, geometry: geometry)
 
         // Apply minimum floor
-        let chiIonClamped = maximum(chiIon, MLXArray(minChi))
-        let chiElectronClamped = maximum(chiElectron, MLXArray(minChi))
-        let particleDiffusivityClamped = maximum(particleDiffusivity, MLXArray(minChi))
+        let clampedIonHeatDiffusivity = maximum(ionHeatDiffusivity, MLXArray(minimumHeatDiffusivity))
+        let clampedElectronHeatDiffusivity = maximum(electronHeatDiffusivity, MLXArray(minimumHeatDiffusivity))
+        let particleDiffusivityClamped = maximum(particleDiffusivity, MLXArray(minimumHeatDiffusivity))
 
         // No convection velocity from QLKNN (set to zero)
-        let nCells = radii.shape[0]
-        let convectionVelocity = MLXArray.zeros([nCells])
+        let cellCount = radii.shape[0]
+        let convectionVelocity = MLXArray.zeros([cellCount])
 
         return TransportCoefficients(
-            evaluatingChiIon: chiIonClamped,
-            chiElectron: chiElectronClamped,
+            ionHeatDiffusivity: clampedIonHeatDiffusivity,
+            electronHeatDiffusivity: clampedElectronHeatDiffusivity,
             particleDiffusivity: particleDiffusivityClamped,
             convectionVelocity: convectionVelocity
         )
@@ -150,9 +151,9 @@ public struct QLKNNTransportModel: TransportModel {
 
     /// Compute QLKNN input parameters from profiles and geometry
     private func computeQLKNNInputs(
-        Ti: MLXArray,
-        Te: MLXArray,
-        ne: MLXArray,
+        ionTemperature: MLXArray,
+        electronTemperature: MLXArray,
+        electronDensity: MLXArray,
         radii: MLXArray,
         q: MLXArray,
         geometry: Geometry
@@ -161,19 +162,19 @@ public struct QLKNNTransportModel: TransportModel {
 
         // Normalized gradients using MLXGradient
         let rLnTi = MLXGradient.normalizedGradient(
-            profile: Ti,
+            profile: ionTemperature,
             radii: radii,
             normalizationLength: majorRadius
         )
 
         let rLnTe = MLXGradient.normalizedGradient(
-            profile: Te,
+            profile: electronTemperature,
             radii: radii,
             normalizationLength: majorRadius
         )
 
         let rLnNe = MLXGradient.normalizedGradient(
-            profile: ne,
+            profile: electronDensity,
             radii: radii,
             normalizationLength: majorRadius
         )
@@ -188,16 +189,19 @@ public struct QLKNNTransportModel: TransportModel {
         let x = MLXGradient.inverseAspectRatio(radii: radii, majorRadius: majorRadius)
 
         // Temperature ratio
-        let tiTe = MLXGradient.temperatureRatio(Ti: Ti, Te: Te)
+        let tiTe = MLXGradient.temperatureRatio(
+            ionTemperature: ionTemperature,
+            electronTemperature: electronTemperature
+        )
 
         // Collisionality
         let logNuStar = MLXGradient.collisionality(
-            ne: ne,
-            Te: Te,
+            electronDensity: electronDensity,
+            electronTemperature: electronTemperature,
             q: q,
             radii: radii,
             majorRadius: majorRadius,
-            Zeff: Zeff
+            effectiveCharge: effectiveCharge
         )
 
         // Normalized density (ni/ne ≈ 1 for single-species)
@@ -224,12 +228,12 @@ public struct QLKNNTransportModel: TransportModel {
     /// **Formula**: χ_GB = T_e^(3/2) * sqrt(m_i) / [(e B)² * a]
     ///
     /// **Units**:
-    /// - Te: [eV] (converted to Joules internally)
+    /// - electronTemperature: [eV] (converted to Joules internally)
     /// - Result: [m²/s]
     ///
     /// **Reference**: Kadomtsev (1975), Plasma Physics and Controlled Nuclear Fusion Research
     private func computeGyrBohmDiffusivity(
-        Te: MLXArray,
+        electronTemperature: MLXArray,
         geometry: Geometry
     ) -> MLXArray {
         // Physical constants
@@ -242,11 +246,11 @@ public struct QLKNNTransportModel: TransportModel {
         let a = geometry.minorRadius            // [m]
 
         // Convert Te from eV to Joules for SI calculation
-        let Te_J = Te * eV_to_J
+        let electronTemperatureJoules = electronTemperature * eV_to_J
 
         // χ_GB = T_e^(3/2) * sqrt(m_i) / [(e B)² * a]
-        // Note: Te is in Joules here
-        let numerator = pow(Te_J, Float(1.5)) * sqrt(ionMass)
+        // Note: electron temperature is in Joules here
+        let numerator = pow(electronTemperatureJoules, Float(1.5)) * sqrt(ionMass)
         let denominator = (electronCharge * B) * (electronCharge * B) * a
 
         return numerator / denominator
@@ -262,10 +266,10 @@ public struct QLKNNTransportModel: TransportModel {
     /// - efiTEM: Ion thermal flux from Trapped Electron Mode
     private func computeIonDiffusivity(
         outputs: [String: MLXArray],
-        Te: MLXArray,
+        electronTemperature: MLXArray,
         geometry: Geometry
     ) -> MLXArray {
-        let chiGB = computeGyrBohmDiffusivity(Te: Te, geometry: geometry)
+        let chiGB = computeGyrBohmDiffusivity(electronTemperature: electronTemperature, geometry: geometry)
 
         let efiITG = outputs["efiITG"]!
         let efiTEM = outputs["efiTEM"]!
@@ -288,10 +292,10 @@ public struct QLKNNTransportModel: TransportModel {
     /// - efeETG: Electron thermal flux from Electron Temperature Gradient mode
     private func computeElectronDiffusivity(
         outputs: [String: MLXArray],
-        Te: MLXArray,
+        electronTemperature: MLXArray,
         geometry: Geometry
     ) -> MLXArray {
-        let chiGB = computeGyrBohmDiffusivity(Te: Te, geometry: geometry)
+        let chiGB = computeGyrBohmDiffusivity(electronTemperature: electronTemperature, geometry: geometry)
 
         let efeITG = outputs["efeITG"]!
         let efeTEM = outputs["efeTEM"]!
@@ -314,10 +318,10 @@ public struct QLKNNTransportModel: TransportModel {
     /// - pfeTEM: Particle flux from TEM mode
     private func computeParticleDiffusivity(
         outputs: [String: MLXArray],
-        Te: MLXArray,
+        electronTemperature: MLXArray,
         geometry: Geometry
     ) -> MLXArray {
-        let chiGB = computeGyrBohmDiffusivity(Te: Te, geometry: geometry)
+        let chiGB = computeGyrBohmDiffusivity(electronTemperature: electronTemperature, geometry: geometry)
 
         let pfeITG = outputs["pfeITG"]!
         let pfeTEM = outputs["pfeTEM"]!

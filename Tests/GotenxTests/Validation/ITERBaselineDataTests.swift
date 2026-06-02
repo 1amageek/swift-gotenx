@@ -25,17 +25,17 @@ struct ITERBaselineDataTests {
     func profilesShape() throws {
         let baseline = ITERBaselineData.load()
 
-        let nPoints = baseline.profiles.rho.count
+        let nPoints = baseline.profiles.normalizedRadius.count
         #expect(nPoints == 50, "Should have 50 radial points")
-        #expect(baseline.profiles.Ti.count == nPoints, "Ti should have same length as rho")
-        #expect(baseline.profiles.Te.count == nPoints, "Te should have same length as rho")
-        #expect(baseline.profiles.ne.count == nPoints, "ne should have same length as rho")
+        #expect(baseline.profiles.ionTemperature.count == nPoints, "Ti should have same length as rho")
+        #expect(baseline.profiles.electronTemperature.count == nPoints, "Te should have same length as rho")
+        #expect(baseline.profiles.electronDensity.count == nPoints, "ne should have same length as rho")
     }
 
     @Test("ITER Baseline rho grid is normalized and monotonic")
     func rhoGrid() throws {
         let baseline = ITERBaselineData.load()
-        let rho = baseline.profiles.rho
+        let rho = baseline.profiles.normalizedRadius
 
         // First point should be 0
         #expect(abs(rho[0] - 0.0) < 1e-6, "First rho should be 0")
@@ -53,16 +53,16 @@ struct ITERBaselineDataTests {
     func temperatureProfiles() throws {
         let baseline = ITERBaselineData.load()
 
-        let Ti = baseline.profiles.Ti
-        let Te = baseline.profiles.Te
+        let Ti = baseline.profiles.ionTemperature
+        let Te = baseline.profiles.electronTemperature
 
         // Core temperature should be highest
-        let Ti_core = Ti[0]
+        let coreIonTemperature = Ti[0]
         let Ti_edge = Ti[Ti.count-1]
-        #expect(Ti_core > Ti_edge, "Core temperature should be higher than edge")
+        #expect(coreIonTemperature > Ti_edge, "Core temperature should be higher than edge")
 
         // Core should be ~20 keV = 20,000 eV
-        #expect(abs(Ti_core - 20000.0) < 100.0, "Core Ti should be ~20 keV")
+        #expect(abs(coreIonTemperature - 20000.0) < 100.0, "Core Ti should be ~20 keV")
 
         // Edge should be ~100 eV
         #expect(abs(Ti_edge - 100.0) < 10.0, "Edge Ti should be ~100 eV")
@@ -82,15 +82,15 @@ struct ITERBaselineDataTests {
     func densityProfiles() throws {
         let baseline = ITERBaselineData.load()
 
-        let ne = baseline.profiles.ne
+        let ne = baseline.profiles.electronDensity
 
         // Core density should be highest
-        let ne_core = ne[0]
+        let coreElectronDensity = ne[0]
         let ne_edge = ne[ne.count-1]
-        #expect(ne_core > ne_edge, "Core density should be higher than edge")
+        #expect(coreElectronDensity > ne_edge, "Core density should be higher than edge")
 
         // Core should be ~1.0 × 10²⁰ m⁻³
-        #expect(abs(ne_core - 1.0e20) < 1e19, "Core ne should be ~1.0×10²⁰ m⁻³")
+        #expect(abs(coreElectronDensity - 1.0e20) < 1e19, "Core ne should be ~1.0×10²⁰ m⁻³")
 
         // Edge should be ~0.2 × 10²⁰ m⁻³
         #expect(abs(ne_edge - 0.2e20) < 1e18, "Edge ne should be ~0.2×10²⁰ m⁻³")
@@ -106,31 +106,31 @@ struct ITERBaselineDataTests {
         let baseline = ITERBaselineData.load()
         let global = baseline.globalQuantities
 
-        // Q_fusion should be 10 (design goal)
-        #expect(abs(global.Q_fusion - 10.0) < 0.1, "Q should be ~10")
+        // fusionGain should be 10 (design goal)
+        #expect(abs(global.fusionGain - 10.0) < 0.1, "Q should be ~10")
 
-        // P_fusion should be 400 MW
-        #expect(abs(global.P_fusion - 400.0) < 50.0, "P_fusion should be ~400 MW")
+        // fusionPower should be 400 MW
+        #expect(abs(global.fusionPower - 400.0) < 50.0, "P_fusion should be ~400 MW")
 
-        // P_alpha should be ~20% of P_fusion
-        #expect(abs(global.P_alpha - 80.0) < 20.0, "P_alpha should be ~80 MW")
+        // alphaPower should be ~20% of fusionPower
+        #expect(abs(global.alphaPower - 80.0) < 20.0, "P_alpha should be ~80 MW")
 
         // τE should be ~3.7 s
-        #expect(abs(global.tau_E - 3.7) < 0.5, "τE should be ~3.7 s")
+        #expect(abs(global.energyConfinementTime - 3.7) < 0.5, "τE should be ~3.7 s")
 
         // βN should be ~1.8
-        #expect(abs(global.beta_N - 1.8) < 0.3, "βN should be ~1.8")
+        #expect(abs(global.normalizedBeta - 1.8) < 0.3, "βN should be ~1.8")
     }
 
     @Test("Validate global quantities - passing case")
     func validateGlobalQuantitiesPassing() throws {
         // Create reasonable global quantities
         let global = GlobalQuantities(
-            P_fusion: 400.0,
-            P_alpha: 80.0,
-            tau_E: 3.5,
-            beta_N: 2.0,
-            Q_fusion: 10.0
+            fusionPower: 400.0,
+            alphaPower: 80.0,
+            energyConfinementTime: 3.5,
+            normalizedBeta: 2.0,
+            fusionGain: 10.0
         )
 
         let isValid = ITERBaselineData.validateGlobalQuantities(global)
@@ -141,11 +141,11 @@ struct ITERBaselineDataTests {
     func validateGlobalQuantitiesLowQ() throws {
         // Q = 3 (too low)
         let global = GlobalQuantities(
-            P_fusion: 150.0,
-            P_alpha: 30.0,
-            tau_E: 2.0,
-            beta_N: 1.5,
-            Q_fusion: 3.0
+            fusionPower: 150.0,
+            alphaPower: 30.0,
+            energyConfinementTime: 2.0,
+            normalizedBeta: 1.5,
+            fusionGain: 3.0
         )
 
         let isValid = ITERBaselineData.validateGlobalQuantities(global)
@@ -156,11 +156,11 @@ struct ITERBaselineDataTests {
     func validateGlobalQuantitiesHighBetaN() throws {
         // βN = 4.0 (MHD unstable)
         let global = GlobalQuantities(
-            P_fusion: 400.0,
-            P_alpha: 80.0,
-            tau_E: 3.5,
-            beta_N: 4.0,
-            Q_fusion: 10.0
+            fusionPower: 400.0,
+            alphaPower: 80.0,
+            energyConfinementTime: 3.5,
+            normalizedBeta: 4.0,
+            fusionGain: 10.0
         )
 
         let isValid = ITERBaselineData.validateGlobalQuantities(global)
@@ -171,11 +171,11 @@ struct ITERBaselineDataTests {
     func validateGlobalQuantitiesLowConfinement() throws {
         // τE = 0.5 s (poor confinement)
         let global = GlobalQuantities(
-            P_fusion: 100.0,
-            P_alpha: 20.0,
-            tau_E: 0.5,
-            beta_N: 1.5,
-            Q_fusion: 8.0
+            fusionPower: 100.0,
+            alphaPower: 20.0,
+            energyConfinementTime: 0.5,
+            normalizedBeta: 1.5,
+            fusionGain: 8.0
         )
 
         let isValid = ITERBaselineData.validateGlobalQuantities(global)
@@ -194,17 +194,17 @@ struct ITERBaselineDataTests {
     func parabolicShape() throws {
         let baseline = ITERBaselineData.load()
 
-        let rho = baseline.profiles.rho
-        let Ti = baseline.profiles.Ti
+        let rho = baseline.profiles.normalizedRadius
+        let Ti = baseline.profiles.ionTemperature
 
         // Extract parameters
-        let Ti_core = Ti[0]
+        let coreIonTemperature = Ti[0]
         let Ti_edge = Ti[Ti.count-1]
 
-        // Verify parabolic shape: Ti(r) = Ti_edge + (Ti_core - Ti_edge) × (1 - r²)²
+        // Verify parabolic shape: Ti(r) = Ti_edge + (coreIonTemperature - Ti_edge) × (1 - r²)²
         for i in 0..<rho.count {
             let r = rho[i]
-            let Ti_expected = Ti_edge + (Ti_core - Ti_edge) * pow(1.0 - r*r, 2.0)
+            let Ti_expected = Ti_edge + (coreIonTemperature - Ti_edge) * pow(1.0 - r*r, 2.0)
             let relativeError = abs(Ti[i] - Ti_expected) / Ti_expected
 
             #expect(relativeError < 0.01, "Temperature should follow parabolic profile at r = \(r)")
@@ -215,17 +215,17 @@ struct ITERBaselineDataTests {
     func linearShape() throws {
         let baseline = ITERBaselineData.load()
 
-        let rho = baseline.profiles.rho
-        let ne = baseline.profiles.ne
+        let rho = baseline.profiles.normalizedRadius
+        let ne = baseline.profiles.electronDensity
 
         // Extract parameters
-        let ne_core = ne[0]
+        let coreElectronDensity = ne[0]
         let ne_edge = ne[ne.count-1]
 
-        // Verify linear shape: ne(r) = ne_edge + (ne_core - ne_edge) × (1 - r)
+        // Verify linear shape: ne(r) = ne_edge + (coreElectronDensity - ne_edge) × (1 - r)
         for i in 0..<rho.count {
             let r = rho[i]
-            let ne_expected = ne_edge + (ne_core - ne_edge) * (1.0 - r)
+            let ne_expected = ne_edge + (coreElectronDensity - ne_edge) * (1.0 - r)
             let relativeError = abs(ne[i] - ne_expected) / ne_expected
 
             #expect(relativeError < 0.01, "Density should follow linear profile at r = \(r)")

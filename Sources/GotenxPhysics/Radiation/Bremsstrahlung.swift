@@ -8,7 +8,7 @@ import GotenxCore
 /// Always a loss term (negative power).
 ///
 /// Physical equation:
-/// P_brems = -C_brems * n_e² * Z_eff * √T_e * (1 + f_rel)
+/// P_brems = -C_brems * n_e² * effectiveCharge * √T_e * (1 + f_rel)
 ///
 /// Where:
 /// - C_brems = 5.35 × 10⁻³⁷ [W·m³·eV^(-1/2)]
@@ -20,7 +20,7 @@ import GotenxCore
 public struct Bremsstrahlung: Sendable {
 
     /// Effective charge number
-    public let Zeff: Float
+    public let effectiveCharge: Float
 
     /// Include relativistic correction for high temperatures
     public let includeRelativistic: Bool
@@ -34,48 +34,48 @@ public struct Bremsstrahlung: Sendable {
     /// Create Bremsstrahlung radiation model
     ///
     /// - Parameters:
-    ///   - Zeff: Effective charge (default: 1.5)
+    ///   - effectiveCharge: Effective charge (default: 1.5)
     ///   - includeRelativistic: Apply relativistic correction (default: true)
-    public init(Zeff: Float = 1.5, includeRelativistic: Bool = true) {
-        self.Zeff = Zeff
+    public init(effectiveCharge: Float = 1.5, includeRelativistic: Bool = true) {
+        self.effectiveCharge = effectiveCharge
         self.includeRelativistic = includeRelativistic
     }
 
     /// Compute Bremsstrahlung radiation power
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³], shape [nCells]
-    ///   - Te: Electron temperature [eV], shape [nCells]
-    /// - Returns: Radiation power [W/m³] (negative = loss), shape [nCells]
+    ///   - electronDensity: Electron density [m⁻³], shape [cellCount]
+    ///   - electronTemperature: Electron temperature [eV], shape [cellCount]
+    /// - Returns: Radiation power [W/m³] (negative = loss), shape [cellCount]
     /// - Throws: PhysicsError if inputs are invalid
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
-    public func compute(ne: MLXArray, Te: MLXArray) throws -> MLXArray {
+    public func compute(electronDensity: MLXArray, electronTemperature: MLXArray) throws -> MLXArray {
 
         // Validate inputs (CRITICAL FIX #3)
-        try PhysicsValidation.validateDensity(ne, name: "ne")
-        try PhysicsValidation.validateTemperature(Te, name: "Te")
-        try PhysicsValidation.validateShapes([ne, Te], names: ["ne", "Te"])
+        try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
+        try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
+        try PhysicsValidation.validateShapes([electronDensity, electronTemperature], names: ["electronDensity", "electronTemperature"])
 
-        var f_rel = MLXArray.zeros(like: Te)
+        var f_rel = MLXArray.zeros(like: electronTemperature)
 
         if includeRelativistic {
-            // Relativistic correction: only significant for Te > 1 keV
+            // Relativistic correction: only significant for electronTemperature > 1 keV
             // f_rel = (T_e / m_e c²) * (4√2 - 1) / π
-            let mask = MLX.greater(Te, Float(1000.0))  // Only apply for Te > 1 keV
+            let mask = MLX.greater(electronTemperature, Float(1000.0))  // Only apply for electronTemperature > 1 keV
             let mask_float = mask.asType(.float32)  // Convert Bool to 0/1
 
-            let relativistic_factor = (Te / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
+            let relativistic_factor = (electronTemperature / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
             f_rel = mask_float * relativistic_factor
         }
 
         // Bremsstrahlung power (negative = energy loss) [W/m³]
-        // P_brems = -C * n_e² * Z_eff * √T_e * (1 + f_rel)
+        // P_brems = -C * n_e² * effectiveCharge * √T_e * (1 + f_rel)
         // CRITICAL: Multiply small values first to prevent Float32 overflow
-        // ne ≈ 10^20, C_brems ≈ 5.35e-37, sqrt(Te) ≈ 100
-        // Order: (-C_brems * ne) * sqrt(Te) * ne * Zeff avoids 10^40 overflow
-        let P_brems_watts = -C_brems * ne * sqrt(Te) * ne * Zeff * (Float(1.0) + f_rel)
+        // electronDensity ≈ 10^20, C_brems ≈ 5.35e-37, sqrt(electronTemperature) ≈ 100
+        // Order: (-C_brems * electronDensity) * sqrt(electronTemperature) * electronDensity * effectiveCharge avoids 10^40 overflow
+        let P_brems_watts = -C_brems * electronDensity * sqrt(electronTemperature) * electronDensity * effectiveCharge * (Float(1.0) + f_rel)
 
         // Return lazy MLXArray - caller will eval() when needed
         return P_brems_watts
@@ -84,29 +84,29 @@ public struct Bremsstrahlung: Sendable {
     /// Compute classical Bremsstrahlung (no relativistic correction)
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Te: Electron temperature [eV]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - electronTemperature: Electron temperature [eV]
     /// - Returns: Classical Bremsstrahlung power [W/m³]
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
-    public func computeClassical(ne: MLXArray, Te: MLXArray) -> MLXArray {
+    public func computeClassical(electronDensity: MLXArray, electronTemperature: MLXArray) -> MLXArray {
         // CRITICAL: Multiply small values first to prevent Float32 overflow
-        // Order: (-C_brems * ne) * sqrt(Te) * ne * Zeff avoids 10^40 overflow
-        return -C_brems * ne * sqrt(Te) * ne * Zeff
+        // Order: (-C_brems * electronDensity) * sqrt(electronTemperature) * electronDensity * effectiveCharge avoids 10^40 overflow
+        return -C_brems * electronDensity * sqrt(electronTemperature) * electronDensity * effectiveCharge
     }
 
     /// Compute relativistic correction factor
     ///
-    /// - Parameter Te: Electron temperature [eV]
+    /// - Parameter electronTemperature: Electron temperature [eV]
     /// - Returns: Relativistic correction factor f_rel (dimensionless)
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
-    public func computeRelativisticCorrection(Te: MLXArray) -> MLXArray {
-        let mask = MLX.greater(Te, Float(1000.0))
+    public func computeRelativisticCorrection(electronTemperature: MLXArray) -> MLXArray {
+        let mask = MLX.greater(electronTemperature, Float(1000.0))
         let mask_float = mask.asType(.float32)  // Convert Bool to 0/1
-        let factor = (Te / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
+        let factor = (electronTemperature / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
         let result = mask_float * factor
         // Return lazy MLXArray - caller will eval() when needed
         return result
@@ -114,13 +114,13 @@ public struct Bremsstrahlung: Sendable {
 
     /// Check if relativistic effects are significant
     ///
-    /// - Parameter Te: Electron temperature [eV]
+    /// - Parameter electronTemperature: Electron temperature [eV]
     /// - Returns: True if relativistic correction > 1%
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
-    public func isRelativisticSignificant(Te: MLXArray) -> MLXArray {
-        let f_rel = computeRelativisticCorrection(Te: Te)
+    public func isRelativisticSignificant(electronTemperature: MLXArray) -> MLXArray {
+        let f_rel = computeRelativisticCorrection(electronTemperature: electronTemperature)
         let result = MLX.greater(f_rel, Float(0.01))
         // Return lazy MLXArray - caller will eval() when needed
         return result
@@ -139,8 +139,8 @@ public struct Bremsstrahlung: Sendable {
     ) throws -> SourceMetadata {
 
         let P_brems_watts = try compute(
-            ne: profiles.electronDensity.value,
-            Te: profiles.electronTemperature.value
+            electronDensity: profiles.electronDensity.value,
+            electronTemperature: profiles.electronTemperature.value
         )
 
         // Volume integration: ∫ P dV → [W/m³] × [m³] = [W]
@@ -180,8 +180,8 @@ extension Bremsstrahlung {
     ) throws -> SourceTerms {
 
         let P_brems_watts = try compute(
-            ne: profiles.electronDensity.value,
-            Te: profiles.electronTemperature.value
+            electronDensity: profiles.electronDensity.value,
+            electronTemperature: profiles.electronTemperature.value
         )
 
         // Convert to MW/m³ for SourceTerms
@@ -228,8 +228,8 @@ extension Bremsstrahlung {
         profiles: CoreProfiles
     ) throws -> SourceTerms {
         let pBremsWatts = computeForSolver(
-            ne: profiles.electronDensity.value,
-            Te: profiles.electronTemperature.value
+            electronDensity: profiles.electronDensity.value,
+            electronTemperature: profiles.electronTemperature.value
         )
         let pBrems = PhysicsConstants.wattsToMegawatts(pBremsWatts)
 
@@ -245,17 +245,17 @@ extension Bremsstrahlung {
         )
     }
 
-    private func computeForSolver(ne: MLXArray, Te: MLXArray) -> MLXArray {
-        var fRel = MLXArray.zeros(like: Te)
+    private func computeForSolver(electronDensity: MLXArray, electronTemperature: MLXArray) -> MLXArray {
+        var fRel = MLXArray.zeros(like: electronTemperature)
 
         if includeRelativistic {
-            let mask = MLX.greater(Te, Float(1000.0))
+            let mask = MLX.greater(electronTemperature, Float(1000.0))
             let maskFloat = mask.asType(.float32)
-            let relativisticFactor = (Te / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
+            let relativisticFactor = (electronTemperature / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
             fRel = maskFloat * relativisticFactor
         }
 
-        return -C_brems * ne * sqrt(Te) * ne * Zeff * (Float(1.0) + fRel)
+        return -C_brems * electronDensity * sqrt(electronTemperature) * electronDensity * effectiveCharge * (Float(1.0) + fRel)
     }
 }
 
@@ -268,17 +268,17 @@ extension Bremsstrahlung {
     /// Integrates Bremsstrahlung power over plasma volume.
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Te: Electron temperature [eV]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - electronTemperature: Electron temperature [eV]
     ///   - geometry: Tokamak geometry
     /// - Returns: Total radiated power [W]
     public func computeTotalPower(
-        ne: MLXArray,
-        Te: MLXArray,
+        electronDensity: MLXArray,
+        electronTemperature: MLXArray,
         geometry: Geometry
     ) throws -> Float {
 
-        let P_brems_density = try compute(ne: ne, Te: Te)
+        let P_brems_density = try compute(electronDensity: electronDensity, electronTemperature: electronTemperature)
 
         // Integrate over volume: P_total = Σ P_brems * V_cell
         let cellVolumes = GeometricFactors.from(geometry: geometry).cellVolumes.value
@@ -290,19 +290,19 @@ extension Bremsstrahlung {
     /// Compute radiation fraction (P_rad / P_input)
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Te: Electron temperature [eV]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - electronTemperature: Electron temperature [eV]
     ///   - geometry: Tokamak geometry
     ///   - inputPower: Total input power [W]
     /// - Returns: Radiation fraction (dimensionless)
     public func computeRadiationFraction(
-        ne: MLXArray,
-        Te: MLXArray,
+        electronDensity: MLXArray,
+        electronTemperature: MLXArray,
         geometry: Geometry,
         inputPower: Float
     ) throws -> Float {
 
-        let P_rad = abs(try computeTotalPower(ne: ne, Te: Te, geometry: geometry))
+        let P_rad = abs(try computeTotalPower(electronDensity: electronDensity, electronTemperature: electronTemperature, geometry: geometry))
         return P_rad / (inputPower + 1e-10)
     }
 }

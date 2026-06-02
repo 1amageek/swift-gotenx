@@ -36,10 +36,10 @@ public struct SimulationConfiguration: Codable, Sendable, Equatable {
 extension SimulationConfiguration {
     /// Create configuration with builder pattern
     public static func build(
-        _ configure: (inout Builder) -> Void
-    ) -> SimulationConfiguration {
+        _ configure: (inout Builder) throws -> Void
+    ) rethrows -> SimulationConfiguration {
         var builder = Builder()
-        configure(&builder)
+        try configure(&builder)
         return builder.build()
     }
 
@@ -88,7 +88,7 @@ extension SimulationConfiguration {
     }
 
     public struct MeshBuilder {
-        public var nCells: Int = 100
+        public var cellCount: Int = 100
         public var majorRadius: Float = 3.0
         public var minorRadius: Float = 1.0
         public var toroidalField: Float = 2.5
@@ -96,7 +96,7 @@ extension SimulationConfiguration {
 
         public func build() -> MeshConfig {
             MeshConfig(
-                nCells: nCells,
+                cellCount: cellCount,
                 majorRadius: majorRadius,
                 minorRadius: minorRadius,
                 toroidalField: toroidalField,
@@ -109,9 +109,9 @@ extension SimulationConfiguration {
         public var boundaries: BoundaryConfig = BoundaryConfig(
             ionTemperature: 100.0,
             electronTemperature: 100.0,
-            density: 1e19
+            electronDensity: 1e19
         )
-        public var transport: TransportConfig = TransportConfig(modelType: .constant)
+        public var transport: TransportConfig = .defaultConstant
         public var sources: SourcesConfig = .default
         public var pedestal: PedestalConfig? = nil
         public var mhd: MHDConfig = .default
@@ -134,14 +134,14 @@ extension SimulationConfiguration {
     public struct TimeBuilder {
         public var start: Float = 0.0
         public var end: Float = 1.0
-        public var initialDt: Float = 1e-3
+        public var initialTimeStep: Float = 1e-3
         public var adaptive: AdaptiveTimestepConfig? = .default
 
         public func build() -> TimeConfiguration {
             TimeConfiguration(
                 start: start,
                 end: end,
-                initialDt: initialDt,
+                initialTimeStep: initialTimeStep,
                 adaptive: adaptive
             )
         }

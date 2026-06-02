@@ -12,43 +12,43 @@ import MLX
 /// **Design (Gradient-preserving)**:
 /// - Internal representation: MLXArray (preserves gradient tape)
 /// - External interface: [Float] accessors (for convenience)
-/// - Shape: [nSteps, 4] where 4 = [P_ECRH, P_ICRH, gas_puff, I_plasma]
+/// - Shape: [stepCount, 4] where 4 = [ecrhPower, icrhPower, gasPuffRate, plasmaCurrent]
 /// - All operations maintain differentiability
 public struct ActuatorTimeSeries {
     /// Internal MLXArray representation (gradient-preserving)
-    /// Shape: [nSteps × 4] (flattened for optimization)
+    /// Shape: [stepCount × 4] (flattened for optimization)
     private let data: MLXArray
 
     /// Number of timesteps
-    public let nSteps: Int
+    public let stepCount: Int
 
     // MARK: - Read-only accessors (for display/logging)
 
     /// ECRH power at each timestep [MW]
-    public var P_ECRH: [Float] {
+    public var ecrhPower: [Float] {
         let start = 0
-        let end = nSteps
+        let end = stepCount
         return Array(data.asArray(Float.self)[start..<end])
     }
 
     /// ICRH power at each timestep [MW]
-    public var P_ICRH: [Float] {
-        let start = nSteps
-        let end = 2 * nSteps
+    public var icrhPower: [Float] {
+        let start = stepCount
+        let end = 2 * stepCount
         return Array(data.asArray(Float.self)[start..<end])
     }
 
     /// Gas puff rate at each timestep [particles/s]
-    public var gas_puff: [Float] {
-        let start = 2 * nSteps
-        let end = 3 * nSteps
+    public var gasPuffRate: [Float] {
+        let start = 2 * stepCount
+        let end = 3 * stepCount
         return Array(data.asArray(Float.self)[start..<end])
     }
 
     /// Plasma current at each timestep [MA]
-    public var I_plasma: [Float] {
-        let start = 3 * nSteps
-        let end = 4 * nSteps
+    public var plasmaCurrent: [Float] {
+        let start = 3 * stepCount
+        let end = 4 * stepCount
         return Array(data.asArray(Float.self)[start..<end])
     }
 
@@ -56,47 +56,47 @@ public struct ActuatorTimeSeries {
 
     /// Create actuator time series from Float arrays
     public init(
-        P_ECRH: [Float],
-        P_ICRH: [Float],
-        gas_puff: [Float],
-        I_plasma: [Float]
+        ecrhPower: [Float],
+        icrhPower: [Float],
+        gasPuffRate: [Float],
+        plasmaCurrent: [Float]
     ) {
-        precondition(P_ECRH.count == P_ICRH.count, "All actuators must have same length")
-        precondition(P_ECRH.count == gas_puff.count, "All actuators must have same length")
-        precondition(P_ECRH.count == I_plasma.count, "All actuators must have same length")
-        precondition(P_ECRH.count > 0, "Must have at least one timestep")
+        precondition(ecrhPower.count == icrhPower.count, "All actuators must have same length")
+        precondition(ecrhPower.count == gasPuffRate.count, "All actuators must have same length")
+        precondition(ecrhPower.count == plasmaCurrent.count, "All actuators must have same length")
+        precondition(ecrhPower.count > 0, "Must have at least one timestep")
 
-        self.nSteps = P_ECRH.count
+        self.stepCount = ecrhPower.count
 
         // Create flat MLXArray (gradient-preserving)
-        let flat = P_ECRH + P_ICRH + gas_puff + I_plasma
+        let flat = ecrhPower + icrhPower + gasPuffRate + plasmaCurrent
         self.data = MLXArray(flat)
     }
 
     /// Create from MLXArray (preserves gradient tape)
-    private init(mlxArray: MLXArray, nSteps: Int) {
-        precondition(mlxArray.shape[0] == nSteps * 4,
-                    "Array shape \(mlxArray.shape[0]) != nSteps (\(nSteps)) × 4")
+    public init(mlxArray: MLXArray, stepCount: Int) {
+        precondition(mlxArray.shape[0] == stepCount * 4,
+                    "Array shape \(mlxArray.shape[0]) != stepCount (\(stepCount)) × 4")
 
         self.data = mlxArray
-        self.nSteps = nSteps
+        self.stepCount = stepCount
     }
 
     /// Create constant actuators (same value at all timesteps)
     public static func constant(
-        P_ECRH: Float,
-        P_ICRH: Float,
-        gas_puff: Float,
-        I_plasma: Float,
-        nSteps: Int
+        ecrhPower: Float,
+        icrhPower: Float,
+        gasPuffRate: Float,
+        plasmaCurrent: Float,
+        stepCount: Int
     ) -> ActuatorTimeSeries {
-        precondition(nSteps > 0, "Must have at least one timestep")
+        precondition(stepCount > 0, "Must have at least one timestep")
 
         return ActuatorTimeSeries(
-            P_ECRH: [Float](repeating: P_ECRH, count: nSteps),
-            P_ICRH: [Float](repeating: P_ICRH, count: nSteps),
-            gas_puff: [Float](repeating: gas_puff, count: nSteps),
-            I_plasma: [Float](repeating: I_plasma, count: nSteps)
+            ecrhPower: [Float](repeating: ecrhPower, count: stepCount),
+            icrhPower: [Float](repeating: icrhPower, count: stepCount),
+            gasPuffRate: [Float](repeating: gasPuffRate, count: stepCount),
+            plasmaCurrent: [Float](repeating: plasmaCurrent, count: stepCount)
         )
     }
 
@@ -108,119 +108,111 @@ public struct ActuatorTimeSeries {
     /// This preserves the gradient tape for automatic differentiation
     ///
     /// Layout: [P_ECRH_0, ..., P_ECRH_N, P_ICRH_0, ..., P_ICRH_N, ...]
-    /// Total length: nSteps × 4
-    public func toMLXArray() -> MLXArray {
+    /// Total length: stepCount × 4
+    public func asMLXArray() -> MLXArray {
         return data  // Return internal representation (gradient-preserving!)
     }
 
-    /// Create from MLXArray (preserves gradient tape)
-    ///
-    /// **Critical**: Wraps MLXArray directly without conversion
-    /// This preserves the gradient tape for backpropagation
-    public static func fromMLXArray(_ array: MLXArray, nSteps: Int) -> ActuatorTimeSeries {
-        return ActuatorTimeSeries(mlxArray: array, nSteps: nSteps)
-    }
-
     /// Get actuator values at specific timestep index
-    public func at(step: Int) -> ActuatorValues {
-        precondition(step >= 0 && step < nSteps, "Step \(step) out of range [0, \(nSteps))")
+    public func values(atStep step: Int) -> ActuatorValues {
+        precondition(step >= 0 && step < stepCount, "Step \(step) out of range [0, \(stepCount))")
 
         return ActuatorValues(
-            P_ECRH: P_ECRH[step],
-            P_ICRH: P_ICRH[step],
-            gas_puff: gas_puff[step],
-            I_plasma: I_plasma[step]
+            ecrhPower: ecrhPower[step],
+            icrhPower: icrhPower[step],
+            gasPuffRate: gasPuffRate[step],
+            plasmaCurrent: plasmaCurrent[step]
         )
     }
 
     /// Get actuator values at specific time (interpolated)
-    public func at(time: Float, dt: Float) -> ActuatorValues {
-        let step = Int(time / dt)
+    public func values(atTime time: Float, timeStep: Float) -> ActuatorValues {
+        let step = Int(time / timeStep)
 
         // Clamp to valid range
-        let clampedStep = max(0, min(step, nSteps - 1))
+        let clampedStep = max(0, min(step, stepCount - 1))
 
-        return at(step: clampedStep)
+        return values(atStep: clampedStep)
     }
 }
 
 /// Actuator values at a single timestep
 public struct ActuatorValues {
     /// ECRH power [MW]
-    public let P_ECRH: Float
+    public let ecrhPower: Float
 
     /// ICRH power [MW]
-    public let P_ICRH: Float
+    public let icrhPower: Float
 
     /// Gas puff rate [particles/s]
-    public let gas_puff: Float
+    public let gasPuffRate: Float
 
     /// Plasma current [MA]
-    public let I_plasma: Float
+    public let plasmaCurrent: Float
 
     public init(
-        P_ECRH: Float,
-        P_ICRH: Float,
-        gas_puff: Float,
-        I_plasma: Float
+        ecrhPower: Float,
+        icrhPower: Float,
+        gasPuffRate: Float,
+        plasmaCurrent: Float
     ) {
-        self.P_ECRH = P_ECRH
-        self.P_ICRH = P_ICRH
-        self.gas_puff = gas_puff
-        self.I_plasma = I_plasma
+        self.ecrhPower = ecrhPower
+        self.icrhPower = icrhPower
+        self.gasPuffRate = gasPuffRate
+        self.plasmaCurrent = plasmaCurrent
     }
 }
 
 /// Actuator constraints (physical limits)
 public struct ActuatorConstraints: Sendable {
-    public let minECRH: Float
-    public let maxECRH: Float
-    public let minICRH: Float
-    public let maxICRH: Float
-    public let minCurrent: Float
-    public let maxCurrent: Float
-    public let minGasPuff: Float
-    public let maxGasPuff: Float
+    public let minimumECRHPower: Float
+    public let maximumECRHPower: Float
+    public let minimumICRHPower: Float
+    public let maximumICRHPower: Float
+    public let minimumCurrent: Float
+    public let maximumCurrent: Float
+    public let minimumGasPuffRate: Float
+    public let maximumGasPuffRate: Float
 
     public init(
-        minECRH: Float,
-        maxECRH: Float,
-        minICRH: Float,
-        maxICRH: Float,
-        minCurrent: Float,
-        maxCurrent: Float,
-        minGasPuff: Float,
-        maxGasPuff: Float
+        minimumECRHPower: Float,
+        maximumECRHPower: Float,
+        minimumICRHPower: Float,
+        maximumICRHPower: Float,
+        minimumCurrent: Float,
+        maximumCurrent: Float,
+        minimumGasPuffRate: Float,
+        maximumGasPuffRate: Float
     ) {
-        self.minECRH = minECRH
-        self.maxECRH = maxECRH
-        self.minICRH = minICRH
-        self.maxICRH = maxICRH
-        self.minCurrent = minCurrent
-        self.maxCurrent = maxCurrent
-        self.minGasPuff = minGasPuff
-        self.maxGasPuff = maxGasPuff
+        self.minimumECRHPower = minimumECRHPower
+        self.maximumECRHPower = maximumECRHPower
+        self.minimumICRHPower = minimumICRHPower
+        self.maximumICRHPower = maximumICRHPower
+        self.minimumCurrent = minimumCurrent
+        self.maximumCurrent = maximumCurrent
+        self.minimumGasPuffRate = minimumGasPuffRate
+        self.maximumGasPuffRate = maximumGasPuffRate
     }
 
     /// ITER Baseline constraints
     public static let iter = ActuatorConstraints(
-        minECRH: 0.0,
-        maxECRH: 30.0,        // 30 MW maximum
-        minICRH: 0.0,
-        maxICRH: 20.0,        // 20 MW maximum
-        minCurrent: 5.0,      // 5 MA minimum
-        maxCurrent: 20.0,     // 20 MA maximum (ITER: 15 MA baseline)
-        minGasPuff: 0.0,
-        maxGasPuff: 1e21      // 10²¹ particles/s maximum
+        minimumECRHPower: 0.0,
+        maximumECRHPower: 30.0,        // 30 MW maximum
+        minimumICRHPower: 0.0,
+        maximumICRHPower: 20.0,        // 20 MW maximum
+        minimumCurrent: 5.0,      // 5 MA minimum
+        maximumCurrent: 20.0,     // 20 MA maximum (ITER: 15 MA baseline)
+        minimumGasPuffRate: 0.0,
+        maximumGasPuffRate: 1e21      // 10²¹ particles/s maximum
     )
 
     /// Apply constraints (clamp to limits)
     public func apply(to actuators: ActuatorTimeSeries) -> ActuatorTimeSeries {
         return ActuatorTimeSeries(
-            P_ECRH: actuators.P_ECRH.map { clamp($0, min: minECRH, max: maxECRH) },
-            P_ICRH: actuators.P_ICRH.map { clamp($0, min: minICRH, max: maxICRH) },
-            gas_puff: actuators.gas_puff.map { clamp($0, min: minGasPuff, max: maxGasPuff) },
-            I_plasma: actuators.I_plasma.map { clamp($0, min: minCurrent, max: maxCurrent) }
+            ecrhPower: actuators.ecrhPower.map { clamp($0, min: minimumECRHPower, max: maximumECRHPower) },
+            icrhPower: actuators.icrhPower.map { clamp($0, min: minimumICRHPower, max: maximumICRHPower) },
+            gasPuffRate: actuators.gasPuffRate.map { clamp($0, min: minimumGasPuffRate, max: maximumGasPuffRate) },
+            plasmaCurrent: actuators.plasmaCurrent.map { clamp($0, min: minimumCurrent, max: maximumCurrent) }
         )
     }
 

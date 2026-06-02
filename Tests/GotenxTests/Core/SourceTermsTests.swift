@@ -13,7 +13,7 @@ struct SourceTermsTests {
     
     @Test("Zero source terms has empty metadata")
     func testZeroSourceTermsHasEmptyMetadata() {
-        let zero = SourceTerms.zero(nCells: 50)
+        let zero = SourceTerms.zero(cellCount: 50)
         
         // CRITICAL: metadata must not be nil
         #expect(zero.metadata != nil, "SourceTerms.zero() must provide metadata")
@@ -26,20 +26,20 @@ struct SourceTermsTests {
     
     @Test("Zero source terms has correct shape")
     func testZeroSourceTermsShape() {
-        let nCells = 100
-        let zero = SourceTerms.zero(nCells: nCells)
+        let cellCount = 100
+        let zero = SourceTerms.zero(cellCount: cellCount)
         
-        #expect(zero.ionHeating.shape == [nCells])
-        #expect(zero.electronHeating.shape == [nCells])
-        #expect(zero.particleSource.shape == [nCells])
-        #expect(zero.currentSource.shape == [nCells])
+        #expect(zero.ionHeating.shape == [cellCount])
+        #expect(zero.electronHeating.shape == [cellCount])
+        #expect(zero.particleSource.shape == [cellCount])
+        #expect(zero.currentSource.shape == [cellCount])
     }
 
     @Test("Localized exchange-scale heating remains valid")
     func testLocalizedExchangeScaleHeatingRemainsValid() {
-        let nCells = 10
-        let localizedHeating = EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(2_000.0))))
-        let zero = EvaluatedArray.zeros([nCells])
+        let cellCount = 10
+        let localizedHeating = EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(2_000.0))))
+        let zero = EvaluatedArray.zeros([cellCount])
 
         let source = SourceTerms(
             ionHeating: localizedHeating,
@@ -49,14 +49,14 @@ struct SourceTermsTests {
             metadata: SourceMetadataCollection.empty
         )
 
-        #expect(source.ionHeating.shape == [nCells])
+        #expect(source.ionHeating.shape == [cellCount])
     }
 
     @Test("Localized exchange-scale cooling remains valid")
     func testLocalizedExchangeScaleCoolingRemainsValid() {
-        let nCells = 10
-        let localizedCooling = EvaluatedArray(evaluating: MLXArray.full([nCells], values: MLXArray(Float(-2_000.0))))
-        let zero = EvaluatedArray.zeros([nCells])
+        let cellCount = 10
+        let localizedCooling = EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(Float(-2_000.0))))
+        let zero = EvaluatedArray.zeros([cellCount])
 
         let source = SourceTerms(
             ionHeating: zero,
@@ -66,7 +66,7 @@ struct SourceTermsTests {
             metadata: SourceMetadataCollection.empty
         )
 
-        #expect(source.electronHeating.shape == [nCells])
+        #expect(source.electronHeating.shape == [cellCount])
     }
 
     // MARK: - Metadata Addition Tests
@@ -121,7 +121,7 @@ struct SourceTermsTests {
     
     @Test("Addition of zero and non-zero preserves metadata")
     func testAdditionWithZeroPreservesMetadata() {
-        let zero = SourceTerms.zero(nCells: 50)
+        let zero = SourceTerms.zero(cellCount: 50)
         
         let nonZero = SourceTerms(
             ionHeating: EvaluatedArray(evaluating: MLXArray.full([50], values: MLXArray(1.0))),
@@ -190,7 +190,7 @@ struct SourceTermsTests {
             )
         }
         
-        let total = sources.reduce(SourceTerms.zero(nCells: 50), +)
+        let total = sources.reduce(SourceTerms.zero(cellCount: 50), +)
         
         #expect(total.metadata != nil)
         #expect(total.metadata?.entries.count == 5, "Should have all 5 metadata entries")

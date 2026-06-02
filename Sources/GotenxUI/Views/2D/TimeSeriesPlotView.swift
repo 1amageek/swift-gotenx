@@ -16,7 +16,7 @@ struct PlasmaCurrentChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("Ip", data.IpProfile[index])
+                    y: .value("Ip", data.plasmaCurrent[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#000000"))
             }
@@ -26,7 +26,7 @@ struct PlasmaCurrentChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("Ibs", data.IBootstrap[index])
+                    y: .value("Ibs", data.bootstrapCurrent[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 1] ?? "#E74C3C"))
                 .lineStyle(StrokeStyle(dash: [5, 5]))
@@ -37,7 +37,7 @@ struct PlasmaCurrentChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("IECRH", data.IECRH[index])
+                    y: .value("ecrhCurrent", data.ecrhCurrent[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 2] ?? "#3498DB"))
                 .lineStyle(StrokeStyle(dash: [5, 5]))
@@ -60,7 +60,7 @@ struct FusionPowerChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("Q", data.qFusion[index])
+                    y: .value("Q", data.fusionGain[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#27AE60"))
             }
@@ -82,7 +82,7 @@ struct EnergyBalanceChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("P_aux", data.pAuxiliary[index])
+                    y: .value("P_aux", data.auxiliaryHeatingPower[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 0] ?? "#E67E22"))
             }
@@ -92,7 +92,7 @@ struct EnergyBalanceChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("P_alpha", data.pAlphaTotal[index])
+                    y: .value("P_alpha", data.totalAlphaPower[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 1] ?? "#9B59B6"))
             }
@@ -102,7 +102,7 @@ struct EnergyBalanceChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("P_ohmic", data.pOhmicE[index])
+                    y: .value("P_ohmic", data.ohmicElectronHeatingPower[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 2] ?? "#E74C3C"))
                 .lineStyle(StrokeStyle(dash: [5, 5]))
@@ -113,7 +113,7 @@ struct EnergyBalanceChart: View {
             ForEach(Array(data.time.enumerated()), id: \.offset) { index, time in
                 LineMark(
                     x: .value("Time", time),
-                    y: .value("P_rad", data.pRadiation[index])
+                    y: .value("P_rad", data.radiationPower[index])
                 )
                 .foregroundStyle(Color(hex: config.plot.colors[safe: 3] ?? "#95A5A6"))
                 .lineStyle(StrokeStyle(dash: [2, 2]))

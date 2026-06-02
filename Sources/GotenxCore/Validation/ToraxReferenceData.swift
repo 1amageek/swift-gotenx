@@ -17,19 +17,19 @@ import Foundation
 ///
 /// ```swift
 /// // Load TORAX reference data
-/// let toraxData = try ToraxReferenceData.load(
+/// let toraxData = try TORAXReferenceData.load(
 ///     from: "reference_data/torax_iter_baseline.nc"
 /// )
 ///
 /// // Compare at specific time
 /// let timeIndex = toraxData.findTimeIndex(closestTo: 2.0)
-/// let Ti_ref = toraxData.Ti[timeIndex]
-/// let Ti_gotenx = // ... from simulation
+/// let ionTemperatureReference = toraxData.ionTemperature[timeIndex]
+/// let ionTemperatureGotenx = // ... from simulation
 ///
 /// let result = ProfileComparator.compare(
 ///     quantity: "ion_temperature",
-///     predicted: Ti_gotenx,
-///     reference: Ti_ref,
+///     predicted: ionTemperatureGotenx,
+///     reference: ionTemperatureReference,
 ///     time: toraxData.time[timeIndex],
 ///     thresholds: .torax
 /// )
@@ -50,52 +50,52 @@ import Foundation
 ///   float electron_density(time, rho_tor_norm)
 ///   float poloidal_flux(time, rho_tor_norm)
 /// ```
-public struct ToraxReferenceData: Sendable {
+public struct TORAXReferenceData: Sendable {
     /// Time points [s]
     public let time: [Float]
 
     /// Normalized toroidal flux coordinate [dimensionless]
-    public let rho: [Float]
+    public let normalizedRadius: [Float]
 
-    /// Ion temperature [eV] - shape: [nTime, nRho]
-    public let Ti: [[Float]]
+    /// Ion temperature [eV] - shape: [timeCount, radiusCount]
+    public let ionTemperature: [[Float]]
 
-    /// Electron temperature [eV] - shape: [nTime, nRho]
-    public let Te: [[Float]]
+    /// Electron temperature [eV] - shape: [timeCount, radiusCount]
+    public let electronTemperature: [[Float]]
 
-    /// Electron density [m⁻³] - shape: [nTime, nRho]
-    public let ne: [[Float]]
+    /// Electron density [m⁻³] - shape: [timeCount, radiusCount]
+    public let electronDensity: [[Float]]
 
-    /// Poloidal flux [Wb] - shape: [nTime, nRho] (optional)
-    public let psi: [[Float]]?
+    /// Poloidal flux [Wb] - shape: [timeCount, radiusCount] (optional)
+    public let poloidalFlux: [[Float]]?
 
     public init(
         time: [Float],
-        rho: [Float],
-        Ti: [[Float]],
-        Te: [[Float]],
-        ne: [[Float]],
-        psi: [[Float]]? = nil
+        normalizedRadius: [Float],
+        ionTemperature: [[Float]],
+        electronTemperature: [[Float]],
+        electronDensity: [[Float]],
+        poloidalFlux: [[Float]]? = nil
     ) {
         self.time = time
-        self.rho = rho
-        self.Ti = Ti
-        self.Te = Te
-        self.ne = ne
-        self.psi = psi
+        self.normalizedRadius = normalizedRadius
+        self.ionTemperature = ionTemperature
+        self.electronTemperature = electronTemperature
+        self.electronDensity = electronDensity
+        self.poloidalFlux = poloidalFlux
 
         // Validate shapes
-        precondition(Ti.count == time.count, "Ti time dimension mismatch")
-        precondition(Te.count == time.count, "Te time dimension mismatch")
-        precondition(ne.count == time.count, "ne time dimension mismatch")
-        if let psi = psi {
-            precondition(psi.count == time.count, "psi time dimension mismatch")
+        precondition(ionTemperature.count == time.count, "ionTemperature time dimension mismatch")
+        precondition(electronTemperature.count == time.count, "electronTemperature time dimension mismatch")
+        precondition(electronDensity.count == time.count, "electronDensity time dimension mismatch")
+        if let poloidalFlux = poloidalFlux {
+            precondition(poloidalFlux.count == time.count, "poloidalFlux time dimension mismatch")
         }
 
         for i in 0..<time.count {
-            precondition(Ti[i].count == rho.count, "Ti spatial dimension mismatch at time \(i)")
-            precondition(Te[i].count == rho.count, "Te spatial dimension mismatch at time \(i)")
-            precondition(ne[i].count == rho.count, "ne spatial dimension mismatch at time \(i)")
+            precondition(ionTemperature[i].count == normalizedRadius.count, "ionTemperature spatial dimension mismatch at time \(i)")
+            precondition(electronTemperature[i].count == normalizedRadius.count, "electronTemperature spatial dimension mismatch at time \(i)")
+            precondition(electronDensity[i].count == normalizedRadius.count, "electronDensity spatial dimension mismatch at time \(i)")
         }
     }
 
@@ -112,16 +112,16 @@ public struct ToraxReferenceData: Sendable {
     ///
     /// - Parameter path: Path to TORAX NetCDF output file
     /// - Returns: Loaded reference data
-    /// - Throws: ToraxDataError if file not found or reader unavailable
-    public static func load(from path: String) throws -> ToraxReferenceData {
+    /// - Throws: TORAXDataError if file not found or reader unavailable
+    public static func load(from path: String) throws -> TORAXReferenceData {
         // Check if file exists
         guard FileManager.default.fileExists(atPath: path) else {
-            throw ToraxDataError.fileNotFound(path)
+            throw TORAXDataError.fileNotFound(path)
         }
 
         // TODO: Implement NetCDF reading in Phase 5
         // For now, return a placeholder error
-        throw ToraxDataError.netCDFReaderUnavailable(
+        throw TORAXDataError.netCDFReaderUnavailable(
             "NetCDF reader will be implemented in Phase 5 (IMAS I/O)"
         )
 
@@ -144,7 +144,7 @@ public struct ToraxReferenceData: Sendable {
     ///
     /// ```swift
     /// let idx = toraxData.findTimeIndex(closestTo: 2.0)
-    /// let Ti_at_2s = toraxData.Ti[idx]
+    /// let ionTemperatureAtTwoSeconds = toraxData.ionTemperature[idx]
     /// ```
     public func findTimeIndex(closestTo targetTime: Float) -> Int {
         var minDiff: Float = Float.infinity
@@ -165,14 +165,14 @@ public struct ToraxReferenceData: Sendable {
     ///
     /// - Parameter timeIndex: Index in time array
     /// - Returns: Reference profiles at that time
-    public func getProfiles(at timeIndex: Int) -> ReferenceProfiles {
+    public func profiles(at timeIndex: Int) -> ReferenceProfiles {
         precondition(timeIndex >= 0 && timeIndex < time.count, "Time index out of bounds")
 
         return ReferenceProfiles(
-            rho: rho,
-            Ti: Ti[timeIndex],
-            Te: Te[timeIndex],
-            ne: ne[timeIndex],
+            normalizedRadius: normalizedRadius,
+            ionTemperature: ionTemperature[timeIndex],
+            electronTemperature: electronTemperature[timeIndex],
+            electronDensity: electronDensity[timeIndex],
             time: time[timeIndex]
         )
     }
@@ -181,16 +181,16 @@ public struct ToraxReferenceData: Sendable {
     ///
     /// - Parameter targetTime: Target time [s]
     /// - Returns: Reference profiles at closest time point
-    public func getProfiles(closestTo targetTime: Float) -> ReferenceProfiles {
+    public func profiles(closestTo targetTime: Float) -> ReferenceProfiles {
         let idx = findTimeIndex(closestTo: targetTime)
-        return getProfiles(at: idx)
+        return profiles(at: idx)
     }
 }
 
 // MARK: - Errors
 
 /// Errors that can occur when loading TORAX reference data
-public enum ToraxDataError: Error, CustomStringConvertible {
+public enum TORAXDataError: Error, CustomStringConvertible {
     case fileNotFound(String)
     case fileOpenFailed(String)
     case netCDFReaderUnavailable(String)

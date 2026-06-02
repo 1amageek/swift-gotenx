@@ -9,9 +9,9 @@ import Foundation
 // MARK: - Test Helpers
 
 /// Helper function to create test geometry
-func createTestGeometry(nCells: Int) -> Geometry {
+func createTestGeometry(cellCount: Int) -> Geometry {
     let mesh = MeshConfig(
-        nCells: nCells,
+        cellCount: cellCount,
         majorRadius: 6.2,
         minorRadius: 2.0,
         toroidalField: 5.3,
@@ -27,11 +27,11 @@ struct GradientComputationTestSuite {
 
     @Test("Gradient computation with linear profile")
     func testGradientComputationAccuracy() throws {
-        let nCells = 100
-        let radii = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let cellCount = 100
+        let radii = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         // Linear profile: f(r) = 1000 + 500*r
-        // Expected gradient: df/dr = 500 everywhere
+        // Expected gradient: df/radialSpacing = 500 everywhere
         let linearProfile = 1000.0 + 500.0 * radii
 
         let gradient = GradientComputation.computeGradient(
@@ -43,18 +43,18 @@ struct GradientComputationTestSuite {
 
         // Check interior points (central differences are accurate for linear profiles)
         // Float32 precision: expect ~0.003 error due to finite precision
-        for i in 1..<(nCells - 1) {
+        for i in 1..<(cellCount - 1) {
             #expect(abs(gradArray[i] - 500.0) < 0.01)  // 0.01 tolerance for Float32
         }
     }
 
     @Test("Gradient scale length computation")
     func testGradientLengthComputation() throws {
-        let nCells = 50
-        let radii = MLXArray.linspace(Float(0.1), Float(1.0), count: nCells)
+        let cellCount = 50
+        let radii = MLXArray.linspace(Float(0.1), Float(1.0), count: cellCount)
 
         // Exponential profile: f(r) = 1000 * exp(-r/0.2)
-        // L = |f| / |df/dr| = 0.2 (constant)
+        // L = |f| / |df/radialSpacing| = 0.2 (constant)
         let L_expected: Float = 0.2
         let profile = 1000.0 * exp(-radii / L_expected)
 
@@ -66,26 +66,26 @@ struct GradientComputationTestSuite {
         let L_array = L.asArray(Float.self)
 
         // Check interior points (should be close to 0.2)
-        for i in 10..<(nCells - 10) {
+        for i in 10..<(cellCount - 10) {
             #expect(abs(L_array[i] - L_expected) < 0.01)
         }
     }
 
     @Test("Pressure gradient length computation")
     func testPressureGradientLength() throws {
-        let nCells = 100
-        let radii = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let cellCount = 100
+        let radii = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         // Create simple profiles
-        let Te = MLXArray.full([nCells], values: MLXArray(5000.0))
-        let Ti = MLXArray.full([nCells], values: MLXArray(5000.0))
-        let ne = MLXArray.full([nCells], values: MLXArray(1e20))
+        let Te = MLXArray.full([cellCount], values: MLXArray(5000.0))
+        let Ti = MLXArray.full([cellCount], values: MLXArray(5000.0))
+        let ne = MLXArray.full([cellCount], values: MLXArray(1e20))
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
             electronTemperature: EvaluatedArray(evaluating: Te),
             electronDensity: EvaluatedArray(evaluating: ne),
-            poloidalFlux: EvaluatedArray(evaluating: MLXArray.linspace(Float(0.0), Float(1.0), count: nCells))
+            poloidalFlux: EvaluatedArray(evaluating: MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount))
         )
 
         let L_p = GradientComputation.computePressureGradientLength(
@@ -94,7 +94,7 @@ struct GradientComputationTestSuite {
         )
 
         let L_p_array = L_p.asArray(Float.self)
-        #expect(L_p_array[nCells / 2] > 1.0)
+        #expect(L_p_array[cellCount / 2] > 1.0)
     }
 }
 
@@ -111,7 +111,7 @@ struct PlasmaPhysicsTestSuite {
         let eta = PlasmaPhysics.spitzerResistivity(
             Te_eV: Te_eV,
             ne_m3: ne_m3,
-            Z_eff: 1.0
+            effectiveCharge: 1.0
         )
 
         let etaArray = eta.asArray(Float.self)
@@ -125,7 +125,7 @@ struct PlasmaPhysicsTestSuite {
         let eta_high = PlasmaPhysics.spitzerResistivity(
             Te_eV: Te_high,
             ne_m3: ne_m3,
-            Z_eff: 1.0
+            effectiveCharge: 1.0
         )
         let etaHighArray = eta_high.asArray(Float.self)
 
@@ -139,11 +139,11 @@ struct PlasmaPhysicsTestSuite {
 
     @Test("Plasma beta calculation")
     func testPlasmaBeta() throws {
-        let nCells = 10
-        let Te = MLXArray([Float](repeating: 5000.0, count: nCells))
-        let Ti = MLXArray([Float](repeating: 5000.0, count: nCells))
-        let ne = MLXArray([Float](repeating: 1e20, count: nCells))
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let cellCount = 10
+        let Te = MLXArray([Float](repeating: 5000.0, count: cellCount))
+        let Ti = MLXArray([Float](repeating: 5000.0, count: cellCount))
+        let ne = MLXArray([Float](repeating: 1e20, count: cellCount))
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -152,7 +152,7 @@ struct PlasmaPhysicsTestSuite {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let B = MLXArray([Float](repeating: 5.3, count: nCells))
+        let B = MLXArray([Float](repeating: 5.3, count: cellCount))
 
         let beta = PlasmaPhysics.plasmaBeta(
             profiles: profiles,
@@ -168,30 +168,30 @@ struct PlasmaPhysicsTestSuite {
 
     @Test("Total magnetic field shape consistency")
     func testTotalMagneticFieldShape() throws {
-        let nCells = 100
+        let cellCount = 100
 
         // Case 1: No poloidal field
         let B_total_no_pol = PlasmaPhysics.totalMagneticField(
             toroidalField: 5.3,
             poloidalField: nil,
-            nCells: nCells
+            cellCount: cellCount
         )
 
-        #expect(B_total_no_pol.shape == [nCells])
+        #expect(B_total_no_pol.shape == [cellCount])
 
         let B_array_no_pol = B_total_no_pol.asArray(Float.self)
-        #expect(B_array_no_pol.count == nCells)
+        #expect(B_array_no_pol.count == cellCount)
         #expect(abs(B_array_no_pol[0] - 5.3) < 1e-6)
 
         // Case 2: With poloidal field
-        let B_pol = MLXArray.full([nCells], values: MLXArray(0.5))
+        let B_pol = MLXArray.full([cellCount], values: MLXArray(0.5))
         let B_total_with_pol = PlasmaPhysics.totalMagneticField(
             toroidalField: 5.3,
             poloidalField: B_pol,
-            nCells: nCells
+            cellCount: cellCount
         )
 
-        #expect(B_total_with_pol.shape == [nCells])
+        #expect(B_total_with_pol.shape == [cellCount])
 
         let B_array_with_pol = B_total_with_pol.asArray(Float.self)
         // √(5.3² + 0.5²) = √(28.09 + 0.25) = √28.34 ≈ 5.324
@@ -201,9 +201,9 @@ struct PlasmaPhysicsTestSuite {
 
     @Test("Ion sound Larmor radius and isotope scaling")
     func testIonSoundLarmorRadius() throws {
-        let nCells = 10
-        let Te = MLXArray([Float](repeating: 5000.0, count: nCells))
-        let B = MLXArray([Float](repeating: 5.3, count: nCells))
+        let cellCount = 10
+        let Te = MLXArray([Float](repeating: 5000.0, count: cellCount))
+        let B = MLXArray([Float](repeating: 5.3, count: cellCount))
 
         // Hydrogen (m = 1)
         let m_H = PlasmaPhysics.ionMass(massNumber: 1.0)
@@ -242,13 +242,13 @@ struct RIModelTestSuite {
 
     @Test("RI transport coefficients computation")
     func testRICoefficients() throws {
-        let nCells = 100
-        let radii = MLXArray.linspace(Float(0.1), Float(1.0), count: nCells)
+        let cellCount = 100
+        let radii = MLXArray.linspace(Float(0.1), Float(1.0), count: cellCount)
 
-        let Te = MLXArray.full([nCells], values: MLXArray(5000.0))
-        let Ti = MLXArray.full([nCells], values: MLXArray(5000.0))
+        let Te = MLXArray.full([cellCount], values: MLXArray(5000.0))
+        let Ti = MLXArray.full([cellCount], values: MLXArray(5000.0))
         let ne = 1e20 * exp(-radii / 0.3)
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -257,25 +257,25 @@ struct RIModelTestSuite {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let geometry = createTestGeometry(nCells: nCells)
-        let params = TransportParameters(modelType: .constant, params: [:])
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let parameters = try TransportParameters(modelType: .constant, parameters: [:])
 
         let riModel = ResistiveInterchangeModel(
-            coefficientRI: 0.5,
+            riCoefficient: 0.5,
             ionMassNumber: 2.0
         )
 
         let coeffs = riModel.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
-        let chiArray = coeffs.chiIon.value.asArray(Float.self)
+        let chiArray = coeffs.ionHeatDiffusivity.value.asArray(Float.self)
 
         // Should be in reasonable range [1e-9, 100] m²/s
         // CRITICAL: RI can be very small at moderate β due to exp(-β_crit/β) suppression
-        for i in 0..<nCells {
+        for i in 0..<cellCount {
             #expect(chiArray[i] >= 1e-9)
             #expect(chiArray[i] <= 100.0)
         }
@@ -283,10 +283,10 @@ struct RIModelTestSuite {
 
     @Test("CRITICAL: Isotope scaling in RI model (χ_D > χ_H)")
     func testIsotopeScalingInRIModel() throws {
-        let nCells = 50
+        let cellCount = 50
 
         // CRITICAL: Must create PEAKED profiles for gradient-driven RI transport!
-        let geometry = createTestGeometry(nCells: nCells)
+        let geometry = createTestGeometry(cellCount: cellCount)
         let rhoNorm = geometry.radii.value / geometry.minorRadius
 
         // Peaked parabolic profiles at MODERATE temperature (2-3 keV)
@@ -297,7 +297,7 @@ struct RIModelTestSuite {
         let Te = MLXArray(Float(2500.0)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.5)) * rhoNorm * rhoNorm)
         let Ti = MLXArray(Float(2500.0)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.5)) * rhoNorm * rhoNorm)
         let ne_high = MLXArray(Float(1.0e20)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.3)) * rhoNorm * rhoNorm)
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -306,42 +306,42 @@ struct RIModelTestSuite {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let params = TransportParameters(modelType: .constant, params: [:])
+        let parameters = try TransportParameters(modelType: .constant, parameters: [:])
 
         // Hydrogen plasma
         // CRITICAL: Very high C_RI to overcome beta suppression
         // β = 0.006 with β_crit = 0.02 → exp(-3.3) ≈ 0.037 (strong suppression)
         // Need C_RI ~ 1000 to get observable χ_RI
         let riModel_H = ResistiveInterchangeModel(
-            coefficientRI: 1000.0,
+            riCoefficient: 1000.0,
             ionMassNumber: 1.0
         )
         let coeffs_H = riModel_H.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // Deuterium plasma
         let riModel_D = ResistiveInterchangeModel(
-            coefficientRI: 1000.0,
+            riCoefficient: 1000.0,
             ionMassNumber: 2.0
         )
         let coeffs_D = riModel_D.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
-        let chi_H_array = coeffs_H.chiIon.value.asArray(Float.self)
-        let chi_D_array = coeffs_D.chiIon.value.asArray(Float.self)
+        let chi_H_array = coeffs_H.ionHeatDiffusivity.value.asArray(Float.self)
+        let chi_D_array = coeffs_D.ionHeatDiffusivity.value.asArray(Float.self)
 
         // CRITICAL: χ ∝ ρ_s² ∝ m_i, so χ_D / χ_H ≈ 2
-        let ratio = chi_D_array[nCells / 2] / chi_H_array[nCells / 2]
+        let ratio = chi_D_array[cellCount / 2] / chi_H_array[cellCount / 2]
 
         print("RI Isotope Scaling Test:")
-        print("  χ_H = \(chi_H_array[nCells / 2]) m²/s")
-        print("  χ_D = \(chi_D_array[nCells / 2]) m²/s")
+        print("  χ_H = \(chi_H_array[cellCount / 2]) m²/s")
+        print("  χ_D = \(chi_D_array[cellCount / 2]) m²/s")
         print("  χ_D / χ_H = \(ratio) (expected ≈ 2.0)")
 
         #expect(ratio > 1.5)
@@ -356,18 +356,18 @@ struct TurbulenceTransitionTestSuite {
 
     @Test("Density transition blending between ITG and RI")
     func testDensityTransitionBlending() throws {
-        let nCells = 50
+        let cellCount = 50
 
-        let Te = MLXArray.full([nCells], values: MLXArray(5000.0))
-        let Ti = MLXArray.full([nCells], values: MLXArray(5000.0))
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let Te = MLXArray.full([cellCount], values: MLXArray(5000.0))
+        let Ti = MLXArray.full([cellCount], values: MLXArray(5000.0))
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
-        let geometry = createTestGeometry(nCells: nCells)
-        let params = TransportParameters(modelType: .densityTransition, params: [:])
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let parameters = try TransportParameters(modelType: .densityTransition, parameters: [:])
         let model = DensityTransitionModel.createDefault(ionMassNumber: 2.0)
 
         // Low density (pure ITG regime)
-        let ne_low = MLXArray.full([nCells], values: MLXArray(1.0e19))
+        let ne_low = MLXArray.full([cellCount], values: MLXArray(1.0e19))
         let profiles_low = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
             electronTemperature: EvaluatedArray(evaluating: Te),
@@ -377,11 +377,11 @@ struct TurbulenceTransitionTestSuite {
         let coeffs_low = model.computeCoefficients(
             profiles: profiles_low,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // High density (pure RI regime)
-        let ne_high = MLXArray.full([nCells], values: MLXArray(4.0e19))
+        let ne_high = MLXArray.full([cellCount], values: MLXArray(4.0e19))
         let profiles_high = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
             electronTemperature: EvaluatedArray(evaluating: Te),
@@ -391,30 +391,30 @@ struct TurbulenceTransitionTestSuite {
         let coeffs_high = model.computeCoefficients(
             profiles: profiles_high,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
-        let chi_low = coeffs_low.chiIon.value.asArray(Float.self)
-        let chi_high = coeffs_high.chiIon.value.asArray(Float.self)
+        let chi_low = coeffs_low.ionHeatDiffusivity.value.asArray(Float.self)
+        let chi_high = coeffs_high.ionHeatDiffusivity.value.asArray(Float.self)
 
         // Coefficients should differ between regimes
-        #expect(chi_low[nCells / 2] != chi_high[nCells / 2])
+        #expect(chi_low[cellCount / 2] != chi_high[cellCount / 2])
 
         print("Density Transition Test:")
-        print("  χ(n=1e19) = \(chi_low[nCells / 2]) m²/s (ITG regime)")
-        print("  χ(n=4e19) = \(chi_high[nCells / 2]) m²/s (RI regime)")
+        print("  χ(n=1e19) = \(chi_low[cellCount / 2]) m²/s (ITG regime)")
+        print("  χ(n=4e19) = \(chi_high[cellCount / 2]) m²/s (RI regime)")
     }
 
     @Test("DEBUG: Pure GyroBohm isotope scaling")
     func testPureGyroBohmIsotopeScaling() throws {
-        let nCells = 50
-        let geometry = createTestGeometry(nCells: nCells)
+        let cellCount = 50
+        let geometry = createTestGeometry(cellCount: cellCount)
         let rhoNorm = geometry.radii.value / geometry.minorRadius
 
         let Te = MLXArray(Float(2500.0)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.5)) * rhoNorm * rhoNorm)
         let Ti = Te
         let ne = MLXArray(Float(2.0e19)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.3)) * rhoNorm * rhoNorm)
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -422,17 +422,17 @@ struct TurbulenceTransitionTestSuite {
             electronDensity: EvaluatedArray(evaluating: ne),
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
-        let params = TransportParameters(modelType: .constant, params: [:])
+        let parameters = try TransportParameters(modelType: .constant, parameters: [:])
 
         // Pure GyroBohm (no Bohm term)
-        let model_H = BohmGyroBohmTransportModel(bohmCoeff: 0.0, gyroBhohmCoeff: 10000.0, ionMassNumber: 1.0)
-        let model_D = BohmGyroBohmTransportModel(bohmCoeff: 0.0, gyroBhohmCoeff: 10000.0, ionMassNumber: 2.0)
+        let model_H = BohmGyroBohmTransportModel(bohmCoefficient: 0.0, gyroBohmCoefficient: 10000.0, ionMassNumber: 1.0)
+        let model_D = BohmGyroBohmTransportModel(bohmCoefficient: 0.0, gyroBohmCoefficient: 10000.0, ionMassNumber: 2.0)
 
-        let coeffs_H = model_H.computeCoefficients(profiles: profiles, geometry: geometry, params: params)
-        let coeffs_D = model_D.computeCoefficients(profiles: profiles, geometry: geometry, params: params)
+        let coeffs_H = model_H.computeCoefficients(profiles: profiles, geometry: geometry, parameters: parameters)
+        let coeffs_D = model_D.computeCoefficients(profiles: profiles, geometry: geometry, parameters: parameters)
 
-        let chi_H = coeffs_H.chiIon.value.asArray(Float.self)[nCells / 2]
-        let chi_D = coeffs_D.chiIon.value.asArray(Float.self)[nCells / 2]
+        let chi_H = coeffs_H.ionHeatDiffusivity.value.asArray(Float.self)[cellCount / 2]
+        let chi_D = coeffs_D.ionHeatDiffusivity.value.asArray(Float.self)[cellCount / 2]
         let ratio = chi_D / chi_H
 
         print("Pure GyroBohm Isotope Test:")
@@ -447,11 +447,11 @@ struct TurbulenceTransitionTestSuite {
 
     @Test("CRITICAL: Overall isotope effect at high density (χ_D > χ_H)")
     func testIsotopeEffectInTransitionModel() throws {
-        let nCells = 50
+        let cellCount = 50
 
         // High-density regime (above transition)
         // CRITICAL: Use peaked profiles at MODERATE temperature for RI regime
-        let geometry = createTestGeometry(nCells: nCells)
+        let geometry = createTestGeometry(cellCount: cellCount)
         let rhoNorm = geometry.radii.value / geometry.minorRadius
 
         // Parabolic profiles at 2-3 keV (collisional regime for RI turbulence)
@@ -459,7 +459,7 @@ struct TurbulenceTransitionTestSuite {
         let Te = MLXArray(Float(2500.0)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.5)) * rhoNorm * rhoNorm)
         let Ti = MLXArray(Float(2500.0)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.5)) * rhoNorm * rhoNorm)
         let ne = MLXArray(Float(1.0e20)) * (MLXArray(Float(1.0)) - MLXArray(Float(0.3)) * rhoNorm * rhoNorm)
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -467,19 +467,19 @@ struct TurbulenceTransitionTestSuite {
             electronDensity: EvaluatedArray(evaluating: ne),
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
-        let params = TransportParameters(modelType: .densityTransition, params: [:])
+        let parameters = try TransportParameters(modelType: .densityTransition, parameters: [:])
 
         // Hydrogen plasma
         // CRITICAL: Use pure GyroBohm for ITG to show isotope effect
         // Bohm term has NO mass dependence → must use only GyroBohm
         // GyroBohm is naturally small (~10⁻⁶ m²/s) → need large coefficient
         let itgModel_H = BohmGyroBohmTransportModel(
-            bohmCoeff: 0.0,
-            gyroBhohmCoeff: 10000.0,  // Amplify to observable range
+            bohmCoefficient: 0.0,
+            gyroBohmCoefficient: 10000.0,  // Amplify to observable range
             ionMassNumber: 1.0
         )
         let riModel_H = ResistiveInterchangeModel(
-            coefficientRI: 1000.0,  // Same as RI test
+            riCoefficient: 1000.0,  // Same as RI test
             ionMassNumber: 1.0
         )
         let model_H = DensityTransitionModel(
@@ -492,17 +492,17 @@ struct TurbulenceTransitionTestSuite {
         let coeffs_H = model_H.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // Deuterium plasma
         let itgModel_D = BohmGyroBohmTransportModel(
-            bohmCoeff: 0.0,
-            gyroBhohmCoeff: 10000.0,  // Same amplification
+            bohmCoefficient: 0.0,
+            gyroBohmCoefficient: 10000.0,  // Same amplification
             ionMassNumber: 2.0
         )
         let riModel_D = ResistiveInterchangeModel(
-            coefficientRI: 1000.0,  // Same as RI test
+            riCoefficient: 1000.0,  // Same as RI test
             ionMassNumber: 2.0
         )
         let model_D = DensityTransitionModel(
@@ -515,19 +515,19 @@ struct TurbulenceTransitionTestSuite {
         let coeffs_D = model_D.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
-        let chi_H_array = coeffs_H.chiIon.value.asArray(Float.self)
-        let chi_D_array = coeffs_D.chiIon.value.asArray(Float.self)
+        let chi_H_array = coeffs_H.ionHeatDiffusivity.value.asArray(Float.self)
+        let chi_D_array = coeffs_D.ionHeatDiffusivity.value.asArray(Float.self)
 
         // At high density (RI regime), χ ∝ ρ_s² ∝ m_i
-        let ratio = chi_D_array[nCells / 2] / chi_H_array[nCells / 2]
+        let ratio = chi_D_array[cellCount / 2] / chi_H_array[cellCount / 2]
 
         print("\nTransition Model Isotope Test (High Density):")
         print("  n_e = 3.5e19 m⁻³ (above n_trans = 2.5e19)")
-        print("  χ_H = \(chi_H_array[nCells / 2]) m²/s")
-        print("  χ_D = \(chi_D_array[nCells / 2]) m²/s")
+        print("  χ_H = \(chi_H_array[cellCount / 2]) m²/s")
+        print("  χ_D = \(chi_D_array[cellCount / 2]) m²/s")
         print("  χ_D / χ_H = \(ratio)")
         print("  Expected: χ_D > χ_H (ρ_s² scaling dominates)")
 
@@ -544,13 +544,13 @@ struct NumericalStabilityTestSuite {
 
     @Test("Float32 stability with extreme temperatures")
     func testFloat32Stability() throws {
-        let nCells = 100
+        let cellCount = 100
 
         // Extreme temperature (high)
-        let Te_extreme = MLXArray.full([nCells], values: MLXArray(50000.0))
-        let Ti_extreme = MLXArray.full([nCells], values: MLXArray(50000.0))
-        let ne = MLXArray.full([nCells], values: MLXArray(1e20))
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let Te_extreme = MLXArray.full([cellCount], values: MLXArray(50000.0))
+        let Ti_extreme = MLXArray.full([cellCount], values: MLXArray(50000.0))
+        let ne = MLXArray.full([cellCount], values: MLXArray(1e20))
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti_extreme),
@@ -559,21 +559,21 @@ struct NumericalStabilityTestSuite {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let geometry = createTestGeometry(nCells: nCells)
-        let params = TransportParameters(modelType: .densityTransition, params: [:])
+        let geometry = createTestGeometry(cellCount: cellCount)
+        let parameters = try TransportParameters(modelType: .densityTransition, parameters: [:])
         let model = DensityTransitionModel.createDefault()
 
         // Should not crash with extreme values
         let coeffs = model.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
-        let chiArray = coeffs.chiIon.value.asArray(Float.self)
+        let chiArray = coeffs.ionHeatDiffusivity.value.asArray(Float.self)
 
         // Check no NaN or Inf
-        for i in 0..<nCells {
+        for i in 0..<cellCount {
             #expect(!chiArray[i].isNaN)
             #expect(!chiArray[i].isInfinite)
             #expect(chiArray[i] >= 1e-6)

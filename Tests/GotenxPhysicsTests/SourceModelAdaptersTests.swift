@@ -12,11 +12,11 @@ struct SourceModelAdaptersTests {
     
     // MARK: - Test Helpers
     
-    func createTestProfiles(nCells: Int = 50) throws -> CoreProfiles {
-        let Ti = MLXArray.full([nCells], values: MLXArray(Float(5000.0)))  // 5 keV
-        let Te = MLXArray.full([nCells], values: MLXArray(Float(5000.0)))  // 5 keV
-        let ne = MLXArray.full([nCells], values: MLXArray(Float(5e19)))    // 5e19 m^-3
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+    func createTestProfiles(cellCount: Int = 50) throws -> CoreProfiles {
+        let Ti = MLXArray.full([cellCount], values: MLXArray(Float(5000.0)))  // 5 keV
+        let Te = MLXArray.full([cellCount], values: MLXArray(Float(5000.0)))  // 5 keV
+        let ne = MLXArray.full([cellCount], values: MLXArray(Float(5e19)))    // 5e19 m^-3
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         return CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -28,7 +28,7 @@ struct SourceModelAdaptersTests {
     
     func createTestGeometry() -> Geometry {
         let meshConfig = MeshConfig(
-            nCells: 50,
+            cellCount: 50,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5,
@@ -49,10 +49,10 @@ struct SourceModelAdaptersTests {
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
 
-        let terms = source.computeTerms(
+        let terms = try source.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: SourceParameters(modelType: "ohmic_heating")
+            parameters: SourceParameters(modelType: "ohmic_heating")
         )
         
         // CRITICAL: metadata must not be nil
@@ -80,10 +80,10 @@ struct SourceModelAdaptersTests {
         let source = OhmicHeatingSource()
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
-        let params = SourceParameters(modelType: "ohmic_heating")
+        let parameters = SourceParameters(modelType: "ohmic_heating")
 
-        let diagnostic = source.computeTerms(profiles: profiles, geometry: geometry, params: params)
-        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, params: params)
+        let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, parameters: parameters)
 
         expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
         expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
@@ -100,10 +100,10 @@ struct SourceModelAdaptersTests {
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
         
-        let terms = source.computeTerms(
+        let terms = try source.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: SourceParameters(modelType: "bremsstrahlung")
+            parameters: SourceParameters(modelType: "bremsstrahlung")
         )
 
         // CRITICAL: metadata must not be nil
@@ -131,10 +131,10 @@ struct SourceModelAdaptersTests {
         let source = BremsstrahlungSource()
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
-        let params = SourceParameters(modelType: "bremsstrahlung")
+        let parameters = SourceParameters(modelType: "bremsstrahlung")
 
-        let diagnostic = source.computeTerms(profiles: profiles, geometry: geometry, params: params)
-        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, params: params)
+        let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, parameters: parameters)
 
         expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
         expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
@@ -151,10 +151,10 @@ struct SourceModelAdaptersTests {
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
         
-        let terms = source.computeTerms(
+        let terms = try source.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: SourceParameters(modelType: "ion_electron_exchange")
+            parameters: SourceParameters(modelType: "ion_electron_exchange")
         )
 
         // CRITICAL: metadata must not be nil
@@ -183,10 +183,10 @@ struct SourceModelAdaptersTests {
         let source = IonElectronExchangeSource()
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
-        let params = SourceParameters(modelType: "ion_electron_exchange")
+        let parameters = SourceParameters(modelType: "ion_electron_exchange")
 
-        let diagnostic = source.computeTerms(profiles: profiles, geometry: geometry, params: params)
-        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, params: params)
+        let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, parameters: parameters)
 
         expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
         expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
@@ -203,10 +203,10 @@ struct SourceModelAdaptersTests {
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
         
-        let terms = source.computeTerms(
+        let terms = try source.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: SourceParameters(modelType: "fusion")
+            parameters: SourceParameters(modelType: "fusion")
         )
 
         // CRITICAL: metadata must not be nil
@@ -241,10 +241,10 @@ struct SourceModelAdaptersTests {
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
         
-        let terms = composite.computeTerms(
+        let terms = try composite.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: SourceParameters(modelType: "composite")
+            parameters: SourceParameters(modelType: "composite")
         )
 
         // CRITICAL: metadata must not be nil
@@ -275,10 +275,10 @@ struct SourceModelAdaptersTests {
         let profiles = try createTestProfiles()
         let geometry = createTestGeometry()
         
-        let terms = composite.computeTerms(
+        let terms = try composite.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: SourceParameters(modelType: "composite")
+            parameters: SourceParameters(modelType: "composite")
         )
 
         // Even with no sources, metadata should not be nil

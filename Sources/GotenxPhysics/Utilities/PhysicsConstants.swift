@@ -12,7 +12,7 @@ public enum PhysicsConstants {
     public static let elementaryCharge: Float = 1.602176634e-19
 
     /// Electron volt to Joules conversion [J/eV]
-    public static let eV: Float = 1.602176634e-19
+    public static let electronVolt: Float = 1.602176634e-19
 
     /// Electron mass [kg]
     public static let electronMass: Float = 9.1093837015e-31
@@ -51,56 +51,56 @@ public enum PhysicsConstants {
 
     // MARK: - Common Ion Masses
 
-    /// Deuterium mass [amu]
+    /// Deuterium mass [atomicMassUnits]
     public static let deuteriumMass: Float = 2.014
 
-    /// Tritium mass [amu]
+    /// Tritium mass [atomicMassUnits]
     public static let tritiumMass: Float = 3.016
 
-    /// Helium-4 mass [amu]
+    /// Helium-4 mass [atomicMassUnits]
     public static let helium4Mass: Float = 4.003
 
     // MARK: - Fusion-Specific Constants
 
     /// D-T fusion alpha particle energy [MeV]
-    public static let dtAlphaEnergy: Float = 3.5
+    public static let deuteriumTritiumAlphaEnergy: Float = 3.5
 
     /// D-T fusion neutron energy [MeV]
-    public static let dtNeutronEnergy: Float = 14.1
+    public static let deuteriumTritiumNeutronEnergy: Float = 14.1
 
     /// D-T fusion Q-value (total energy release) [MeV]
-    public static let dtQValue: Float = 17.6
+    public static let deuteriumTritiumQValue: Float = 17.6
 
     // MARK: - Unit Conversions
 
     /// Convert eV to Joules
-    public static func eVToJoules(_ eV: Float) -> Float {
-        return eV * PhysicsConstants.eV
+    public static func electronVoltsToJoules(_ electronVolts: Float) -> Float {
+        return electronVolts * PhysicsConstants.electronVolt
     }
 
     /// Convert Joules to eV
-    public static func joulesToEV(_ joules: Float) -> Float {
-        return joules / PhysicsConstants.eV
+    public static func joulesToElectronVolts(_ joules: Float) -> Float {
+        return joules / PhysicsConstants.electronVolt
     }
 
     /// Convert keV to eV
-    public static func keVToEV(_ keV: Float) -> Float {
-        return keV * 1e3
+    public static func kiloelectronVoltsToElectronVolts(_ kiloelectronVolts: Float) -> Float {
+        return kiloelectronVolts * 1e3
     }
 
     /// Convert eV to keV
-    public static func eVToKeV(_ eV: Float) -> Float {
-        return eV / 1e3
+    public static func electronVoltsToKiloelectronVolts(_ electronVolts: Float) -> Float {
+        return electronVolts / 1e3
     }
 
     /// Convert MeV to Joules
-    public static func MeVToJoules(_ MeV: Float) -> Float {
-        return MeV * 1e6 * PhysicsConstants.eV
+    public static func megaelectronVoltsToJoules(_ megaelectronVolts: Float) -> Float {
+        return megaelectronVolts * 1e6 * PhysicsConstants.electronVolt
     }
 
     /// Convert atomic mass units to kg
-    public static func amuToKg(_ amu: Float) -> Float {
-        return amu * atomicMassUnit
+    public static func atomicMassUnitsToKilograms(_ atomicMassUnits: Float) -> Float {
+        return atomicMassUnits * atomicMassUnit
     }
 
     // MARK: - Power Unit Conversions
@@ -149,7 +149,7 @@ public enum PhysicsConstants {
     ///
     /// - Parameter megawatts: Power density in MW/m³
     /// - Returns: Power density in eV/(m³·s)
-    public static let megawattsPerCubicMeterToEvPerCubicMeterPerSecond: Float = 6.2415090744e24
+    public static let megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond: Float = 6.2415090744e24
 
     /// Convert power density from MW/m³ to eV/(m³·s) (scalar version)
     ///
@@ -158,13 +158,13 @@ public enum PhysicsConstants {
     /// **Example**:
     /// ```swift
     /// let Q_MW: Float = 1.0  // [MW/m³] - heating power density
-    /// let Q_eV = PhysicsConstants.megawattsToEvDensity(Q_MW)  // [eV/(m³·s)]
+    /// let Q_eV = PhysicsConstants.megawattsToElectronVoltDensity(Q_MW)  // [eV/(m³·s)]
     /// ```
     ///
     /// - Parameter megawatts: Power density in [MW/m³]
     /// - Returns: Power density in [eV/(m³·s)]
-    public static func megawattsToEvDensity(_ megawatts: Float) -> Float {
-        return megawatts * megawattsPerCubicMeterToEvPerCubicMeterPerSecond
+    public static func megawattsToElectronVoltDensity(_ megawatts: Float) -> Float {
+        return megawatts * megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond
     }
 
     /// Convert power density from MW/m³ to eV/(m³·s) (array version)
@@ -175,12 +175,12 @@ public enum PhysicsConstants {
     /// ```swift
     /// // In Block1DCoeffsBuilder.swift:
     /// let Q_MW = sources.ionHeating.value  // [MW/m³]
-    /// let Q_eV = PhysicsConstants.megawattsToEvDensity(Q_MW)  // [eV/(m³·s)]
+    /// let Q_eV = PhysicsConstants.megawattsToElectronVoltDensity(Q_MW)  // [eV/(m³·s)]
     /// ```
     ///
     /// - Parameter megawatts: Power density array in [MW/m³]
     /// - Returns: Power density array in [eV/(m³·s)]
-    public static func megawattsToEvDensity(_ megawatts: MLXArray) -> MLXArray {
-        return megawatts * megawattsPerCubicMeterToEvPerCubicMeterPerSecond
+    public static func megawattsToElectronVoltDensity(_ megawatts: MLXArray) -> MLXArray {
+        return megawatts * megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond
     }
 }

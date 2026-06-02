@@ -13,22 +13,22 @@ public struct EquationTolerances: Codable, Sendable, Equatable, Hashable {
     public let relativeTolerance: Float
 
     /// Minimum value threshold (below this, use absolute tolerance only)
-    public let minValueThreshold: Float
+    public let minimumValueThreshold: Float
 
     public init(
         absoluteTolerance: Float,
         relativeTolerance: Float,
-        minValueThreshold: Float
+        minimumValueThreshold: Float
     ) {
         self.absoluteTolerance = absoluteTolerance
         self.relativeTolerance = relativeTolerance
-        self.minValueThreshold = minValueThreshold
+        self.minimumValueThreshold = minimumValueThreshold
     }
 
     /// Compute combined tolerance for state value x
     /// tol = max(absoluteTolerance, relativeTolerance * |x|)
     public func combinedTolerance(for value: Float) -> Float {
-        if abs(value) < minValueThreshold {
+        if abs(value) < minimumValueThreshold {
             return absoluteTolerance
         }
         return max(absoluteTolerance, relativeTolerance * abs(value))
@@ -59,22 +59,22 @@ public struct NumericalTolerances: Codable, Sendable, Equatable, Hashable {
         ionTemperature: EquationTolerances(
             absoluteTolerance: 10.0,        // 10 eV absolute
             relativeTolerance: 1e-4,        // 0.01% relative
-            minValueThreshold: 100.0        // Below 100 eV, use absolute only
+            minimumValueThreshold: 100.0        // Below 100 eV, use absolute only
         ),
         electronTemperature: EquationTolerances(
             absoluteTolerance: 10.0,
             relativeTolerance: 1e-4,
-            minValueThreshold: 100.0
+            minimumValueThreshold: 100.0
         ),
         electronDensity: EquationTolerances(
             absoluteTolerance: 1e17,        // 1e17 m⁻³ absolute
             relativeTolerance: 1e-4,
-            minValueThreshold: 1e18
+            minimumValueThreshold: 1e18
         ),
         poloidalFlux: EquationTolerances(
             absoluteTolerance: 1e-3,        // 1 mWb absolute
             relativeTolerance: 1e-5,
-            minValueThreshold: 0.1
+            minimumValueThreshold: 0.1
         )
     )
 
@@ -85,22 +85,22 @@ public struct NumericalTolerances: Codable, Sendable, Equatable, Hashable {
             ionTemperature: EquationTolerances(
                 absoluteTolerance: tolerance * 1e4,  // Scale to eV
                 relativeTolerance: tolerance,
-                minValueThreshold: 100.0
+                minimumValueThreshold: 100.0
             ),
             electronTemperature: EquationTolerances(
                 absoluteTolerance: tolerance * 1e4,
                 relativeTolerance: tolerance,
-                minValueThreshold: 100.0
+                minimumValueThreshold: 100.0
             ),
             electronDensity: EquationTolerances(
                 absoluteTolerance: tolerance * 1e20,  // Scale to m⁻³
                 relativeTolerance: tolerance,
-                minValueThreshold: 1e18
+                minimumValueThreshold: 1e18
             ),
             poloidalFlux: EquationTolerances(
                 absoluteTolerance: tolerance * 10,    // Scale to Wb
                 relativeTolerance: tolerance,
-                minValueThreshold: 0.1
+                minimumValueThreshold: 0.1
             )
         )
     }
@@ -130,7 +130,7 @@ public struct ToleranceScaler {
     /// - Parameters:
     ///   - layout: State layout (equation ranges)
     ///   - physicalState: Current state in physical units (for relative tolerance)
-    /// - Returns: Scaled tolerance vector [4*nCells]
+    /// - Returns: Scaled tolerance vector [4*cellCount]
     public func scaledTolerances(
         layout: StateLayout,
         physicalState: FlattenedState

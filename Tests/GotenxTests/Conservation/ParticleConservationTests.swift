@@ -10,24 +10,24 @@ struct ParticleConservationTests {
     // MARK: - Test Helpers
 
     /// Create test profiles with uniform density
-    private func createUniformProfiles(nCells: Int, ne: Float) throws -> CoreProfiles {
-        let Ti = MLXArray(Array(repeating: Float(10000.0), count: nCells))
-        let Te = MLXArray(Array(repeating: Float(10000.0), count: nCells))
-        let neArray = MLXArray(Array(repeating: ne, count: nCells))
-        let psi = MLXArray(Array(repeating: Float(0.0), count: nCells))
+    private func createUniformProfiles(cellCount: Int, electronDensity: Float) throws -> CoreProfiles {
+        let ionTemperature = MLXArray(Array(repeating: Float(10000.0), count: cellCount))
+        let electronTemperature = MLXArray(Array(repeating: Float(10000.0), count: cellCount))
+        let electronDensityArray = MLXArray(Array(repeating: electronDensity, count: cellCount))
+        let poloidalFlux = MLXArray(Array(repeating: Float(0.0), count: cellCount))
 
         return CoreProfiles(
-            ionTemperature: EvaluatedArray(evaluating: Ti),
-            electronTemperature: EvaluatedArray(evaluating: Te),
-            electronDensity: EvaluatedArray(evaluating: neArray),
-            poloidalFlux: EvaluatedArray(evaluating: psi)
+            ionTemperature: EvaluatedArray(evaluating: ionTemperature),
+            electronTemperature: EvaluatedArray(evaluating: electronTemperature),
+            electronDensity: EvaluatedArray(evaluating: electronDensityArray),
+            poloidalFlux: EvaluatedArray(evaluating: poloidalFlux)
         )
     }
 
     /// Create simple geometry with uniform volumes
-    private func createUniformGeometry(nCells: Int, cellVolume: Float) -> Geometry {
+    private func createUniformGeometry(cellCount: Int, cellVolume: Float) -> Geometry {
         let config = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 6.2,    // m
             minorRadius: 2.0,    // m
             toroidalField: 5.3   // T
@@ -40,11 +40,11 @@ struct ParticleConservationTests {
     @Test("Compute conserved quantity")
     func testComputeConservedQuantity() throws {
         let conservation = ParticleConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles: ne = 1e20 m^-3
-        let profiles = try createUniformProfiles(nCells: nCells, ne: 1e20)
-        let geometry = createUniformGeometry(nCells: nCells, cellVolume: 1.0)
+        let profiles = try createUniformProfiles(cellCount: cellCount, electronDensity: 1e20)
+        let geometry = createUniformGeometry(cellCount: cellCount, cellVolume: 1.0)
 
         // Compute total particles
         let totalParticles = conservation.computeConservedQuantity(
@@ -53,15 +53,15 @@ struct ParticleConservationTests {
         )
 
         // Expected: N = ne × V_total
-        // V_total = 2π R₀ dr × nCells
-        // where dr = a / nCells = 2.0 / 25 = 0.08 m
+        // V_total = 2π R₀ radialSpacing × cellCount
+        // where radialSpacing = a / cellCount = 2.0 / 25 = 0.08 m
         // V_cell = 2π × 6.2 × 0.08 ≈ 3.115 m³
         // V_total = 3.115 × 25 ≈ 77.88 m³
         let R0: Float = 6.2
         let a: Float = 2.0
-        let dr = a / Float(nCells)
-        let cellVolume = 2.0 * Float.pi * R0 * dr
-        let expected: Float = 1e20 * cellVolume * Float(nCells)
+        let radialSpacing = a / Float(cellCount)
+        let cellVolume = 2.0 * Float.pi * R0 * radialSpacing
+        let expected: Float = 1e20 * cellVolume * Float(cellCount)
         let relativeError = abs(totalParticles - expected) / expected
 
         #expect(relativeError < 1e-5, "Total particles incorrect: \(totalParticles) vs \(expected)")
@@ -106,10 +106,10 @@ struct ParticleConservationTests {
     @Test("Apply correction")
     func testApplyCorrection() throws {
         let conservation = ParticleConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles with ne = 1e20
-        let profiles = try createUniformProfiles(nCells: nCells, ne: 1e20)
+        let profiles = try createUniformProfiles(cellCount: cellCount, electronDensity: 1e20)
 
         // Apply 5% correction (factor = 1.05)
         let corrected = conservation.applyCorrection(
@@ -142,11 +142,11 @@ struct ParticleConservationTests {
     @Test("Round-trip: correction restores conservation")
     func testRoundTrip() throws {
         let conservation = ParticleConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create initial profiles
-        let initialProfiles = try createUniformProfiles(nCells: nCells, ne: 1e20)
-        let geometry = createUniformGeometry(nCells: nCells, cellVolume: 1.0)
+        let initialProfiles = try createUniformProfiles(cellCount: cellCount, electronDensity: 1e20)
+        let geometry = createUniformGeometry(cellCount: cellCount, cellVolume: 1.0)
 
         // Compute reference
         let N0 = conservation.computeConservedQuantity(
@@ -216,19 +216,19 @@ struct ParticleConservationTests {
     @Test("Conservation with gradient profiles")
     func testGradientProfiles() throws {
         let conservation = ParticleConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles with linear gradient: ne = 1e20 * (1 - 0.5*r)
         var ne_values: [Float] = []
-        for i in 0..<nCells {
-            let r = Float(i) / Float(nCells - 1)
+        for i in 0..<cellCount {
+            let r = Float(i) / Float(cellCount - 1)
             ne_values.append(1e20 * (1.0 - 0.5 * r))
         }
 
-        let Ti = MLXArray(Array(repeating: Float(10000.0), count: nCells))
-        let Te = MLXArray(Array(repeating: Float(10000.0), count: nCells))
-        let ne = MLXArray(ne_values, [nCells])
-        let psi = MLXArray(Array(repeating: Float(0.0), count: nCells))
+        let Ti = MLXArray(Array(repeating: Float(10000.0), count: cellCount))
+        let Te = MLXArray(Array(repeating: Float(10000.0), count: cellCount))
+        let ne = MLXArray(ne_values, [cellCount])
+        let psi = MLXArray(Array(repeating: Float(0.0), count: cellCount))
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -237,7 +237,7 @@ struct ParticleConservationTests {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let geometry = createUniformGeometry(nCells: nCells, cellVolume: 1.0)
+        let geometry = createUniformGeometry(cellCount: cellCount, cellVolume: 1.0)
 
         // Compute initial total
         let N0 = conservation.computeConservedQuantity(profiles: profiles, geometry: geometry)
@@ -259,18 +259,18 @@ struct ParticleConservationTests {
     @Test("Conservation with zero density cells")
     func testZeroDensityCells() throws {
         let conservation = ParticleConservation()
-        let nCells = 25
+        let cellCount = 25
 
         // Create profiles with some zero density cells
         var ne_values: [Float] = []
-        for i in 0..<nCells {
+        for i in 0..<cellCount {
             ne_values.append(i < 20 ? 1e20 : 0.0)  // Last 5 cells are zero
         }
 
-        let Ti = MLXArray(Array(repeating: Float(10000.0), count: nCells))
-        let Te = MLXArray(Array(repeating: Float(10000.0), count: nCells))
-        let ne = MLXArray(ne_values, [nCells])
-        let psi = MLXArray(Array(repeating: Float(0.0), count: nCells))
+        let Ti = MLXArray(Array(repeating: Float(10000.0), count: cellCount))
+        let Te = MLXArray(Array(repeating: Float(10000.0), count: cellCount))
+        let ne = MLXArray(ne_values, [cellCount])
+        let psi = MLXArray(Array(repeating: Float(0.0), count: cellCount))
 
         let profiles = CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -279,7 +279,7 @@ struct ParticleConservationTests {
             poloidalFlux: EvaluatedArray(evaluating: psi)
         )
 
-        let geometry = createUniformGeometry(nCells: nCells, cellVolume: 1.0)
+        let geometry = createUniformGeometry(cellCount: cellCount, cellVolume: 1.0)
 
         // Should handle zero cells gracefully
         let N = conservation.computeConservedQuantity(profiles: profiles, geometry: geometry)

@@ -80,7 +80,7 @@ public struct GasPuffModel: Sendable {
     /// - Returns: Particle source density [m⁻³/s]
     public func computeParticleSource(geometry: Geometry) -> MLXArray {
         let geometricFactors = GeometricFactors.from(geometry: geometry)
-        let r = geometricFactors.rCell.value  // Physical radius r [m]
+        let r = geometricFactors.cellRadii.value  // Physical radius r [m]
         let rho = r / geometry.minorRadius    // Normalized radius ρ = r/a
         let volumes = geometricFactors.cellVolumes.value
 

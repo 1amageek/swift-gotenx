@@ -43,5 +43,5 @@ public enum SolverError: Error, Sendable {
     case singularMatrix
     case invalidInput(String)
     case numericalInstability
-    case maxIterationsExceeded
+    case maximumIterationsExceeded
 }

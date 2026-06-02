@@ -8,42 +8,42 @@ struct ConstantTransportModelTests {
     @Test("ConstantTransportModel initialization")
     func testInitialization() {
         let model = ConstantTransportModel(
-            chiIon: 1.0,
-            chiElectron: 1.5,
+            ionHeatDiffusivity: 1.0,
+            electronHeatDiffusivity: 1.5,
             particleDiffusivity: 0.5,
             convectionVelocity: 0.0
         )
 
         #expect(model.name == "constant")
-        #expect(model.chiIonValue == 1.0)
-        #expect(model.chiElectronValue == 1.5)
+        #expect(model.ionHeatDiffusivityValue == 1.0)
+        #expect(model.electronHeatDiffusivityValue == 1.5)
     }
 
     @Test("ConstantTransportModel initialization from parameters")
-    func testInitializationFromParams() {
-        let params = TransportParameters(
+    func testInitializationFromParams() throws {
+        let parameters = try TransportParameters(
             modelType: .constant,
-            params: [
-                "chi_ion": 2.0,
-                "chi_electron": 2.5,
-                "particle_diffusivity": 1.0,
-                "convection_velocity": 0.5
+            parameters: [
+                "ionHeatDiffusivity": 2.0,
+                "electronHeatDiffusivity": 2.5,
+                "particleDiffusivity": 1.0,
+                "convectionVelocity": 0.5
             ]
         )
 
-        let model = ConstantTransportModel(params: params)
+        let model = try ConstantTransportModel(parameters: parameters)
 
-        #expect(model.chiIonValue == 2.0)
-        #expect(model.chiElectronValue == 2.5)
+        #expect(model.ionHeatDiffusivityValue == 2.0)
+        #expect(model.electronHeatDiffusivityValue == 2.5)
         #expect(model.particleDiffusivityValue == 1.0)
         #expect(model.convectionVelocityValue == 0.5)
     }
 
     @Test("ConstantTransportModel computes uniform coefficients")
-    func testComputeCoefficients() {
+    func testComputeCoefficients() throws {
         let model = ConstantTransportModel(
-            chiIon: 1.0,
-            chiElectron: 1.5
+            ionHeatDiffusivity: 1.0,
+            electronHeatDiffusivity: 1.5
         )
 
         let profiles = CoreProfiles(
@@ -54,27 +54,27 @@ struct ConstantTransportModelTests {
         )
 
         let mesh = MeshConfig(
-            nCells: 10,
+            cellCount: 10,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
         )
         let geometry = createGeometry(from: mesh)
 
-        let params = TransportParameters(modelType: .constant)
+        let parameters = try TransportParameters(modelType: .constant)
 
         let coeffs = model.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // Verify shape
-        #expect(coeffs.chiIon.shape == [10])
-        #expect(coeffs.chiElectron.shape == [10])
+        #expect(coeffs.ionHeatDiffusivity.shape == [10])
+        #expect(coeffs.electronHeatDiffusivity.shape == [10])
 
         // Verify values are constant
-        let chiIonArray = coeffs.chiIon.value
+        let chiIonArray = coeffs.ionHeatDiffusivity.value
         eval(chiIonArray)
 
         for i in 0..<10 {
@@ -90,20 +90,20 @@ struct BohmGyroBohmTransportModelTests {
     @Test("BohmGyroBohmTransportModel initialization")
     func testInitialization() {
         let model = BohmGyroBohmTransportModel(
-            bohmCoeff: 1.0,
-            gyroBhohmCoeff: 1.0
+            bohmCoefficient: 1.0,
+            gyroBohmCoefficient: 1.0
         )
 
         #expect(model.name == "bohm-gyrobohm")
-        #expect(model.bohmCoeff == 1.0)
-        #expect(model.gyroBhohmCoeff == 1.0)
+        #expect(model.bohmCoefficient == 1.0)
+        #expect(model.gyroBohmCoefficient == 1.0)
     }
 
     @Test("BohmGyroBohmTransportModel computes diffusivities")
-    func testComputeCoefficients() {
+    func testComputeCoefficients() throws {
         let model = BohmGyroBohmTransportModel(
-            bohmCoeff: 1.0,
-            gyroBhohmCoeff: 1.0
+            bohmCoefficient: 1.0,
+            gyroBohmCoefficient: 1.0
         )
 
         let profiles = CoreProfiles(
@@ -114,27 +114,27 @@ struct BohmGyroBohmTransportModelTests {
         )
 
         let mesh = MeshConfig(
-            nCells: 10,
+            cellCount: 10,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 2.5
         )
         let geometry = createGeometry(from: mesh)
 
-        let params = TransportParameters(modelType: .bohmGyrobohm)
+        let parameters = try TransportParameters(modelType: .bohmGyrobohm)
 
         let coeffs = model.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // Verify shape
-        #expect(coeffs.chiIon.shape == [10])
-        #expect(coeffs.chiElectron.shape == [10])
+        #expect(coeffs.ionHeatDiffusivity.shape == [10])
+        #expect(coeffs.electronHeatDiffusivity.shape == [10])
 
         // Verify values are positive
-        let chiElectronArray = coeffs.chiElectron.value
+        let chiElectronArray = coeffs.electronHeatDiffusivity.value
         eval(chiElectronArray)
 
         for i in 0..<10 {

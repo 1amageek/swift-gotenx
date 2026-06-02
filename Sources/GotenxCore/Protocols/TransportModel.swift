@@ -9,11 +9,11 @@ public protocol TransportModel: PhysicsComponent, Sendable {
     /// - Parameters:
     ///   - profiles: Current core profiles
     ///   - geometry: Tokamak geometry
-    ///   - params: Transport model parameters
+    ///   - parameters: Transport model parameters
     /// - Returns: Transport coefficients (chi, D, V)
     func computeCoefficients(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: TransportParameters
+        parameters: TransportParameters
     ) -> TransportCoefficients
 }

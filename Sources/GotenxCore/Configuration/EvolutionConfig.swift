@@ -12,43 +12,60 @@ public struct EvolutionConfig: Codable, Sendable, Equatable, Hashable {
     public let electronHeat: Bool
 
     /// Evolve electron density equation
-    public let density: Bool
+    public let electronDensity: Bool
 
     /// Evolve poloidal flux (current diffusion) equation
-    public let current: Bool
+    public let poloidalFlux: Bool
 
     public static let `default` = EvolutionConfig(
         ionHeat: true,
         electronHeat: true,
-        density: true,
-        current: false  // Often disabled for computational efficiency
+        electronDensity: true,
+        poloidalFlux: false  // Often disabled for computational efficiency
     )
 
     public init(
         ionHeat: Bool = true,
         electronHeat: Bool = true,
-        density: Bool = true,
-        current: Bool = false
+        electronDensity: Bool = true,
+        poloidalFlux: Bool = false
     ) {
         self.ionHeat = ionHeat
         self.electronHeat = electronHeat
-        self.density = density
-        self.current = current
+        self.electronDensity = electronDensity
+        self.poloidalFlux = poloidalFlux
     }
 
     /// Number of evolved equations
     public var count: Int {
-        [ionHeat, electronHeat, density, current]
+        [ionHeat, electronHeat, electronDensity, poloidalFlux]
             .filter { $0 }
             .count
     }
 
-    // MARK: - Codable (backward compatibility with JSON)
-
     enum CodingKeys: String, CodingKey {
-        case ionHeat = "ionTemperature"  // JSON uses "ionTemperature"
-        case electronHeat = "electronTemperature"  // JSON uses "electronTemperature"
-        case density
-        case current
+        case ionHeat = "ionTemperature"
+        case electronHeat = "electronTemperature"
+        case electronDensity
+        case poloidalFlux
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            ionHeat: try container.decodeIfPresent(Bool.self, forKey: .ionHeat) ?? true,
+            electronHeat: try container.decodeIfPresent(Bool.self, forKey: .electronHeat) ?? true,
+            electronDensity: try container.decodeIfPresent(Bool.self, forKey: .electronDensity) ?? true,
+            poloidalFlux: try container.decodeIfPresent(Bool.self, forKey: .poloidalFlux) ?? false
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ionHeat, forKey: .ionHeat)
+        try container.encode(electronHeat, forKey: .electronHeat)
+        try container.encode(electronDensity, forKey: .electronDensity)
+        try container.encode(poloidalFlux, forKey: .poloidalFlux)
     }
 }

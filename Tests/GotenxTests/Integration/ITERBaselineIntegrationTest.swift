@@ -17,7 +17,7 @@ import MLX
 ///
 /// Validates:
 /// - Source metadata pipeline (power balance tracking)
-/// - Derived quantities computation (Q_fusion, τE, H_factor)
+/// - Derived quantities computation (fusionGain, τE, confinementHFactor)
 /// - Energy and particle conservation
 /// - Physical parameter ranges
 @Suite("ITER Baseline Integration Tests")
@@ -26,33 +26,33 @@ struct ITERBaselineIntegrationTest {
     // MARK: - Test Configuration
 
     /// Create ITER-like static configuration
-    func makeITERStaticConfig(nCells: Int = 50) -> StaticRuntimeParams {
+    func makeITERStaticConfig(cellCount: Int = 50) -> StaticRuntimeParameters {
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 6.2,    // ITER: R0 = 6.2 m
             minorRadius: 2.0,    // ITER: a = 2.0 m
             toroidalField: 5.3,  // ITER: B0 = 5.3 T
             geometryType: .circular
         )
 
-        return StaticRuntimeParams(
+        return StaticRuntimeParameters(
             mesh: meshConfig,
             evolveIonHeat: true,
             evolveElectronHeat: true,
-            evolveDensity: true,
-            evolveCurrent: false,  // Current not evolved in baseline test
+            evolveElectronDensity: true,
+            evolvePoloidalFlux: false,  // Current not evolved in baseline test
             solverType: .newtonRaphson,  // Use Newton-Raphson for accurate convergence
             theta: 1.0,              // Fully implicit for stability
             solverTolerance: 1e-6,
-            solverMaxIterations: 30
+            solverMaximumIterations: 30
         )
     }
 
     /// Create ITER baseline dynamic configuration
-    func makeITERDynamicConfig() -> DynamicRuntimeParams {
-        let transportParams = TransportParameters(
+    func makeITERDynamicConfig() throws -> DynamicRuntimeParameters {
+        let transportParameters = try TransportParameters(
             modelType: .bohmGyrobohm,
-            params: [:]
+            parameters: [:]
         )
 
         let boundaryConditions = BoundaryConditions(
@@ -82,18 +82,18 @@ struct ITERBaselineIntegrationTest {
             currentDensity: .parabolic(peak: 1.5, edge: 0.1, exponent: 2.0)             // ~1 MA/m² average (ITER: 15 MA / ~30 m²)
         )
 
-        return DynamicRuntimeParams(
-            dt: 1e-4,  // 0.1 ms timestep
+        return DynamicRuntimeParameters(
+            timeStep: 1e-4,  // 0.1 ms timestep
             boundaryConditions: boundaryConditions,
             profileConditions: profileConditions,
-            sourceParams: [:],
-            transportParams: transportParams
+            sourceParameters: [:],
+            transportParameters: transportParameters
         )
     }
 
     /// Create ITER initial profiles
-    func makeITERInitialProfiles(nCells: Int) -> CoreProfiles {
-        let rho = MLXArray(0..<nCells).asType(.float32) / Float(nCells - 1)
+    func makeITERInitialProfiles(cellCount: Int) -> CoreProfiles {
+        let rho = MLXArray(0..<cellCount).asType(.float32) / Float(cellCount - 1)
 
         let Ti_peak: Float = 20000.0  // 20 keV
         let Te_peak: Float = 20000.0
@@ -130,9 +130,9 @@ struct ITERBaselineIntegrationTest {
     @Test("Complete source metadata pipeline")
     func testSourceMetadataPipeline() throws {
         // Setup
-        let staticParams = makeITERStaticConfig(nCells: 50)
-        let geometry = Geometry(config: staticParams.mesh)
-        let profiles = makeITERInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeITERStaticConfig(cellCount: 50)
+        let geometry = Geometry(config: staticParameters.mesh)
+        let profiles = makeITERInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         // Create all source models
         let fusionPower = FusionPowerSource()
@@ -151,11 +151,11 @@ struct ITERBaselineIntegrationTest {
         ])
 
         // Compute source terms with metadata
-        let sourceParams = SourceParameters(modelType: "composite", params: [:])
-        let sourceTerms = compositeSource.computeTerms(
+        let sourceParameters = SourceParameters(modelType: "composite", parameters: [:])
+        let sourceTerms = try compositeSource.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: sourceParams
+            parameters: sourceParameters
         )
 
         // CRITICAL: Verify metadata is present
@@ -200,17 +200,17 @@ struct ITERBaselineIntegrationTest {
 
     @Test("Energy conservation in ion-electron exchange")
     func testIonElectronExchangeConservation() throws {
-        let staticParams = makeITERStaticConfig(nCells: 50)
-        let geometry = Geometry(config: staticParams.mesh)
-        let profiles = makeITERInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeITERStaticConfig(cellCount: 50)
+        let geometry = Geometry(config: staticParameters.mesh)
+        let profiles = makeITERInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         let ionElectronExchange = IonElectronExchangeSource()
 
-        let sourceParams = SourceParameters(modelType: "ionElectronExchange", params: [:])
-        let sourceTerms = ionElectronExchange.computeTerms(
+        let sourceParameters = SourceParameters(modelType: "ionElectronExchange", parameters: [:])
+        let sourceTerms = try ionElectronExchange.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: sourceParams
+            parameters: sourceParameters
         )
 
         guard let metadata = sourceTerms.metadata else {
@@ -232,17 +232,17 @@ struct ITERBaselineIntegrationTest {
 
     @Test("Radiation power sign convention")
     func testRadiationSignConvention() throws {
-        let staticParams = makeITERStaticConfig(nCells: 50)
-        let geometry = Geometry(config: staticParams.mesh)
-        let profiles = makeITERInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeITERStaticConfig(cellCount: 50)
+        let geometry = Geometry(config: staticParameters.mesh)
+        let profiles = makeITERInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         // Test Bremsstrahlung
         let bremsstrahlung = BremsstrahlungSource()
-        let bremsParams = SourceParameters(modelType: "bremsstrahlung", params: [:])
-        let bremsTerms = bremsstrahlung.computeTerms(
+        let bremsParams = SourceParameters(modelType: "bremsstrahlung", parameters: [:])
+        let bremsTerms = try bremsstrahlung.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: bremsParams
+            parameters: bremsParams
         )
 
         guard let bremsMetadata = bremsTerms.metadata else {
@@ -254,11 +254,11 @@ struct ITERBaselineIntegrationTest {
 
         // Test Impurity Radiation
         let impurityRadiation = ImpurityRadiationSource()
-        let impurityParams = SourceParameters(modelType: "impurityRadiation", params: [:])
-        let impurityTerms = impurityRadiation.computeTerms(
+        let impurityParams = SourceParameters(modelType: "impurityRadiation", parameters: [:])
+        let impurityTerms = try impurityRadiation.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: impurityParams
+            parameters: impurityParams
         )
 
         guard let impurityMetadata = impurityTerms.metadata else {
@@ -277,9 +277,9 @@ struct ITERBaselineIntegrationTest {
 
     @Test("Derived quantities with full physics")
     func testDerivedQuantitiesWithFullPhysics() throws {
-        let staticParams = makeITERStaticConfig(nCells: 50)
-        let geometry = Geometry(config: staticParams.mesh)
-        let profiles = makeITERInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeITERStaticConfig(cellCount: 50)
+        let geometry = Geometry(config: staticParameters.mesh)
+        let profiles = makeITERInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         // Create full source model
         let fusionPower = FusionPowerSource()
@@ -294,11 +294,11 @@ struct ITERBaselineIntegrationTest {
             "ionElectronExchange": ionElectronExchange
         ])
 
-        let sourceParams = SourceParameters(modelType: "composite", params: [:])
-        let sourceTerms = compositeSource.computeTerms(
+        let sourceParameters = SourceParameters(modelType: "composite", parameters: [:])
+        let sourceTerms = try compositeSource.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: sourceParams
+            parameters: sourceParameters
         )
 
         // Compute derived quantities
@@ -310,48 +310,48 @@ struct ITERBaselineIntegrationTest {
         )
 
         // Verify core values are in ITER range
-        #expect(derived.Ti_core > 10000, "Core Ti should be > 10 keV (10,000 eV)")
-        #expect(derived.Te_core > 10000, "Core Te should be > 10 keV")
-        #expect(derived.ne_core > 5e19, "Core density should be > 5×10^19 m^-3")
+        #expect(derived.coreIonTemperature > 10000, "Core Ti should be > 10 keV (10,000 eV)")
+        #expect(derived.coreElectronTemperature > 10000, "Core Te should be > 10 keV")
+        #expect(derived.coreElectronDensity > 5e19, "Core density should be > 5×10^19 m^-3")
 
         // Verify thermal energy is positive
-        #expect(derived.W_thermal > 0, "Thermal energy should be positive")
+        #expect(derived.thermalEnergy > 0, "Thermal energy should be positive")
 
         // Verify power components
-        #expect(derived.P_fusion > 0, "Fusion power should be positive")
-        #expect(derived.P_ohmic >= 0, "Ohmic power should be non-negative")
-        #expect(derived.P_alpha > 0, "Alpha power should be positive")
+        #expect(derived.fusionPower > 0, "Fusion power should be positive")
+        #expect(derived.ohmicPower >= 0, "Ohmic power should be non-negative")
+        #expect(derived.alphaPower > 0, "Alpha power should be positive")
 
         // Verify fusion gain Q (should be >> 1 for ITER-like conditions)
         // Note: For initial profiles without time evolution, Q might not reach ITER target (Q=10)
         // but should be > 1 to demonstrate fusion-dominated regime
-        if derived.P_fusion > 0 {
-            #expect(derived.Q_fusion >= 0, "Q_fusion should be non-negative")
-            print("   Q_fusion: \(derived.Q_fusion)")
+        if derived.fusionPower > 0 {
+            #expect(derived.fusionGain >= 0, "Q_fusion should be non-negative")
+            print("   fusionGain: \(derived.fusionGain)")
         }
 
         // Verify energy confinement time
-        #expect(derived.tau_E > 0, "Energy confinement time should be positive")
+        #expect(derived.energyConfinementTime > 0, "Energy confinement time should be positive")
 
         // Verify normalized beta
-        #expect(derived.beta_N > 0, "Normalized beta should be positive")
+        #expect(derived.normalizedBeta > 0, "Normalized beta should be positive")
 
         print("✅ Derived quantities test passed")
-        print("   Ti_core: \(derived.Ti_core / 1000) keV")
-        print("   Te_core: \(derived.Te_core / 1000) keV")
-        print("   ne_core: \(derived.ne_core / 1e20) × 10^20 m^-3")
-        print("   W_thermal: \(derived.W_thermal / 1e6) MJ")
-        print("   P_fusion: \(derived.P_fusion) MW")
-        print("   P_alpha: \(derived.P_alpha) MW")
-        print("   τE: \(derived.tau_E) s")
-        print("   βN: \(derived.beta_N)")
+        print("   coreIonTemperature: \(derived.coreIonTemperature / 1000) keV")
+        print("   coreElectronTemperature: \(derived.coreElectronTemperature / 1000) keV")
+        print("   coreElectronDensity: \(derived.coreElectronDensity / 1e20) × 10^20 m^-3")
+        print("   thermalEnergy: \(derived.thermalEnergy / 1e6) MJ")
+        print("   fusionPower: \(derived.fusionPower) MW")
+        print("   alphaPower: \(derived.alphaPower) MW")
+        print("   τE: \(derived.energyConfinementTime) s")
+        print("   βN: \(derived.normalizedBeta)")
     }
 
     @Test("ITER power balance validation")
     func testITERPowerBalance() throws {
-        let staticParams = makeITERStaticConfig(nCells: 50)
-        let geometry = Geometry(config: staticParams.mesh)
-        let profiles = makeITERInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeITERStaticConfig(cellCount: 50)
+        let geometry = Geometry(config: staticParameters.mesh)
+        let profiles = makeITERInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         // Create source model
         let fusionPower = FusionPowerSource()
@@ -364,11 +364,11 @@ struct ITERBaselineIntegrationTest {
             "bremsstrahlung": bremsstrahlung
         ])
 
-        let sourceParams = SourceParameters(modelType: "composite", params: [:])
-        let sourceTerms = compositeSource.computeTerms(
+        let sourceParameters = SourceParameters(modelType: "composite", parameters: [:])
+        let sourceTerms = try compositeSource.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: sourceParams
+            parameters: sourceParameters
         )
 
         guard let metadata = sourceTerms.metadata else {
@@ -384,9 +384,9 @@ struct ITERBaselineIntegrationTest {
         let P_net = P_heating + P_radiation
 
         print("✅ ITER power balance test")
-        print("   P_fusion: \(metadata.fusionPower / 1e6) MW")
-        print("   P_ohmic: \(metadata.ohmicPower / 1e6) MW")
-        print("   P_auxiliary: \(metadata.auxiliaryPower / 1e6) MW")
+        print("   fusionPower: \(metadata.fusionPower / 1e6) MW")
+        print("   ohmicPower: \(metadata.ohmicPower / 1e6) MW")
+        print("   auxiliaryPower: \(metadata.auxiliaryPower / 1e6) MW")
         print("   P_radiation: \(metadata.radiationPower / 1e6) MW")
         print("   P_heating: \(P_heating / 1e6) MW")
         print("   P_net: \(P_net / 1e6) MW")
@@ -410,9 +410,9 @@ struct ITERBaselineIntegrationTest {
 
     @Test("ITER baseline parameter ranges")
     func testITERParameterRanges() throws {
-        let staticParams = makeITERStaticConfig(nCells: 50)
-        let geometry = Geometry(config: staticParams.mesh)
-        let profiles = makeITERInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeITERStaticConfig(cellCount: 50)
+        let geometry = Geometry(config: staticParameters.mesh)
+        let profiles = makeITERInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         let derived = DerivedQuantitiesComputer.compute(
             profiles: profiles,
@@ -423,37 +423,37 @@ struct ITERBaselineIntegrationTest {
         // These are approximate targets, not strict requirements
 
         // Temperature: 10-30 keV core
-        let Ti_core_keV = derived.Ti_core / 1000
-        let Te_core_keV = derived.Te_core / 1000
+        let Ti_core_keV = derived.coreIonTemperature / 1000
+        let Te_core_keV = derived.coreElectronTemperature / 1000
         #expect(Ti_core_keV >= 10.0, "ITER core Ti should be ≥ 10 keV")
         #expect(Te_core_keV >= 10.0, "ITER core Te should be ≥ 10 keV")
         #expect(Ti_core_keV <= 30.0, "ITER core Ti should be ≤ 30 keV")
         #expect(Te_core_keV <= 30.0, "ITER core Te should be ≤ 30 keV")
 
         // Density: 0.5-1.5 × 10^20 m^-3 core
-        let ne_core_1e20 = derived.ne_core / 1e20
+        let ne_core_1e20 = derived.coreElectronDensity / 1e20
         #expect(ne_core_1e20 >= 0.5, "ITER core density should be ≥ 0.5×10^20 m^-3")
         #expect(ne_core_1e20 <= 1.5, "ITER core density should be ≤ 1.5×10^20 m^-3")
 
         // Normalized beta: typically 1.8-2.5 for ITER
         // (Our test case might be higher due to simplified current profile calculation)
-        #expect(derived.beta_N > 0, "βN should be positive")
-        #expect(derived.beta_N < 20.0, "βN should be reasonable (< 20)")
+        #expect(derived.normalizedBeta > 0, "βN should be positive")
+        #expect(derived.normalizedBeta < 20.0, "βN should be reasonable (< 20)")
 
         print("✅ ITER parameter ranges test passed")
-        print("   Ti_core: \(Ti_core_keV) keV ∈ [10, 30] keV")
-        print("   Te_core: \(Te_core_keV) keV ∈ [10, 30] keV")
-        print("   ne_core: \(ne_core_1e20) × 10^20 m^-3 ∈ [0.5, 1.5]")
-        print("   βN: \(derived.beta_N)")
+        print("   coreIonTemperature: \(Ti_core_keV) keV ∈ [10, 30] keV")
+        print("   coreElectronTemperature: \(Te_core_keV) keV ∈ [10, 30] keV")
+        print("   coreElectronDensity: \(ne_core_1e20) × 10^20 m^-3 ∈ [0.5, 1.5]")
+        print("   βN: \(derived.normalizedBeta)")
     }
 
     // MARK: - Metadata Aggregation Tests
 
     @Test("Composite source metadata aggregation")
     func testCompositeMetadataAggregation() throws {
-        let staticParams = makeITERStaticConfig(nCells: 50)
-        let geometry = Geometry(config: staticParams.mesh)
-        let profiles = makeITERInitialProfiles(nCells: staticParams.mesh.nCells)
+        let staticParameters = makeITERStaticConfig(cellCount: 50)
+        let geometry = Geometry(config: staticParameters.mesh)
+        let profiles = makeITERInitialProfiles(cellCount: staticParameters.mesh.cellCount)
 
         // Create 3 different source models
         let fusion = FusionPowerSource()
@@ -466,11 +466,11 @@ struct ITERBaselineIntegrationTest {
             "bremsstrahlung": brems
         ])
 
-        let params = SourceParameters(modelType: "composite", params: [:])
-        let terms = composite.computeTerms(
+        let parameters = SourceParameters(modelType: "composite", parameters: [:])
+        let terms = try composite.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         guard let metadata = terms.metadata else {

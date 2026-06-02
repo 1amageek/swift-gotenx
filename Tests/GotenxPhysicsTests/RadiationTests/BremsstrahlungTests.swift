@@ -4,20 +4,20 @@ import MLX
 @testable import GotenxPhysics
 
 @Test("Bremsstrahlung is always negative")
-func testRadiationIsLoss() {
+func testRadiationIsLoss() throws {
     let brems = Bremsstrahlung()
 
     let ne = MLXArray([Float(1e20)])
     let Te = MLXArray([Float(10000.0)])
 
-    let P = try! brems.compute(ne: ne, Te: Te)
+    let P = try brems.compute(electronDensity: ne, electronTemperature: Te)
     eval(P)  // Evaluate before calling .item()
 
     #expect(P.item(Float.self) < 0, "Bremsstrahlung should always be a loss (negative power)")
 }
 
 @Test("Bremsstrahlung scaling with density")
-func testDensityScaling() {
+func testDensityScaling() throws {
     let brems = Bremsstrahlung()
 
     // P_brems ∝ n²
@@ -25,8 +25,8 @@ func testDensityScaling() {
     let ne2 = MLXArray([Float(2e20)])
     let Te = MLXArray([Float(10000.0)])
 
-    let P1 = try! brems.compute(ne: ne1, Te: Te)
-    let P2 = try! brems.compute(ne: ne2, Te: Te)
+    let P1 = try brems.compute(electronDensity: ne1, electronTemperature: Te)
+    let P2 = try brems.compute(electronDensity: ne2, electronTemperature: Te)
 
     let ratio_array = abs(P2 / P1)
     eval(ratio_array)  // Evaluate before calling .item()
@@ -37,7 +37,7 @@ func testDensityScaling() {
 }
 
 @Test("Bremsstrahlung scaling with temperature")
-func testTemperatureScaling() {
+func testTemperatureScaling() throws {
     let brems = Bremsstrahlung(includeRelativistic: false)  // Use classical only
 
     // P_brems ∝ √T
@@ -45,8 +45,8 @@ func testTemperatureScaling() {
     let Te1 = MLXArray([Float(10000.0)])
     let Te2 = MLXArray([Float(40000.0)])
 
-    let P1 = try! brems.compute(ne: ne, Te: Te1)
-    let P2 = try! brems.compute(ne: ne, Te: Te2)
+    let P1 = try brems.compute(electronDensity: ne, electronTemperature: Te1)
+    let P2 = try brems.compute(electronDensity: ne, electronTemperature: Te2)
 
     let ratio_array = abs(P2 / P1)
     eval(ratio_array)  // Evaluate before calling .item()
@@ -57,17 +57,17 @@ func testTemperatureScaling() {
 }
 
 @Test("Relativistic correction at high temperature")
-func testRelativisticCorrection() {
+func testRelativisticCorrection() throws {
     let brems_classical = Bremsstrahlung(includeRelativistic: false)
     let brems_relativistic = Bremsstrahlung(includeRelativistic: true)
 
     let ne = MLXArray([Float(1e20)])
     let Te = MLXArray([Float(100000.0)])  // 100 keV - relativistic effects matter
 
-    let P_classical = try! brems_classical.compute(ne: ne, Te: Te)
+    let P_classical = try brems_classical.compute(electronDensity: ne, electronTemperature: Te)
     eval(P_classical)  // Evaluate before calling .item()
 
-    let P_relativistic = try! brems_relativistic.compute(ne: ne, Te: Te)
+    let P_relativistic = try brems_relativistic.compute(electronDensity: ne, electronTemperature: Te)
     eval(P_relativistic)  // Evaluate before calling .item()
 
     // Relativistic correction should increase radiation
@@ -76,17 +76,17 @@ func testRelativisticCorrection() {
 }
 
 @Test("Negligible relativistic correction at low temperature")
-func testLowTemperatureRelativistic() {
+func testLowTemperatureRelativistic() throws {
     let brems_classical = Bremsstrahlung(includeRelativistic: false)
     let brems_relativistic = Bremsstrahlung(includeRelativistic: true)
 
     let ne = MLXArray([Float(1e20)])
     let Te = MLXArray([Float(1000.0)])  // 1 keV - relativistic effects negligible
 
-    let P_classical = try! brems_classical.compute(ne: ne, Te: Te)
+    let P_classical = try brems_classical.compute(electronDensity: ne, electronTemperature: Te)
     eval(P_classical)  // Evaluate before calling .item()
 
-    let P_relativistic = try! brems_relativistic.compute(ne: ne, Te: Te)
+    let P_relativistic = try brems_relativistic.compute(electronDensity: ne, electronTemperature: Te)
     eval(P_relativistic)  // Evaluate before calling .item()
 
     let ratio = abs(P_relativistic.item(Float.self) / P_classical.item(Float.self))
@@ -96,24 +96,24 @@ func testLowTemperatureRelativistic() {
             "Relativistic correction should be negligible at 1 keV: ratio = \(ratio)")
 }
 
-@Test("Radiation increases with Zeff")
-func testZeffScaling() {
-    let brems_low = Bremsstrahlung(Zeff: 1.0)
-    let brems_high = Bremsstrahlung(Zeff: 2.0)
+@Test("Radiation increases with effective charge")
+func testEffectiveChargeScaling() throws {
+    let brems_low = Bremsstrahlung(effectiveCharge: 1.0)
+    let brems_high = Bremsstrahlung(effectiveCharge: 2.0)
 
     let ne = MLXArray([Float(1e20)])
     let Te = MLXArray([Float(10000.0)])
 
-    let P_low = try! brems_low.compute(ne: ne, Te: Te)
+    let P_low = try brems_low.compute(electronDensity: ne, electronTemperature: Te)
     eval(P_low)  // Evaluate before calling .item()
 
-    let P_high = try! brems_high.compute(ne: ne, Te: Te)
+    let P_high = try brems_high.compute(electronDensity: ne, electronTemperature: Te)
     eval(P_high)  // Evaluate before calling .item()
 
     let ratio = abs(P_high.item(Float.self) / P_low.item(Float.self))
 
-    // Should scale linearly with Zeff
-    #expect(abs(ratio - 2.0) < 0.01, "Bremsstrahlung should scale linearly with Zeff")
+    // Should scale linearly with effectiveCharge
+    #expect(abs(ratio - 2.0) < 0.01, "Bremsstrahlung should scale linearly with effective charge")
 }
 
 @Test("Relativistic correction factor")
@@ -122,25 +122,25 @@ func testRelativisticFactor() {
 
     // At low temperature, f_rel should be ~0
     let Te_low = MLXArray([Float(1000.0)])
-    let f_rel_low = brems.computeRelativisticCorrection(Te: Te_low)
+    let f_rel_low = brems.computeRelativisticCorrection(electronTemperature: Te_low)
     eval(f_rel_low)  // Evaluate before calling .item()
     #expect(f_rel_low.item(Float.self) < 0.001, "Relativistic correction should be tiny at 1 keV")
 
     // At high temperature, f_rel should be significant
     let Te_high = MLXArray([Float(100000.0)])
-    let f_rel_high = brems.computeRelativisticCorrection(Te: Te_high)
+    let f_rel_high = brems.computeRelativisticCorrection(electronTemperature: Te_high)
     eval(f_rel_high)  // Evaluate before calling .item()
     #expect(f_rel_high.item(Float.self) > 0.01, "Relativistic correction should be significant at 100 keV")
 }
 
 @Test("Radiation power units")
-func testUnits() {
+func testUnits() throws {
     let brems = Bremsstrahlung()
 
     let ne = MLXArray([Float(1e20)])  // m⁻³
     let Te = MLXArray([Float(10000.0)])  // eV
 
-    let P = try! brems.compute(ne: ne, Te: Te)
+    let P = try brems.compute(electronDensity: ne, electronTemperature: Te)
     eval(P)  // Evaluate before calling .item()
 
     // Power density should be in W/m³

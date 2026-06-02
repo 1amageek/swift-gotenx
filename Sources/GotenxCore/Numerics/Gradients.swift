@@ -20,10 +20,10 @@ public struct GradientComputation {
     /// - At r=a: Backward difference
     ///
     /// **Parameters**:
-    /// - variable: Profile to differentiate [nCells]
-    /// - radii: Radial coordinate array [nCells] in meters
+    /// - variable: Profile to differentiate [cellCount]
+    /// - radii: Radial coordinate array [cellCount] in meters
     ///
-    /// **Returns**: Gradient ∇f [nCells] in units of variable/m
+    /// **Returns**: Gradient ∇f [cellCount] in units of variable/m
     public static func computeGradient(
         variable: MLXArray,
         radii: MLXArray
@@ -37,11 +37,11 @@ public struct GradientComputation {
     /// a profile varies significantly.
     ///
     /// **Parameters**:
-    /// - variable: Profile [nCells]
-    /// - radii: Radial coordinates [nCells] in meters
+    /// - variable: Profile [cellCount]
+    /// - radii: Radial coordinates [cellCount] in meters
     /// - epsilon: Regularization to prevent division by zero (default: 1e-10)
     ///
-    /// **Returns**: Gradient scale length L [nCells] in meters
+    /// **Returns**: Gradient scale length L [cellCount] in meters
     ///
     /// **Example**:
     /// ```swift
@@ -62,17 +62,17 @@ public struct GradientComputation {
         return abs(variable) / (abs(gradVar) + epsilon)
     }
 
-    /// Compute normalized gradient R/L_n = (R₀/n)(dn/dr)
+    /// Compute normalized gradient R/L_n = (R₀/n)(dn/radialSpacing)
     ///
     /// This is the dimensionless gradient commonly used in turbulence theory.
     ///
     /// **Parameters**:
-    /// - variable: Profile (e.g., density, temperature) [nCells]
-    /// - radii: Radial coordinates [nCells] in meters
+    /// - variable: Profile (e.g., density, temperature) [cellCount]
+    /// - radii: Radial coordinates [cellCount] in meters
     /// - majorRadius: Major radius R₀ in meters
     /// - epsilon: Regularization (default: 1e-10)
     ///
-    /// **Returns**: Normalized gradient R/L [nCells] (dimensionless)
+    /// **Returns**: Normalized gradient R/L [cellCount] (dimensionless)
     public static func computeNormalizedGradient(
         variable: MLXArray,
         radii: MLXArray,
@@ -81,7 +81,7 @@ public struct GradientComputation {
     ) -> MLXArray {
         let gradVar = computeGradient(variable: variable, radii: radii)
 
-        // R/L = -(R₀/f)(df/dr) = -R₀ × (1/f)(df/dr)
+        // R/L = -(R₀/f)(df/radialSpacing) = -R₀ × (1/f)(df/radialSpacing)
         // Note: Negative sign because L_n typically defined with - sign
         return -(majorRadius / (variable + epsilon)) * gradVar
     }
@@ -92,10 +92,10 @@ public struct GradientComputation {
     ///
     /// **Parameters**:
     /// - profiles: Core plasma profiles
-    /// - radii: Radial coordinates [nCells] in meters
+    /// - radii: Radial coordinates [cellCount] in meters
     /// - epsilon: Regularization (default: 1e-10)
     ///
-    /// **Returns**: Pressure gradient scale length L_p [nCells] in meters
+    /// **Returns**: Pressure gradient scale length L_p [cellCount] in meters
     ///
     /// **Units**:
     /// - n_e: m⁻³
@@ -122,11 +122,11 @@ public struct GradientComputation {
     /// Compute density gradient scale length
     ///
     /// **Parameters**:
-    /// - density: Electron density [nCells] in m⁻³
-    /// - radii: Radial coordinates [nCells] in meters
+    /// - density: Electron density [cellCount] in m⁻³
+    /// - radii: Radial coordinates [cellCount] in meters
     /// - epsilon: Regularization (default: 1e-10)
     ///
-    /// **Returns**: Density gradient scale length L_n [nCells] in meters
+    /// **Returns**: Density gradient scale length L_n [cellCount] in meters
     public static func computeDensityGradientLength(
         density: MLXArray,
         radii: MLXArray,
@@ -138,11 +138,11 @@ public struct GradientComputation {
     /// Compute temperature gradient scale length
     ///
     /// **Parameters**:
-    /// - temperature: Temperature [nCells] in eV
-    /// - radii: Radial coordinates [nCells] in meters
+    /// - temperature: Temperature [cellCount] in eV
+    /// - radii: Radial coordinates [cellCount] in meters
     /// - epsilon: Regularization (default: 1e-10)
     ///
-    /// **Returns**: Temperature gradient scale length L_T [nCells] in meters
+    /// **Returns**: Temperature gradient scale length L_T [cellCount] in meters
     public static func computeTemperatureGradientLength(
         temperature: MLXArray,
         radii: MLXArray,

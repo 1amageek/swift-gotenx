@@ -15,9 +15,20 @@ import GotenxCore
 /// 4. Default values (lowest)
 public actor GotenxConfigReader {
     private let configReader: ConfigReader
+    private let jsonPath: String
+    private let cliOverrides: [String: String]
+    private let environment: [String: String]
 
-    private init(configReader: ConfigReader) {
+    private init(
+        configReader: ConfigReader,
+        jsonPath: String,
+        cliOverrides: [String: String],
+        environment: [String: String]
+    ) {
         self.configReader = configReader
+        self.jsonPath = jsonPath
+        self.cliOverrides = cliOverrides
+        self.environment = environment
     }
 
     /// Create GotenxConfigReader with hierarchical providers
@@ -29,6 +40,21 @@ public actor GotenxConfigReader {
     public static func create(
         jsonPath: String,
         cliOverrides: [String: String] = [:]
+    ) async throws -> GotenxConfigReader {
+        try await create(
+            jsonPath: jsonPath,
+            cliOverrides: cliOverrides,
+            environment: ProcessInfo.processInfo.environment
+        )
+    }
+
+    /// Create GotenxConfigReader with an explicit environment snapshot.
+    ///
+    /// Use this overload in tests to avoid mutating process-wide environment variables.
+    public static func create(
+        jsonPath: String,
+        cliOverrides: [String: String] = [:],
+        environment: [String: String]
     ) async throws -> GotenxConfigReader {
         var providers: [any ConfigProvider] = []
 
@@ -59,7 +85,8 @@ public actor GotenxConfigReader {
 
         // Priority 2: Environment variables
         providers.append(
-            EnvironmentVariablesProvider()
+            EnvironmentVariablesProvider(environmentVariables: environment)
+                .prefixKeys(with: "gotenx")
         )
 
         // Priority 3 (lowest): JSON file
@@ -67,7 +94,12 @@ public actor GotenxConfigReader {
         providers.append(jsonProvider)
 
         let reader = ConfigReader(providers: providers)
-        return GotenxConfigReader(configReader: reader)
+        return GotenxConfigReader(
+            configReader: reader,
+            jsonPath: jsonPath,
+            cliOverrides: cliOverrides,
+            environment: environment
+        )
     }
 
     // MARK: - Configuration Fetching
@@ -75,18 +107,12 @@ public actor GotenxConfigReader {
     /// Fetch complete SimulationConfiguration
     public func fetchConfiguration() async throws -> SimulationConfiguration {
         // Fetch basic configuration first
-        let runtime = try await fetchRuntimeConfig()
         let time = try await fetchTimeConfig()
+        let runtime = try await fetchRuntimeConfig(time: time)
         let output = try await fetchOutputConfig()
 
-        // Apply CFL-aware defaults to transport if needed
-        let runtimeWithDefaults = try applyTransportDefaults(
-            runtime: runtime,
-            time: time
-        )
-
         let config = SimulationConfiguration(
-            runtime: runtimeWithDefaults,
+            runtime: runtime,
             time: time,
             output: output
         )
@@ -95,56 +121,6 @@ public actor GotenxConfigReader {
         try ConfigurationValidator.validate(config)
 
         return config
-    }
-
-    /// Apply CFL-aware defaults to transport configuration
-    ///
-    /// This method computes safe default values for transport parameters based on
-    /// mesh resolution and timestep to ensure CFL stability.
-    ///
-    /// - Parameters:
-    ///   - runtime: Runtime configuration
-    ///   - time: Time configuration
-    /// - Returns: Runtime configuration with defaults applied
-    private func applyTransportDefaults(
-        runtime: RuntimeConfiguration,
-        time: TimeConfiguration
-    ) throws -> RuntimeConfiguration {
-        let transport = runtime.dynamic.transport
-
-        // If parameters are already specified, use them as-is
-        if !transport.parameters.isEmpty {
-            return runtime
-        }
-
-        // Compute CFL-safe defaults
-        let defaults = computeCFLSafeDefaults(
-            modelType: transport.modelType,
-            mesh: runtime.static.mesh,
-            time: time
-        )
-
-        // Create new transport config with defaults
-        let transportWithDefaults = TransportConfig(
-            modelType: transport.modelType,
-            parameters: defaults
-        )
-
-        // Rebuild runtime configuration
-        let dynamicWithDefaults = DynamicConfig(
-            boundaries: runtime.dynamic.boundaries,
-            transport: transportWithDefaults,
-            sources: runtime.dynamic.sources,
-            pedestal: runtime.dynamic.pedestal,
-            mhd: runtime.dynamic.mhd,
-            restart: runtime.dynamic.restart,
-            initialProfile: runtime.dynamic.initialProfile
-        )
-
-        return RuntimeConfiguration(
-            static: runtime.static,
-            dynamic: dynamicWithDefaults
-        )
     }
 
     /// Compute CFL-safe transport parameter defaults
@@ -163,22 +139,61 @@ public actor GotenxConfigReader {
         mesh: MeshConfig,
         time: TimeConfiguration,
         cflLimit: Float = 0.5
-    ) -> [String: Float] {
+    ) throws -> [String: Float] {
+        guard mesh.cellCount > 0 else {
+            throw ConfigurationError.invalidValue(
+                key: "runtime.static.mesh.cellCount",
+                value: "\(mesh.cellCount)",
+                reason: "Cell count must be positive before computing CFL-safe transport defaults"
+            )
+        }
+
+        guard mesh.minorRadius.isFinite, mesh.minorRadius > 0 else {
+            throw ConfigurationError.invalidValue(
+                key: "runtime.static.mesh.minorRadius",
+                value: "\(mesh.minorRadius)",
+                reason: "Minor radius must be finite and positive before computing CFL-safe transport defaults"
+            )
+        }
+
+        guard time.initialTimeStep.isFinite, time.initialTimeStep > 0 else {
+            throw ConfigurationError.invalidValue(
+                key: "time.initialTimeStep",
+                value: "\(time.initialTimeStep)",
+                reason: "Initial timestep must be finite and positive before computing CFL-safe transport defaults"
+            )
+        }
+
+        guard cflLimit.isFinite, cflLimit > 0 else {
+            throw ConfigurationError.invalidValue(
+                key: "transport.cflLimit",
+                value: "\(cflLimit)",
+                reason: "CFL limit must be finite and positive"
+            )
+        }
+
         // Calculate cell spacing
-        let dx = mesh.minorRadius / Float(mesh.nCells)
-        let dt = time.initialDt
+        let dx = mesh.minorRadius / Float(mesh.cellCount)
+        let timeStep = time.initialTimeStep
 
         // CFL-safe maximum diffusivity
-        let chiMax = cflLimit * dx * dx / dt
+        let chiMax = cflLimit * dx * dx / timeStep
+        guard chiMax.isFinite, chiMax > 0 else {
+            throw ConfigurationError.invalidValue(
+                key: "runtime.dynamic.transport",
+                value: "\(chiMax)",
+                reason: "CFL-safe diffusivity default must be finite and positive"
+            )
+        }
 
         switch modelType {
         case .constant:
             // Conservative defaults: Use 90% of CFL limit for safety margin
             let safetyFactor: Float = 0.9
             return [
-                "chi_ion": chiMax * safetyFactor,
-                "chi_electron": chiMax * safetyFactor,
-                "particle_diffusivity": chiMax * safetyFactor * 0.2  // Typically lower
+                "ionHeatDiffusivity": chiMax * safetyFactor,
+                "electronHeatDiffusivity": chiMax * safetyFactor,
+                "particleDiffusivity": chiMax * safetyFactor * 0.2  // Typically lower
             ]
 
         case .bohmGyrobohm, .qlknn:
@@ -188,32 +203,22 @@ public actor GotenxConfigReader {
         case .densityTransition:
             // Model-specific parameters (not CFL-limited)
             return [
-                "ri_coefficient": 0.5,
-                "transition_density": 2.5e19,
-                "transition_width": 0.5e19,
-                "ion_mass_number": 2.0
+                "riCoefficient": 0.5,
+                "transitionDensity": 2.5e19,
+                "transitionWidth": 0.5e19,
+                "ionMassNumber": 2.0
             ]
         }
     }
 
-    /// Reload configuration by creating a new GotenxConfigReader
-    ///
-    /// Note: ConfigReader doesn't have a reload() method. To reload configuration,
-    /// you need to create a new GotenxConfigReader instance. For automatic reloading,
-    /// use ReloadingJSONProvider instead of JSONProvider when creating the reader.
-    ///
-    /// This method is deprecated and will be removed. Use create() to get fresh config.
-    @available(*, deprecated, message: "Use GotenxConfigReader.create() to reload configuration")
-    public func reload() async throws -> SimulationConfiguration {
-        // ConfigReader doesn't support reload - this is a placeholder
-        return try await fetchConfiguration()
-    }
-
     // MARK: - Runtime Configuration
 
-    private func fetchRuntimeConfig() async throws -> RuntimeConfiguration {
+    private func fetchRuntimeConfig(time: TimeConfiguration) async throws -> RuntimeConfiguration {
         let staticConfig = try await fetchStaticConfig()
-        let dynamicConfig = try await fetchDynamicConfig()
+        let dynamicConfig = try await fetchDynamicConfig(
+            mesh: staticConfig.mesh,
+            time: time
+        )
 
         return RuntimeConfiguration(
             static: staticConfig,
@@ -223,8 +228,8 @@ public actor GotenxConfigReader {
 
     private func fetchStaticConfig() async throws -> StaticConfig {
         // Mesh configuration
-        let meshNCells = try await configReader.fetchInt(
-            forKey: "runtime.static.mesh.nCells",
+        let meshCellCount = try await fetchInt(
+            forKeys: ["runtime.static.mesh.cellCount"],
             default: 100
         )
         let majorRadius = try await configReader.fetchDouble(
@@ -245,7 +250,7 @@ public actor GotenxConfigReader {
         )
 
         let mesh = MeshConfig(
-            nCells: meshNCells,
+            cellCount: meshCellCount,
             majorRadius: Float(majorRadius),
             minorRadius: Float(minorRadius),
             toroidalField: Float(toroidalField),
@@ -261,20 +266,20 @@ public actor GotenxConfigReader {
             forKey: "runtime.static.evolution.electronTemperature",
             default: true
         )
-        let evolveDensity = try await configReader.fetchBool(
-            forKey: "runtime.static.evolution.electronDensity",
+        let evolveElectronDensity = try await fetchBool(
+            forKeys: ["runtime.static.evolution.electronDensity"],
             default: true
         )
-        let evolveCurrent = try await configReader.fetchBool(
-            forKey: "runtime.static.evolution.poloidalFlux",
+        let evolvePoloidalFlux = try await fetchBool(
+            forKeys: ["runtime.static.evolution.poloidalFlux"],
             default: false
         )
 
         let evolution = EvolutionConfig(
             ionHeat: evolveIonHeat,
             electronHeat: evolveElectronHeat,
-            density: evolveDensity,
-            current: evolveCurrent
+            electronDensity: evolveElectronDensity,
+            poloidalFlux: evolvePoloidalFlux
         )
 
         // Solver configuration
@@ -282,8 +287,8 @@ public actor GotenxConfigReader {
             forKey: "runtime.static.solver.type",
             default: "linear"
         )
-        let solverMaxIter = try await configReader.fetchInt(
-            forKey: "runtime.static.solver.maxIterations",
+        let solverMaxIter = try await fetchInt(
+            forKeys: ["runtime.static.solver.maximumIterations"],
             default: 30
         )
         let solverTolerance = try await configReader.fetchDouble(
@@ -294,7 +299,7 @@ public actor GotenxConfigReader {
         let solver = SolverConfig(
             type: solverType,
             tolerance: Float(solverTolerance),
-            maxIterations: solverMaxIter
+            maximumIterations: solverMaxIter
         )
 
         // Scheme configuration
@@ -313,7 +318,7 @@ public actor GotenxConfigReader {
         )
     }
 
-    private func fetchDynamicConfig() async throws -> DynamicConfig {
+    private func fetchDynamicConfig(mesh: MeshConfig, time: TimeConfiguration) async throws -> DynamicConfig {
         // Boundary conditions
         let ionTemp = try await configReader.fetchDouble(
             forKey: "runtime.dynamic.boundaries.ionTemperature",
@@ -323,19 +328,19 @@ public actor GotenxConfigReader {
             forKey: "runtime.dynamic.boundaries.electronTemperature",
             default: 100.0
         )
-        let electronDensity = try await configReader.fetchDouble(
-            forKey: "runtime.dynamic.boundaries.electronDensity",
+        let electronDensity = try await fetchDouble(
+            forKeys: ["runtime.dynamic.boundaries.electronDensity"],
             default: 1e19
         )
 
         let boundaries = BoundaryConfig(
             ionTemperature: Float(ionTemp),
             electronTemperature: Float(electronTemp),
-            density: Float(electronDensity)
+            electronDensity: Float(electronDensity)
         )
 
         // Transport configuration
-        let transport = try await fetchTransportConfig()
+        let transport = try await fetchTransportConfig(mesh: mesh, time: time)
 
         // Sources configuration
         let sources = try await fetchSourcesConfig()
@@ -363,26 +368,174 @@ public actor GotenxConfigReader {
         )
     }
 
-    private func fetchTransportConfig() async throws -> TransportConfig {
+    private func fetchTransportConfig(mesh: MeshConfig, time: TimeConfiguration) async throws -> TransportConfig {
         let modelType = try await fetchEnum(
             forKey: "runtime.dynamic.transport.modelType",
             default: TransportModelType.constant
         )
 
-        // Transport-specific parameters (optional)
-        var parameters: [String: Float] = [:]
+        try validateConfiguredTransportParameterKeys(for: modelType)
 
-        if let chiIon = try await configReader.fetchDouble(forKey: "runtime.dynamic.transport.chiIon") {
-            parameters["chiIon"] = Float(chiIon)
-        }
-        if let chiElectron = try await configReader.fetchDouble(forKey: "runtime.dynamic.transport.chiElectron") {
-            parameters["chiElectron"] = Float(chiElectron)
+        var parameters = try await fetchTransportParameters(modelType: modelType)
+        if parameters.isEmpty {
+            parameters = try computeCFLSafeDefaults(
+                modelType: modelType,
+                mesh: mesh,
+                time: time
+            )
         }
 
-        return TransportConfig(
+        return try TransportConfig(
             modelType: modelType,
             parameters: parameters
         )
+    }
+
+    private func fetchTransportParameters(modelType: TransportModelType) async throws -> [String: Float] {
+        var parameters: [String: Float] = [:]
+        for key in modelType.allowedParameterKeys.sorted() {
+            if let value = try await configReader.fetchDouble(forKey: "runtime.dynamic.transport.parameters.\(key)") {
+                parameters[key] = Float(value)
+            }
+        }
+
+        return parameters
+    }
+
+    private func validateConfiguredTransportParameterKeys(for modelType: TransportModelType) throws {
+        let configuredKeys = try configuredTransportParameterKeys()
+        let allowedKeys = modelType.allowedParameterKeys
+
+        for key in configuredKeys.sorted() where !allowedKeys.contains(key) {
+            throw ConfigurationValidationError.unknownTransportParameter(
+                parameter: key,
+                modelType: modelType,
+                allowed: allowedKeys.sorted()
+            )
+        }
+    }
+
+    private func configuredTransportParameterKeys() throws -> Set<String> {
+        var keys = try jsonTransportParameterKeys()
+        keys.formUnion(Self.transportParameterKeys(inOverrides: cliOverrides))
+        keys.formUnion(Self.transportParameterKeys(inEnvironment: environment))
+        return keys
+    }
+
+    private func jsonTransportParameterKeys() throws -> Set<String> {
+        let data = try Data(contentsOf: URL(fileURLWithPath: jsonPath))
+        let root = try JSONSerialization.jsonObject(with: data)
+
+        guard let rootDictionary = root as? [String: Any] else {
+            throw ConfigurationError.invalidValue(
+                key: "configuration",
+                value: "\(Swift.type(of: root))",
+                reason: "Configuration root must be a JSON object"
+            )
+        }
+
+        guard let transport = Self.dictionaryValue(
+            in: rootDictionary,
+            path: ["runtime", "dynamic", "transport"]
+        ) else {
+            return []
+        }
+
+        guard let parametersValue = transport["parameters"] else {
+            return []
+        }
+
+        guard let parameters = parametersValue as? [String: Any] else {
+            throw ConfigurationError.invalidValue(
+                key: "runtime.dynamic.transport.parameters",
+                value: "\(Swift.type(of: parametersValue))",
+                reason: "Transport parameters must be a JSON object"
+            )
+        }
+
+        return Set(parameters.keys)
+    }
+
+    private static func dictionaryValue(
+        in root: [String: Any],
+        path: [String]
+    ) -> [String: Any]? {
+        var current: Any = root
+
+        for component in path {
+            guard let dictionary = current as? [String: Any],
+                  let next = dictionary[component] else {
+                return nil
+            }
+            current = next
+        }
+
+        return current as? [String: Any]
+    }
+
+    private static func transportParameterKeys(inOverrides overrides: [String: String]) -> Set<String> {
+        let prefix = "runtime.dynamic.transport.parameters."
+        return Set(
+            overrides.keys.compactMap { key in
+                guard key.hasPrefix(prefix) else {
+                    return nil
+                }
+                return String(key.dropFirst(prefix.count))
+            }
+        )
+    }
+
+    private static func transportParameterKeys(inEnvironment environment: [String: String]) -> Set<String> {
+        let prefix = environmentName(
+            forComponents: ["gotenx", "runtime", "dynamic", "transport", "parameters"]
+        ) + "_"
+        let knownParameterNames = Dictionary(
+            uniqueKeysWithValues: allTransportParameterKeys.map { key in
+                (environmentName(forComponents: [key]), key)
+            }
+        )
+
+        return Set(
+            environment.keys.compactMap { key in
+                guard key.hasPrefix(prefix) else {
+                    return nil
+                }
+
+                let encodedParameterName = String(key.dropFirst(prefix.count))
+                return knownParameterNames[encodedParameterName] ?? encodedParameterName
+            }
+        )
+    }
+
+    private static var allTransportParameterKeys: Set<String> {
+        Set(TransportModelType.allCases.flatMap { $0.allowedParameterKeys })
+    }
+
+    private static func environmentName(forComponents components: [String]) -> String {
+        components
+            .map(environmentComponentName)
+            .joined(separator: "_")
+    }
+
+    private static func environmentComponentName(_ component: String) -> String {
+        var normalized = ""
+        var previousWasLowercase = false
+
+        for character in component {
+            if previousWasLowercase, character.isUppercase {
+                normalized.append("_")
+            }
+
+            normalized.append(character)
+            previousWasLowercase = character.isLowercase
+        }
+
+        return normalized
+            .uppercased()
+            .map { character in
+                character.isLetter || character.isNumber ? String(character) : "_"
+            }
+            .joined()
     }
 
     private func fetchSourcesConfig() async throws -> SourcesConfig {
@@ -426,8 +579,8 @@ public actor GotenxConfigReader {
             forKey: "runtime.dynamic.mhd.sawtooth.sCritical",
             default: 0.2
         )
-        let minCrashInterval = try await configReader.fetchDouble(
-            forKey: "runtime.dynamic.mhd.sawtooth.minCrashInterval",
+        let minimumCrashInterval = try await configReader.fetchDouble(
+            forKey: "runtime.dynamic.mhd.sawtooth.minimumCrashInterval",
             default: 0.01
         )
         let flatteningFactor = try await configReader.fetchDouble(
@@ -443,10 +596,10 @@ public actor GotenxConfigReader {
             default: 1e-3
         )
 
-        let sawtoothParams = SawtoothParameters(
+        let sawtoothParameters = SawtoothParameters(
             minimumRadius: Float(minimumRadius),
             sCritical: Float(sCritical),
-            minCrashInterval: Float(minCrashInterval),
+            minimumCrashInterval: Float(minimumCrashInterval),
             flatteningFactor: Float(flatteningFactor),
             mixingRadiusMultiplier: Float(mixingRadiusMultiplier),
             crashStepDuration: Float(crashStepDuration)
@@ -459,7 +612,7 @@ public actor GotenxConfigReader {
 
         return MHDConfig(
             sawtoothEnabled: sawtoothEnabled,
-            sawtoothParams: sawtoothParams,
+            sawtoothParameters: sawtoothParameters,
             ntmEnabled: ntmEnabled
         )
     }
@@ -502,8 +655,8 @@ public actor GotenxConfigReader {
             forKey: "time.end",
             default: 1.0
         )
-        let initialDt = try await configReader.fetchDouble(
-            forKey: "time.initialDt",
+        let initialTimeStep = try await fetchDouble(
+            forKeys: ["time.initialTimeStep"],
             default: 1e-3
         )
 
@@ -519,18 +672,18 @@ public actor GotenxConfigReader {
                 forKey: "time.adaptive.safetyFactor",
                 default: 0.9
             )
-            let minDt = try await configReader.fetchDouble(
-                forKey: "time.adaptive.minDt",
+            let minimumTimeStep = try await fetchDouble(
+                forKeys: ["time.adaptive.minimumTimeStep"],
                 default: 1e-6
             )
-            let maxDt = try await configReader.fetchDouble(
-                forKey: "time.adaptive.maxDt",
+            let maximumTimeStep = try await fetchDouble(
+                forKeys: ["time.adaptive.maximumTimeStep"],
                 default: 1e-1
             )
 
             adaptive = AdaptiveTimestepConfig(
-                minDt: Float(minDt),
-                maxDt: Float(maxDt),
+                minimumTimeStep: Float(minimumTimeStep),
+                maximumTimeStep: Float(maximumTimeStep),
                 safetyFactor: Float(safetyFactor)
             )
         } else {
@@ -540,7 +693,7 @@ public actor GotenxConfigReader {
         return TimeConfiguration(
             start: Float(start),
             end: Float(end),
-            initialDt: Float(initialDt),
+            initialTimeStep: Float(initialTimeStep),
             adaptive: adaptive
         )
     }
@@ -570,6 +723,37 @@ public actor GotenxConfigReader {
     }
 
     // MARK: - Generic Helpers
+
+    private func fetchInt(forKeys keys: [String], default defaultValue: Int) async throws -> Int {
+        for key in keys {
+            if let value = try await configReader.fetchInt(forKey: key) {
+                return value
+            }
+        }
+        return defaultValue
+    }
+
+    private func fetchDouble(forKeys keys: [String], default defaultValue: Double) async throws -> Double {
+        try await fetchDouble(forKeys: keys) ?? defaultValue
+    }
+
+    private func fetchDouble(forKeys keys: [String]) async throws -> Double? {
+        for key in keys {
+            if let value = try await configReader.fetchDouble(forKey: key) {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func fetchBool(forKeys keys: [String], default defaultValue: Bool) async throws -> Bool {
+        for key in keys {
+            if let value = try await configReader.fetchBool(forKey: key) {
+                return value
+            }
+        }
+        return defaultValue
+    }
 
     /// Fetch string-based enum with validation
     ///

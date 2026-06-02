@@ -41,6 +41,11 @@ This directory contains the technical design and architecture documentation for 
 - Physical range validation
 - Error types and actionable feedback
 
+**[QUALITY_GATES.md](QUALITY_GATES.md)**
+- Repository-level reliability gates
+- xcodebuild verification command for critical suites
+- API naming, configuration, and numerical diagnostic guardrails
+
 ---
 
 ## Numerical Computing
@@ -65,12 +70,11 @@ This directory contains the technical design and architecture documentation for 
 - `compile()` best practices (pure functions, no self capture)
 - Swift 6 strict concurrency requirements
 
-**[NUMERICAL_ROBUSTNESS_DESIGN.md](NUMERICAL_ROBUSTNESS_DESIGN.md)** 🔥 **CRITICAL**
+**[NUMERICAL_ROBUSTNESS_DESIGN.md](NUMERICAL_ROBUSTNESS_DESIGN.md)**
 - NaN propagation prevention (IonElectronExchange crash fix)
-- ValidatedProfiles wrapper architecture (Sprint 1-3 phased implementation)
+- `ValidatedProfiles` and numerical validation contracts
 - Constrained line search for Newton-Raphson solver
-- Input validation and safe fallback mechanisms
-- Status: Implementation ready (Sprint 1 spec finalized)
+- Input validation and fail-fast source diagnostics
 
 ---
 
@@ -82,7 +86,7 @@ This directory contains the technical design and architecture documentation for 
 - QLKNN neural network model (high-fidelity)
 - Performance characteristics and use cases
 
-**[FVM_NUMERICAL_IMPROVEMENTS_PLAN.md](FVM_NUMERICAL_IMPROVEMENTS_PLAN.md)** 🔥 **PRIORITY**
+**[FVM_NUMERICAL_IMPROVEMENTS_PLAN.md](FVM_NUMERICAL_IMPROVEMENTS_PLAN.md)**
 - Power-law convection scheme (Patankar)
 - Sauter bootstrap current formula
 - Non-uniform grid support
@@ -124,6 +128,9 @@ This directory contains the technical design and architecture documentation for 
 **Reviewing configuration changes?**
 → [CONFIGURATION_VALIDATION_SPEC.md](CONFIGURATION_VALIDATION_SPEC.md) specifies validation rules
 
+**Checking reliability gates?**
+→ [QUALITY_GATES.md](QUALITY_GATES.md) maps risk areas to required test coverage
+
 ---
 
 ## Document Status
@@ -134,6 +141,7 @@ This directory contains the technical design and architecture documentation for 
 | CONFIGURATION_SYSTEM.md | ✅ Active reference | 2025-10-21 |
 | CONFIGURATION_ARCHITECTURE_REFACTORING.md | 🚧 Design phase | 2025-10-25 |
 | CONFIGURATION_VALIDATION_SPEC.md | 📋 Specification | 2025-10-24 |
+| QUALITY_GATES.md | ✅ Active reference | 2026-06-02 |
 | FVM_NUMERICAL_IMPROVEMENTS_PLAN.md | 🔥 Ready for impl | 2025-10-22 |
 | NUMERICAL_ROBUSTNESS_DESIGN.md | 🔥 Implementation ready | 2025-10-25 |
 | MLX_BEST_PRACTICES.md | ✅ Active reference | 2025-10-21 |
@@ -178,4 +186,4 @@ When adding or updating documentation:
 
 ---
 
-*Last updated: 2025-10-25*
+*Last updated: 2026-06-02*

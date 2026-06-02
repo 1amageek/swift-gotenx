@@ -38,7 +38,7 @@ public struct ECRHModel: Sendable {
 
     /// Deposition location (normalized radius ρ)
     /// Typical range: 0.0 (core) - 0.9 (near edge)
-    public let depositionRho: Float
+    public let normalizedDepositionRadius: Float
 
     /// Deposition width (3σ width of Gaussian profile)
     /// Typical range: 0.05 - 0.15
@@ -66,21 +66,21 @@ public struct ECRHModel: Sendable {
     ///
     /// - Parameters:
     ///   - totalPower: Total injected power [W] (e.g., 20e6 for 20 MW)
-    ///   - depositionRho: Deposition location [dimensionless, 0-1]
+    ///   - normalizedDepositionRadius: Deposition location [dimensionless, 0-1]
     ///   - depositionWidth: Deposition width [dimensionless]
     ///   - launchAngle: Launch angle [degrees] (optional, for future use)
     ///   - frequency: Microwave frequency [Hz] (optional, for future use)
     ///   - enableCurrentDrive: Whether to calculate ECCD (default: false)
     public init(
         totalPower: Float,
-        depositionRho: Float = 0.5,
+        normalizedDepositionRadius: Float = 0.5,
         depositionWidth: Float = 0.1,
         launchAngle: Float? = nil,
         frequency: Float? = nil,
         enableCurrentDrive: Bool = false
     ) {
         self.totalPower = totalPower
-        self.depositionRho = depositionRho
+        self.normalizedDepositionRadius = normalizedDepositionRadius
         self.depositionWidth = depositionWidth
         self.launchAngle = launchAngle
         self.frequency = frequency
@@ -102,13 +102,13 @@ public struct ECRHModel: Sendable {
     /// - Returns: Power density [W/m³]
     public func computePowerDensity(geometry: Geometry) -> MLXArray {
         let geometricFactors = GeometricFactors.from(geometry: geometry)
-        let r = geometricFactors.rCell.value  // Physical radius r [m]
+        let r = geometricFactors.cellRadii.value  // Physical radius r [m]
         let rho = r / geometry.minorRadius    // Normalized radius ρ = r/a
         let volumes = geometricFactors.cellVolumes.value
 
-        // Gaussian profile centered at depositionRho
+        // Gaussian profile centered at normalizedDepositionRadius
         let sigma = depositionWidth / 3.0  // 3-sigma width convention
-        let delta = rho - depositionRho
+        let delta = rho - normalizedDepositionRadius
         let profile = exp(-0.5 * pow(delta / sigma, 2))
 
         // Normalize to total power
@@ -123,7 +123,7 @@ public struct ECRHModel: Sendable {
     ///
     /// **Model**: Lin-Liu current drive efficiency
     /// ```
-    /// η_CD = C × (T_e / m_e c²) / (1 + ξ × Z_eff)
+    /// η_CD = C × (T_e / m_e c²) / (1 + ξ × effectiveCharge)
     /// j_ECCD = η_CD × P / (n_e × T_e)
     /// ```
     ///

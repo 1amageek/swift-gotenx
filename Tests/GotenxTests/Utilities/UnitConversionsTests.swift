@@ -20,7 +20,7 @@ struct UnitConversionsTests {
     @Test("eV constant is correct")
     func testEvConstant() {
         let expected: Float = 1.602176634e-19  // [J/eV]
-        #expect(UnitConversions.eV == expected, "eV constant mismatch")
+        #expect(UnitConversions.electronVolt == expected, "eV constant mismatch")
     }
 
     /// Test that conversion constant is correct
@@ -32,7 +32,7 @@ struct UnitConversionsTests {
         //         = 10⁶ J/(m³·s) × (1 eV / 1.602176634×10⁻¹⁹ J)
         //         = 6.2415090744×10²⁴ eV/(m³·s)
         let expected: Float = 6.2415090744e24
-        #expect(UnitConversions.megawattsPerCubicMeterToEvPerCubicMeterPerSecond == expected,
+        #expect(UnitConversions.megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond == expected,
                 "Conversion constant mismatch")
     }
 
@@ -43,13 +43,13 @@ struct UnitConversionsTests {
         let megawatt: Float = 1e6  // [W]
 
         // Convert J to eV: J / (J/eV) = eV
-        let evPerJoule: Float = 1.0 / UnitConversions.eV  // [eV/J]
+        let evPerJoule: Float = 1.0 / UnitConversions.electronVolt  // [eV/J]
         let evPerSecond: Float = megawatt * evPerJoule  // [eV/s]
 
         // For power density: [MW/m³] → [eV/(m³·s)]
         let derived = evPerSecond  // Same as MW * (eV/J)
 
-        let expected = UnitConversions.megawattsPerCubicMeterToEvPerCubicMeterPerSecond
+        let expected = UnitConversions.megawattsPerCubicMeterToElectronVoltsPerCubicMeterPerSecond
         let relativeError = abs(derived - expected) / expected
 
         #expect(relativeError < 1e-6,
@@ -62,7 +62,7 @@ struct UnitConversionsTests {
     @Test("Scalar conversion: 1 MW/m³ → eV/(m³·s)")
     func testScalarConversionUnity() {
         let input: Float = 1.0  // [MW/m³]
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         let expected: Float = 6.2415090744e24  // [eV/(m³·s)]
         let relativeError = abs(output - expected) / expected
@@ -74,7 +74,7 @@ struct UnitConversionsTests {
     @Test("Scalar conversion: 0.5 MW/m³ (typical ITER heating)")
     func testScalarConversionRealistic() {
         let input: Float = 0.5  // [MW/m³] - typical fusion heating
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         let expected: Float = 0.5 * 6.2415090744e24  // [eV/(m³·s)]
         let relativeError = abs(output - expected) / expected
@@ -86,7 +86,7 @@ struct UnitConversionsTests {
     @Test("Scalar conversion: 0 MW/m³")
     func testScalarConversionZero() {
         let input: Float = 0.0  // [MW/m³]
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         #expect(output == 0.0, "Zero input should give zero output")
     }
@@ -95,7 +95,7 @@ struct UnitConversionsTests {
     @Test("Scalar conversion: negative value (cooling)")
     func testScalarConversionNegative() {
         let input: Float = -0.1  // [MW/m³] - cooling/loss term
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         let expected: Float = -0.1 * 6.2415090744e24  // [eV/(m³·s)]
         let relativeError = abs(output - expected) / abs(expected)
@@ -108,9 +108,9 @@ struct UnitConversionsTests {
     /// Test array conversion with uniform values
     @Test("Array conversion: uniform heating profile")
     func testArrayConversionUniform() {
-        let nCells = 25
-        let input = MLXArray(Array(repeating: Float(1.0), count: nCells))  // [MW/m³]
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let cellCount = 25
+        let input = MLXArray(Array(repeating: Float(1.0), count: cellCount))  // [MW/m³]
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         // Verify output is Float32 (GPU-compatible)
         #expect(output.dtype == .float32, "Output should be Float32 for GPU compatibility")
@@ -130,19 +130,19 @@ struct UnitConversionsTests {
     /// Test array conversion with profile (core-to-edge gradient)
     @Test("Array conversion: realistic heating profile")
     func testArrayConversionProfile() {
-        let nCells = 25
+        let cellCount = 25
 
         // Realistic heating profile: peaked in core, decaying to edge
         // Q(r) = Q0 * (1 - 0.9 * (r/a)²)
         var inputArray = [Float]()
-        for i in 0..<nCells {
-            let rho = Float(i) / Float(nCells - 1)  // Normalized radius
+        for i in 0..<cellCount {
+            let rho = Float(i) / Float(cellCount - 1)  // Normalized radius
             let Q_MW: Float = 1.0 * (1.0 - 0.9 * rho * rho)  // [MW/m³]
             inputArray.append(Q_MW)
         }
 
         let input = MLXArray(inputArray)
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         // Verify output is Float32 (GPU-compatible)
         #expect(output.dtype == .float32, "Output should be Float32 for GPU compatibility")
@@ -165,9 +165,9 @@ struct UnitConversionsTests {
     /// Test array conversion with zeros
     @Test("Array conversion: zero heating")
     func testArrayConversionZeros() {
-        let nCells = 25
-        let input = MLXArray.zeros([nCells])  // [MW/m³]
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let cellCount = 25
+        let input = MLXArray.zeros([cellCount])  // [MW/m³]
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         // Verify output is Float32 (GPU-compatible)
         #expect(output.dtype == .float32, "Output should be Float32 for GPU compatibility")
@@ -186,7 +186,7 @@ struct UnitConversionsTests {
     @Test("Array conversion: mixed heating/cooling")
     func testArrayConversionMixed() {
         let input = MLXArray([Float(1.0), Float(-0.5), Float(0.0), Float(0.3), Float(-0.1)])  // [MW/m³]
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         // Verify output is Float32 (GPU-compatible)
         #expect(output.dtype == .float32, "Output should be Float32 for GPU compatibility")
@@ -222,9 +222,9 @@ struct UnitConversionsTests {
     @Test("Temperature equation dimensional consistency with conversion")
     func testTemperatureEquationDimensions() {
         // Setup typical ITER plasma parameters
-        let ne: Float = 1e20      // [m⁻³]
-        let chi: Float = 1.0      // [m²/s]
-        let gradT: Float = 1000.0 // [eV/m]
+        let electronDensity: Float = 1e20      // [m⁻³]
+        let heatDiffusivity: Float = 1.0      // [m²/s]
+        let temperatureGradient: Float = 1000.0 // [eV/m]
         let Q_MW: Float = 0.5     // [MW/m³]
 
         // Left side: n_e ∂T/∂t
@@ -233,13 +233,13 @@ struct UnitConversionsTests {
 
         // Diffusion term: ∇·(n_e χ ∇T)
         // Dimension: ∇·([m⁻³] × [m²/s] × [eV/m]) = [eV/(m³·s)]
-        let dr: Float = 0.08  // [m] typical cell size
-        let diffusionTerm = ne * chi * gradT / dr
+        let radialSpacing: Float = 0.08  // [m] typical cell size
+        let diffusionTerm = electronDensity * heatDiffusivity * temperatureGradient / radialSpacing
         // [m⁻³] × [m²/s] × [eV/m] × [1/m] = [eV/(m³·s)] ✓
 
         // Source term: Q after conversion
         // Must have dimension [eV/(m³·s)]
-        let sourceTerm = UnitConversions.megawattsToEvDensity(Q_MW)
+        let sourceTerm = UnitConversions.megawattsToElectronVoltDensity(Q_MW)
 
         // Verify both terms are comparable in magnitude
         // (same dimension means they can be added/subtracted)
@@ -255,7 +255,7 @@ struct UnitConversionsTests {
     func testConversionPrecision() {
         // Test that conversion doesn't lose precision for typical values
         let input: Float = 0.123456789  // [MW/m³]
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         // Verify at least 6 significant figures preserved
         let coefficient: Float = 6.2415090744e24
@@ -270,7 +270,7 @@ struct UnitConversionsTests {
     @Test("Conversion with very small values")
     func testConversionVerySmall() {
         let input: Float = 1e-6  // [MW/m³] - very small heating
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         let coefficient: Float = 6.2415090744e24
         let expected = input * coefficient
@@ -283,7 +283,7 @@ struct UnitConversionsTests {
     @Test("Conversion with very large values")
     func testConversionVeryLarge() {
         let input: Float = 100.0  // [MW/m³] - very large heating
-        let output = UnitConversions.megawattsToEvDensity(input)
+        let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
         let coefficient: Float = 6.2415090744e24
         let expected = input * coefficient
@@ -302,11 +302,11 @@ struct UnitConversionsTests {
     @Test("Array conversion uses Float32 for GPU compatibility")
     func testArrayConversionDtype() {
         // Test with Float32 input
-        let nCells = 10
+        let cellCount = 10
 
         // Float32 input → Float32 output (GPU-compatible)
-        let float32Input = MLXArray(Array(repeating: Float(1.0), count: nCells))
-        let float32Output = UnitConversions.megawattsToEvDensity(float32Input)
+        let float32Input = MLXArray(Array(repeating: Float(1.0), count: cellCount))
+        let float32Output = UnitConversions.megawattsToElectronVoltDensity(float32Input)
         #expect(float32Output.dtype == .float32, "Float32 input should produce Float32 output (GPU-compatible)")
 
         // Note: Float64 is NOT supported on Apple Silicon GPU
@@ -321,7 +321,7 @@ struct UnitConversionsTests {
         let coefficient = Float(6.2415090744e24)  // Explicitly Float32
 
         for (i, input) in scalarValues.enumerated() {
-            let output = UnitConversions.megawattsToEvDensity(input)
+            let output = UnitConversions.megawattsToElectronVoltDensity(input)
 
             #expect(!output.isInfinite, "Scalar value at index \(i) overflowed to infinity")
             #expect(!output.isNaN, "Scalar value at index \(i) is NaN")
@@ -333,7 +333,7 @@ struct UnitConversionsTests {
 
         // Test array version with Float32 output (GPU-compatible, sufficient precision)
         let arrayInput = MLXArray([Float(1.0), Float(10.0), Float(100.0)])
-        let arrayOutput = UnitConversions.megawattsToEvDensity(arrayInput)
+        let arrayOutput = UnitConversions.megawattsToElectronVoltDensity(arrayInput)
 
         #expect(arrayOutput.dtype == .float32, "Array output should be Float32 (GPU-compatible)")
 

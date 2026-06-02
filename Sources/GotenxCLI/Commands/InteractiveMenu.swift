@@ -171,11 +171,11 @@ struct InteractiveMenu {
         print("\n⚙️  Modify Configuration")
         print("═══════════════════════════════════════════════════")
         print("Available parameters:")
-        print("  1. mesh.nCells - Number of radial grid cells")
+        print("  1. mesh.cellCount - Number of radial grid cells")
         print("  2. mesh.majorRadius - Major radius (m)")
         print("  3. mesh.minorRadius - Minor radius (m)")
         print("  4. time.end - Simulation end time (s)")
-        print("  5. time.initialDt - Initial timestep (s)")
+        print("  5. time.initialTimeStep - Initial timestep (s)")
         print("  6. boundaries.ionTemperature - Ion temperature boundary (eV)")
         print("  7. boundaries.electronTemperature - Electron temperature boundary (eV)")
         print("  8. boundaries.electronDensity - Electron density boundary (m^-3)")
@@ -219,7 +219,7 @@ struct InteractiveMenu {
         // Convert time and output configs to builders
         builder.time.start = currentConfig.time.start
         builder.time.end = currentConfig.time.end
-        builder.time.initialDt = currentConfig.time.initialDt
+        builder.time.initialTimeStep = currentConfig.time.initialTimeStep
         builder.time.adaptive = currentConfig.time.adaptive
 
         builder.output.saveInterval = currentConfig.output.saveInterval
@@ -234,7 +234,7 @@ struct InteractiveMenu {
                 print("❌ Invalid integer value")
                 return
             }
-            builder.runtime.static.mesh.nCells = value
+            builder.runtime.static.mesh.cellCount = value
             needsRecompilation = true
         case 2:
             guard let value = Float(valueStr) else {
@@ -259,7 +259,7 @@ struct InteractiveMenu {
                 print("❌ Invalid float value")
                 return
             }
-            builder.time.initialDt = value
+            builder.time.initialTimeStep = value
         case 6:
             guard let value = Float(valueStr) else {
                 print("❌ Invalid float value")
@@ -269,7 +269,7 @@ struct InteractiveMenu {
             builder.runtime.dynamic.boundaries = BoundaryConfig(
                 ionTemperature: value,
                 electronTemperature: currentConfig.runtime.dynamic.boundaries.electronTemperature,
-                density: currentConfig.runtime.dynamic.boundaries.density
+                electronDensity: currentConfig.runtime.dynamic.boundaries.electronDensity
             )
         case 7:
             guard let value = Float(valueStr) else {
@@ -280,7 +280,7 @@ struct InteractiveMenu {
             builder.runtime.dynamic.boundaries = BoundaryConfig(
                 ionTemperature: currentConfig.runtime.dynamic.boundaries.ionTemperature,
                 electronTemperature: value,
-                density: currentConfig.runtime.dynamic.boundaries.density
+                electronDensity: currentConfig.runtime.dynamic.boundaries.electronDensity
             )
         case 8:
             guard let value = Float(valueStr) else {
@@ -291,7 +291,7 @@ struct InteractiveMenu {
             builder.runtime.dynamic.boundaries = BoundaryConfig(
                 ionTemperature: currentConfig.runtime.dynamic.boundaries.ionTemperature,
                 electronTemperature: currentConfig.runtime.dynamic.boundaries.electronTemperature,
-                density: value
+                electronDensity: value
             )
         default:
             print("❌ Invalid parameter number")
@@ -331,7 +331,7 @@ struct InteractiveMenu {
             currentConfigPath = path
 
             print("✓ Configuration loaded successfully")
-            print("  Mesh cells: \(newConfig.runtime.static.mesh.nCells)")
+            print("  Mesh cells: \(newConfig.runtime.static.mesh.cellCount)")
             print("  Major radius: \(newConfig.runtime.static.mesh.majorRadius) m")
             print("  Time range: [\(newConfig.time.start), \(newConfig.time.end)] s")
             print("\n⚠️  Static parameters changed - next run will trigger recompilation")
@@ -376,7 +376,7 @@ struct InteractiveMenu {
     private func makeProgressCallback() -> @Sendable (Float, ProgressInfo) -> Void {
         return { fraction, progress in
             let percentage = Int(fraction * 100)
-            print("  Progress: \(percentage)% | Time: \(String(format: "%.6f", progress.currentTime))s | dt: \(String(format: "%.8f", progress.lastDt))s")
+            print("  Progress: \(percentage)% | Time: \(String(format: "%.6f", progress.currentTime))s | timeStep: \(String(format: "%.8f", progress.lastTimeStep))s")
         }
     }
 

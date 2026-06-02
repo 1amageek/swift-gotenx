@@ -2,7 +2,7 @@
 // Regression tests for configuration override priority
 //
 // CRITICAL: These tests verify that the provider priority order is correct
-// swift-configuration uses REVERSE array order: last provider = highest priority
+// ConfigReader uses first-match priority: first provider = highest priority
 
 import Testing
 import Foundation
@@ -16,7 +16,7 @@ struct ConfigurationPriorityTests {
     // MARK: - Test Fixtures
 
     /// Create a minimal test JSON configuration
-    private func createTestConfig(nCells: Int = 100) throws -> String {
+    private func createTestConfig(cellCount: Int = 100) throws -> String {
         let tempDir = FileManager.default.temporaryDirectory
         let configPath = tempDir.appendingPathComponent("test_config_\(UUID()).json")
 
@@ -25,7 +25,7 @@ struct ConfigurationPriorityTests {
           "runtime": {
             "static": {
               "mesh": {
-                "nCells": \(nCells),
+                "cellCount": \(cellCount),
                 "majorRadius": 3.0,
                 "minorRadius": 1.0,
                 "toroidalField": 2.5,
@@ -40,7 +40,7 @@ struct ConfigurationPriorityTests {
               "solver": {
                 "type": "linear",
                 "tolerance": 1e-6,
-                "maxIterations": 30
+                "maximumIterations": 30
               },
               "scheme": {
                 "theta": 1.0
@@ -77,12 +77,12 @@ struct ConfigurationPriorityTests {
           "time": {
             "start": 0.0,
             "end": 1.0,
-            "initialDt": 0.001,
+            "initialTimeStep": 0.001,
             "adaptive": {
               "enabled": true,
               "safetyFactor": 0.9,
-              "minDt": 1e-6,
-              "maxDt": 0.1
+              "minimumTimeStep": 1e-6,
+              "maximumTimeStep": 0.1
             }
           },
           "output": {
@@ -100,13 +100,13 @@ struct ConfigurationPriorityTests {
 
     @Test("CLI overrides JSON (highest priority)")
     func testCLIOverridesJSON() async throws {
-        // Setup: JSON has nCells = 100
-        let configPath = try createTestConfig(nCells: 100)
+        // Setup: JSON has cellCount = 100
+        let configPath = try createTestConfig(cellCount: 100)
         defer { removeTestItemIfExists(atPath: configPath) }
 
-        // CLI override: nCells = 200
+        // CLI override: cellCount = 200
         let cliOverrides = [
-            "runtime.static.mesh.nCells": "200"
+            "runtime.static.mesh.cellCount": "200"
         ]
 
         let reader = try await GotenxConfigReader.create(
@@ -117,56 +117,51 @@ struct ConfigurationPriorityTests {
         let config = try await reader.fetchConfiguration()
 
         // Verify: CLI wins (200, not JSON's 100)
-        #expect(config.runtime.static.mesh.nCells == 200)
+        #expect(config.runtime.static.mesh.cellCount == 200)
     }
 
     @Test("Environment overrides JSON but not CLI")
     func testEnvironmentOverridesJSON() async throws {
-        // Setup: JSON has nCells = 100
-        let configPath = try createTestConfig(nCells: 100)
+        // Setup: JSON has cellCount = 100
+        let configPath = try createTestConfig(cellCount: 100)
         defer { removeTestItemIfExists(atPath: configPath) }
-
-        // Environment: nCells = 150
-        setenv("runtime.static.mesh.nCells", "150", 1)
-        defer { unsetenv("runtime.static.mesh.nCells") }
 
         // Case 1: No CLI override - Environment should win
         let reader1 = try await GotenxConfigReader.create(
             jsonPath: configPath,
-            cliOverrides: [:]
+            cliOverrides: [:],
+            environment: [
+                "GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT": "150"
+            ]
         )
         let config1 = try await reader1.fetchConfiguration()
 
-        // Note: EnvironmentVariablesProvider may use different naming convention
-        // This test documents actual behavior
-        // If env override doesn't work, it should use JSON's 100
-        let envWorked = config1.runtime.static.mesh.nCells == 150
-        let jsonUsed = config1.runtime.static.mesh.nCells == 100
-
-        // Either environment worked or JSON was used (both are valid depending on provider)
-        #expect(envWorked || jsonUsed)
+        #expect(config1.runtime.static.mesh.cellCount == 150)
 
         // Case 2: CLI override present - CLI should win over environment
         let cliOverrides = [
-            "runtime.static.mesh.nCells": "200"
+            "runtime.static.mesh.cellCount": "200"
         ]
         let reader2 = try await GotenxConfigReader.create(
             jsonPath: configPath,
-            cliOverrides: cliOverrides
+            cliOverrides: cliOverrides,
+            environment: [
+                "GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT": "150"
+            ]
         )
         let config2 = try await reader2.fetchConfiguration()
 
         // Verify: CLI wins (200, not environment's 150)
-        #expect(config2.runtime.static.mesh.nCells == 200)
+        #expect(config2.runtime.static.mesh.cellCount == 200)
     }
 
     @Test("Multiple CLI overrides all apply")
     func testMultipleCLIOverrides() async throws {
-        let configPath = try createTestConfig(nCells: 100)
+        let configPath = try createTestConfig(cellCount: 100)
         defer { removeTestItemIfExists(atPath: configPath) }
 
         let cliOverrides = [
-            "runtime.static.mesh.nCells": "250",
+            "runtime.static.mesh.cellCount": "250",
             "runtime.static.mesh.majorRadius": "7.5",
             "runtime.static.mesh.minorRadius": "2.5",
             "time.end": "5.0"
@@ -180,7 +175,7 @@ struct ConfigurationPriorityTests {
         let config = try await reader.fetchConfiguration()
 
         // Verify all CLI overrides applied
-        #expect(config.runtime.static.mesh.nCells == 250)
+        #expect(config.runtime.static.mesh.cellCount == 250)
         #expect(config.runtime.static.mesh.majorRadius == 7.5)
         #expect(config.runtime.static.mesh.minorRadius == 2.5)
         #expect(config.time.end == 5.0)
@@ -188,7 +183,7 @@ struct ConfigurationPriorityTests {
 
     @Test("JSON values used when no overrides present")
     func testJSONUsedWithoutOverrides() async throws {
-        let configPath = try createTestConfig(nCells: 175)
+        let configPath = try createTestConfig(cellCount: 175)
         defer { removeTestItemIfExists(atPath: configPath) }
 
         let reader = try await GotenxConfigReader.create(
@@ -199,7 +194,7 @@ struct ConfigurationPriorityTests {
         let config = try await reader.fetchConfiguration()
 
         // Verify JSON value used
-        #expect(config.runtime.static.mesh.nCells == 175)
+        #expect(config.runtime.static.mesh.cellCount == 175)
     }
 
     // MARK: - Type Conversion Tests
@@ -211,7 +206,7 @@ struct ConfigurationPriorityTests {
 
         let cliOverrides = [
             "runtime.static.mesh.majorRadius": "6.23456789",  // High precision
-            "time.initialDt": "0.00123456789"
+            "time.initialTimeStep": "0.00123456789"
         ]
 
         let reader = try await GotenxConfigReader.create(
@@ -223,7 +218,7 @@ struct ConfigurationPriorityTests {
 
         // Verify conversions happened (Float has ~7 significant digits)
         #expect(abs(config.runtime.static.mesh.majorRadius - 6.234568) < 0.0001)
-        #expect(abs(config.time.initialDt - 0.001234568) < 0.0000001)
+        #expect(abs(config.time.initialTimeStep - 0.001234568) < 0.0000001)
     }
 
     // MARK: - Optional Handling Tests
@@ -316,12 +311,12 @@ struct ConfigurationPriorityTests {
 
     // MARK: - Regression Test for Provider Order Bug
 
-    @Test("REGRESSION: Provider array order is REVERSE priority")
+    @Test("REGRESSION: Provider array order keeps CLI first")
     func testProviderOrderRegression() async throws {
         // This test explicitly verifies the fix for the critical bug
         // where providers were added in the wrong order
 
-        let configPath = try createTestConfig(nCells: 100)
+        let configPath = try createTestConfig(cellCount: 100)
         defer { removeTestItemIfExists(atPath: configPath) }
 
         // Simulate the bug scenario:
@@ -330,7 +325,7 @@ struct ConfigurationPriorityTests {
         // BUG behavior: JSON wins (100) ❌
 
         let cliOverrides = [
-            "runtime.static.mesh.nCells": "200"
+            "runtime.static.mesh.cellCount": "200"
         ]
 
         let reader = try await GotenxConfigReader.create(
@@ -342,12 +337,12 @@ struct ConfigurationPriorityTests {
 
         // If this fails, the provider order bug has regressed!
         #expect(
-            config.runtime.static.mesh.nCells == 200,
+            config.runtime.static.mesh.cellCount == 200,
             "CRITICAL REGRESSION: CLI override did not take priority over JSON. Provider order is wrong!"
         )
 
         // Additionally verify it's NOT using JSON value
-        #expect(config.runtime.static.mesh.nCells != 100)
+        #expect(config.runtime.static.mesh.cellCount != 100)
     }
 
     // MARK: - Default Values Tests
@@ -392,13 +387,12 @@ struct ConfigurationPriorityTests {
         let config = try await reader.fetchConfiguration()
 
         // Verify all defaults are sensible
-        #expect(config.runtime.static.mesh.nCells == 100)
+        #expect(config.runtime.static.mesh.cellCount == 100)
         #expect(config.runtime.static.mesh.majorRadius == 3.0)
         #expect(config.runtime.static.mesh.minorRadius == 1.0)
         #expect(config.time.start == 0.0)
         #expect(config.time.end == 1.0)
-        #expect(config.time.initialDt == 0.001)
+        #expect(config.time.initialTimeStep == 0.001)
         #expect(config.output.directory == "/tmp/gotenx_results")
     }
 }
-

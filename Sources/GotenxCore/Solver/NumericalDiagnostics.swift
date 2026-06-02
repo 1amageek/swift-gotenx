@@ -21,13 +21,13 @@ public struct NumericalDiagnostics: Sendable, Codable, Equatable {
     // MARK: - Convergence Metrics
 
     /// L2 norm of residual ||R|| at current timestep
-    public let residual_norm: Float
+    public let residualNorm: Float
 
     /// Number of Newton-Raphson iterations taken
-    public let newton_iterations: Int
+    public let newtonIterations: Int
 
     /// Number of linear solver iterations
-    public let linear_iterations: Int
+    public let linearIterations: Int
 
     /// Convergence flag (true if residual < tolerance)
     public let converged: Bool
@@ -37,60 +37,60 @@ public struct NumericalDiagnostics: Sendable, Codable, Equatable {
     /// Particle conservation drift: (N - N_0) / N_0
     ///
     /// **Acceptance Criteria**: |drift| < 0.01 (1%)
-    public let particle_drift: Float
+    public let particleDrift: Float
 
     /// Energy conservation drift: (W - W_0) / W_0
     ///
     /// **Acceptance Criteria**: |drift| < 0.01 (1%)
-    public let energy_drift: Float
+    public let energyDrift: Float
 
     /// Current conservation drift: (I - I_0) / I_0
     ///
     /// **Acceptance Criteria**: |drift| < 0.01 (1%)
-    public let current_drift: Float
+    public let currentDrift: Float
 
     // MARK: - Performance Metrics
 
     /// Wall clock time for this timestep [s]
-    public let wall_time: Float
+    public let wallTime: Float
 
     /// Number of residual function evaluations
-    public let eval_count: Int
+    public let evaluationCount: Int
 
     // MARK: - Timestep Control
 
     /// Adaptive timestep size [s]
-    public let dt: Float
+    public let timeStep: Float
 
     /// CFL number (Courant-Friedrichs-Lewy condition)
-    public let cfl_number: Float
+    public let cflNumber: Float
 
     // MARK: - Initialization
 
     public init(
-        residual_norm: Float,
-        newton_iterations: Int,
-        linear_iterations: Int,
+        residualNorm: Float,
+        newtonIterations: Int,
+        linearIterations: Int,
         converged: Bool,
-        particle_drift: Float,
-        energy_drift: Float,
-        current_drift: Float,
-        wall_time: Float,
-        eval_count: Int,
-        dt: Float,
-        cfl_number: Float
+        particleDrift: Float,
+        energyDrift: Float,
+        currentDrift: Float,
+        wallTime: Float,
+        evaluationCount: Int,
+        timeStep: Float,
+        cflNumber: Float
     ) {
-        self.residual_norm = residual_norm
-        self.newton_iterations = newton_iterations
-        self.linear_iterations = linear_iterations
+        self.residualNorm = residualNorm
+        self.newtonIterations = newtonIterations
+        self.linearIterations = linearIterations
         self.converged = converged
-        self.particle_drift = particle_drift
-        self.energy_drift = energy_drift
-        self.current_drift = current_drift
-        self.wall_time = wall_time
-        self.eval_count = eval_count
-        self.dt = dt
-        self.cfl_number = cfl_number
+        self.particleDrift = particleDrift
+        self.energyDrift = energyDrift
+        self.currentDrift = currentDrift
+        self.wallTime = wallTime
+        self.evaluationCount = evaluationCount
+        self.timeStep = timeStep
+        self.cflNumber = cflNumber
     }
 }
 
@@ -102,17 +102,17 @@ extension NumericalDiagnostics {
     /// **Rationale**: Allows compilation and testing without breaking existing code.
     /// Actual diagnostics will be captured in Phase 2.
     public static let `default` = NumericalDiagnostics(
-        residual_norm: 0,
-        newton_iterations: 0,
-        linear_iterations: 0,
+        residualNorm: 0,
+        newtonIterations: 0,
+        linearIterations: 0,
         converged: true,  // Assume convergence by default
-        particle_drift: 0,
-        energy_drift: 0,
-        current_drift: 0,
-        wall_time: 0,
-        eval_count: 0,
-        dt: 1e-4,  // Default timestep
-        cfl_number: 0
+        particleDrift: 0,
+        energyDrift: 0,
+        currentDrift: 0,
+        wallTime: 0,
+        evaluationCount: 0,
+        timeStep: 1e-4,  // Default timestep
+        cflNumber: 0
     )
 }
 
@@ -125,9 +125,9 @@ extension NumericalDiagnostics {
         guard converged else { return false }
 
         // Conservation checks (within 1% tolerance)
-        guard abs(particle_drift) < 0.01 else { return false }
-        guard abs(energy_drift) < 0.01 else { return false }
-        guard abs(current_drift) < 0.01 else { return false }
+        guard abs(particleDrift) < 0.01 else { return false }
+        guard abs(energyDrift) < 0.01 else { return false }
+        guard abs(currentDrift) < 0.01 else { return false }
 
         return true
     }
@@ -136,14 +136,14 @@ extension NumericalDiagnostics {
     public var warningLevel: Int {
         if !converged { return 2 }
 
-        let maxDrift = max(
-            abs(particle_drift),
-            abs(energy_drift),
-            abs(current_drift)
+        let maximumDrift = max(
+            abs(particleDrift),
+            abs(energyDrift),
+            abs(currentDrift)
         )
 
-        if maxDrift > 0.05 { return 2 }  // > 5% drift
-        if maxDrift > 0.01 { return 1 }  // > 1% drift
+        if maximumDrift > 0.05 { return 2 }  // > 5% drift
+        if maximumDrift > 0.01 { return 1 }  // > 1% drift
         return 0  // Healthy
     }
 }

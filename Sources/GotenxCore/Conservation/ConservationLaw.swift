@@ -69,8 +69,8 @@ public protocol ConservationLaw: Sendable {
     /// ## Example: Particle Conservation
     ///
     /// ```swift
-    /// let ne = profiles.electronDensity.value      // [nCells]
-    /// let volumes = geometry.cellVolumes.value     // [nCells]
+    /// let ne = profiles.electronDensity.value      // [cellCount]
+    /// let volumes = geometry.cellVolumes.value     // [cellCount]
     /// let totalParticles = (ne * volumes).sum()    // GPU sum reduction
     /// return totalParticles.item(Float.self)       // Extract scalar
     /// ```

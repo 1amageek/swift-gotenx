@@ -39,13 +39,13 @@ public struct StaticConfig: Codable, Sendable, Equatable, Hashable {
 // MARK: - Conversion to Runtime Parameters
 
 extension StaticConfig {
-    /// Convert to StaticRuntimeParams for simulation execution
+    /// Convert to StaticRuntimeParameters for simulation execution
     ///
     /// This adapter bridges the configuration system with the runtime execution.
     /// Used in Phase 4 to initialize SimulationOrchestrator.
     ///
     /// - Throws: `ConfigurationError.invalidValue` if solver type is invalid
-    public func toRuntimeParams() throws -> StaticRuntimeParams {
+    public func runtimeParameters() throws -> StaticRuntimeParameters {
         let normalizedSolverType: String
         switch solver.type {
         case "newton":
@@ -62,16 +62,16 @@ extension StaticConfig {
             )
         }
 
-        return StaticRuntimeParams(
+        return StaticRuntimeParameters(
             mesh: mesh,
             evolveIonHeat: evolution.ionHeat,
             evolveElectronHeat: evolution.electronHeat,
-            evolveDensity: evolution.density,
-            evolveCurrent: evolution.current,
+            evolveElectronDensity: evolution.electronDensity,
+            evolvePoloidalFlux: evolution.poloidalFlux,
             solverType: solverType,
             theta: scheme.theta,
-            solverTolerance: solver.tolerance ?? 1e-6,  // Fallback for legacy field
-            solverMaxIterations: solver.maxIterations
+            solverTolerance: solver.tolerance ?? 1e-6,
+            solverMaximumIterations: solver.maximumIterations
         )
     }
 }

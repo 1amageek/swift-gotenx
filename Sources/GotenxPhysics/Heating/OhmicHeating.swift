@@ -11,7 +11,7 @@ import GotenxCore
 /// for trapped particles.
 ///
 /// Spitzer resistivity:
-/// η_Spitzer = 5.2 × 10⁻⁵ * Z_eff * ln(Λ) / T_e^(3/2)  [Ω·m]
+/// η_Spitzer = 5.2 × 10⁻⁵ * effectiveCharge * ln(Λ) / T_e^(3/2)  [Ω·m]
 ///
 /// Neoclassical correction:
 /// η_neo = η_Spitzer * (1 + ε^(3/2))
@@ -19,10 +19,10 @@ import GotenxCore
 public struct OhmicHeating: Sendable {
 
     /// Effective charge
-    public let Zeff: Float
+    public let effectiveCharge: Float
 
     /// Coulomb logarithm
-    public let lnLambda: Float
+    public let coulombLogarithm: Float
 
     /// Apply neoclassical correction for trapped particles
     public let useNeoclassical: Bool
@@ -33,18 +33,18 @@ public struct OhmicHeating: Sendable {
     /// Create Ohmic heating model
     ///
     /// - Parameters:
-    ///   - Zeff: Effective charge (default: 1.5)
-    ///   - lnLambda: Coulomb logarithm (default: 17.0)
+    ///   - effectiveCharge: Effective charge (default: 1.5)
+    ///   - coulombLogarithm: Coulomb logarithm (default: 17.0)
     ///   - useNeoclassical: Apply neoclassical correction (default: true)
     ///   - thresholds: Physical thresholds (default: .default)
     public init(
-        Zeff: Float = 1.5,
-        lnLambda: Float = 17.0,
+        effectiveCharge: Float = 1.5,
+        coulombLogarithm: Float = 17.0,
         useNeoclassical: Bool = true,
         thresholds: PhysicalThresholds = .default
     ) {
-        self.Zeff = Zeff
-        self.lnLambda = lnLambda
+        self.effectiveCharge = effectiveCharge
+        self.coulombLogarithm = coulombLogarithm
         self.useNeoclassical = useNeoclassical
         self.thresholds = thresholds
     }
@@ -52,28 +52,28 @@ public struct OhmicHeating: Sendable {
     /// Compute Ohmic heating power density
     ///
     /// - Parameters:
-    ///   - Te: Electron temperature [eV], shape [nCells]
-    ///   - jParallel: Parallel current density [A/m²], shape [nCells]
+    ///   - electronTemperature: Electron temperature [eV], shape [cellCount]
+    ///   - jParallel: Parallel current density [A/m²], shape [cellCount]
     ///   - geometry: Tokamak geometry
-    /// - Returns: Heating power [W/m³], shape [nCells]
+    /// - Returns: Heating power [W/m³], shape [cellCount]
     /// - Throws: PhysicsError if inputs are invalid
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
     public func compute(
-        Te: MLXArray,
+        electronTemperature: MLXArray,
         jParallel: MLXArray,
         geometry: Geometry
     ) throws -> MLXArray {
 
         // Validate inputs (CRITICAL FIX #3)
-        try PhysicsValidation.validateTemperature(Te, name: "Te")
+        try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
         try PhysicsValidation.validateFinite(jParallel, name: "jParallel")
-        try PhysicsValidation.validateShapes([Te, jParallel], names: ["Te", "jParallel"])
+        try PhysicsValidation.validateShapes([electronTemperature, jParallel], names: ["electronTemperature", "jParallel"])
 
         // Spitzer resistivity [Ω·m]
-        // η_Spitzer = 5.2 × 10⁻⁵ * Z_eff * ln(Λ) / T_e^(3/2)
-        let eta_Spitzer = PhysicsConstants.spitzerPrefactor * Zeff * lnLambda / pow(Te, 1.5)
+        // η_Spitzer = 5.2 × 10⁻⁵ * effectiveCharge * ln(Λ) / T_e^(3/2)
+        let eta_Spitzer = PhysicsConstants.spitzerPrefactor * effectiveCharge * coulombLogarithm / pow(electronTemperature, 1.5)
 
         var eta = eta_Spitzer
 
@@ -81,7 +81,7 @@ public struct OhmicHeating: Sendable {
             // Neoclassical correction for trapped particles
             // Inverse aspect ratio: ε = r/R₀
             let geomFactors = GeometricFactors.from(geometry: geometry)
-            let epsilon = geomFactors.rCell.value / geometry.majorRadius
+            let epsilon = geomFactors.cellRadii.value / geometry.majorRadius
 
             // Trapped particle correction factor: f_trap ≈ 1 + ε^(3/2)
             let f_trap = 1.0 + pow(epsilon, 1.5)
@@ -99,42 +99,42 @@ public struct OhmicHeating: Sendable {
     /// Compute Spitzer resistivity (without neoclassical correction)
     ///
     /// - Parameters:
-    ///   - Te: Electron temperature [eV]
-    ///   - Zeff: Effective charge (optional override)
-    ///   - lnLambda: Coulomb logarithm (optional override)
+    ///   - electronTemperature: Electron temperature [eV]
+    ///   - effectiveCharge: Effective charge (optional override)
+    ///   - coulombLogarithm: Coulomb logarithm (optional override)
     /// - Returns: Resistivity [Ω·m]
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
     public func computeSpitzerResistivity(
-        Te: MLXArray,
-        Zeff: Float? = nil,
-        lnLambda: Float? = nil
+        electronTemperature: MLXArray,
+        effectiveCharge: Float? = nil,
+        coulombLogarithm: Float? = nil
     ) -> MLXArray {
-        let Z = Zeff ?? self.Zeff
-        let ln = lnLambda ?? self.lnLambda
+        let Z = effectiveCharge ?? self.effectiveCharge
+        let ln = coulombLogarithm ?? self.coulombLogarithm
 
-        return PhysicsConstants.spitzerPrefactor * Z * ln / pow(Te, 1.5)
+        return PhysicsConstants.spitzerPrefactor * Z * ln / pow(electronTemperature, 1.5)
     }
 
     /// Compute neoclassical resistivity
     ///
     /// - Parameters:
-    ///   - Te: Electron temperature [eV]
+    ///   - electronTemperature: Electron temperature [eV]
     ///   - geometry: Tokamak geometry
     /// - Returns: Resistivity [Ω·m]
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
     public func computeNeoclassicalResistivity(
-        Te: MLXArray,
+        electronTemperature: MLXArray,
         geometry: Geometry
     ) -> MLXArray {
-        let eta_Spitzer = computeSpitzerResistivity(Te: Te)
+        let eta_Spitzer = computeSpitzerResistivity(electronTemperature: electronTemperature)
 
         // Trapped particle correction
         let geomFactors = GeometricFactors.from(geometry: geometry)
-        let epsilon = geomFactors.rCell.value / geometry.majorRadius
+        let epsilon = geomFactors.cellRadii.value / geometry.majorRadius
         let f_trap = 1.0 + pow(epsilon, 1.5)
 
         return eta_Spitzer * f_trap
@@ -166,7 +166,7 @@ public struct OhmicHeating: Sendable {
         }
 
         let Q_ohm_watts = try compute(
-            Te: profiles.electronTemperature.value,
+            electronTemperature: profiles.electronTemperature.value,
             jParallel: jParallel,
             geometry: geometry
         )
@@ -237,7 +237,7 @@ extension OhmicHeating {
         }
 
         let Q_ohm_watts = try compute(
-            Te: profiles.electronTemperature.value,
+            electronTemperature: profiles.electronTemperature.value,
             jParallel: jParallel,
             geometry: geometry
         )
@@ -298,7 +298,7 @@ extension OhmicHeating {
         }
 
         let qOhmWatts = computeForSolver(
-            Te: profiles.electronTemperature.value,
+            electronTemperature: profiles.electronTemperature.value,
             jParallel: jParallel,
             geometry: geometry
         )
@@ -340,7 +340,7 @@ extension OhmicHeating {
     ) throws -> MLXArray {
 
         let psi = profiles.poloidalFlux.value
-        let nCells = psi.shape[0]
+        let cellCount = psi.shape[0]
 
         // Check if we have meaningful flux data
         let psiRange = MLX.max(psi).item(Float.self) - MLX.min(psi).item(Float.self)
@@ -352,32 +352,32 @@ extension OhmicHeating {
         guard relativeVariation > thresholds.fluxVariationThreshold else {
             // Poloidal flux variation is negligible → no meaningful current
             // This happens in startup or when psi solver hasn't run yet
-            return MLXArray.zeros([nCells])
+            return MLXArray.zeros([cellCount])
         }
 
         let geomFactors = GeometricFactors.from(geometry: geometry)
-        let rCell = geomFactors.rCell.value
+        let cellRadii = geomFactors.cellRadii.value
 
         // Compute radial derivative of psi using central differences
         // ∂ψ/∂r ≈ (ψ[i+1] - ψ[i-1]) / (r[i+1] - r[i-1])
 
-        guard nCells >= 3 else {
+        guard cellCount >= 3 else {
             // Not enough points for gradient
-            return MLXArray.zeros([nCells])
+            return MLXArray.zeros([cellCount])
         }
 
         // Interior points: central difference
-        let dr_interior = rCell[2..<nCells] - rCell[0..<(nCells-2)]
-        let dpsi_interior = psi[2..<nCells] - psi[0..<(nCells-2)]
+        let dr_interior = cellRadii[2..<cellCount] - cellRadii[0..<(cellCount-2)]
+        let dpsi_interior = psi[2..<cellCount] - psi[0..<(cellCount-2)]
         let grad_psi_interior = dpsi_interior / (dr_interior + 1e-10)
 
         // Boundaries: forward/backward difference
-        let dr_left = rCell[1] - rCell[0]
+        let dr_left = cellRadii[1] - cellRadii[0]
         let dpsi_left = psi[1] - psi[0]
         let grad_psi_left = dpsi_left / (dr_left + 1e-10)
 
-        let dr_right = rCell[nCells-1] - rCell[nCells-2]
-        let dpsi_right = psi[nCells-1] - psi[nCells-2]
+        let dr_right = cellRadii[cellCount-1] - cellRadii[cellCount-2]
+        let dpsi_right = psi[cellCount-1] - psi[cellCount-2]
         let grad_psi_right = dpsi_right / (dr_right + 1e-10)
 
         // Concatenate
@@ -396,16 +396,16 @@ extension OhmicHeating {
     }
 
     private func computeForSolver(
-        Te: MLXArray,
+        electronTemperature: MLXArray,
         jParallel: MLXArray,
         geometry: Geometry
     ) -> MLXArray {
-        let etaSpitzer = PhysicsConstants.spitzerPrefactor * Zeff * lnLambda / pow(Te, 1.5)
+        let etaSpitzer = PhysicsConstants.spitzerPrefactor * effectiveCharge * coulombLogarithm / pow(electronTemperature, 1.5)
 
         let eta: MLXArray
         if useNeoclassical {
             let geomFactors = GeometricFactors.from(geometry: geometry)
-            let epsilon = geomFactors.rCell.value / geometry.majorRadius
+            let epsilon = geomFactors.cellRadii.value / geometry.majorRadius
             eta = etaSpitzer * (1.0 + pow(epsilon, 1.5))
         } else {
             eta = etaSpitzer
@@ -419,25 +419,25 @@ extension OhmicHeating {
         geometry: Geometry
     ) -> MLXArray {
         let psi = profiles.poloidalFlux.value
-        let nCells = psi.shape[0]
+        let cellCount = psi.shape[0]
 
-        guard nCells >= 3 else {
-            return MLXArray.zeros([nCells])
+        guard cellCount >= 3 else {
+            return MLXArray.zeros([cellCount])
         }
 
         let geomFactors = GeometricFactors.from(geometry: geometry)
-        let rCell = geomFactors.rCell.value
+        let cellRadii = geomFactors.cellRadii.value
 
-        let drInterior = rCell[2..<nCells] - rCell[0..<(nCells - 2)]
-        let dpsiInterior = psi[2..<nCells] - psi[0..<(nCells - 2)]
+        let drInterior = cellRadii[2..<cellCount] - cellRadii[0..<(cellCount - 2)]
+        let dpsiInterior = psi[2..<cellCount] - psi[0..<(cellCount - 2)]
         let gradPsiInterior = dpsiInterior / (drInterior + 1e-10)
 
-        let drLeft = rCell[1] - rCell[0]
+        let drLeft = cellRadii[1] - cellRadii[0]
         let dpsiLeft = psi[1] - psi[0]
         let gradPsiLeft = dpsiLeft / (drLeft + 1e-10)
 
-        let drRight = rCell[nCells - 1] - rCell[nCells - 2]
-        let dpsiRight = psi[nCells - 1] - psi[nCells - 2]
+        let drRight = cellRadii[cellCount - 1] - cellRadii[cellCount - 2]
+        let dpsiRight = psi[cellCount - 1] - psi[cellCount - 2]
         let gradPsiRight = dpsiRight / (drRight + 1e-10)
 
         let gradPsi = concatenated([

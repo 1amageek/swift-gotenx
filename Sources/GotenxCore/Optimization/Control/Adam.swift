@@ -33,7 +33,7 @@ import MLX
 /// ```swift
 /// let optimizer = Adam(
 ///     learningRate: 0.001,
-///     maxIterations: 100
+///     maximumIterations: 100
 /// )
 ///
 /// let result = optimizer.optimize(
@@ -65,7 +65,7 @@ public struct Adam {
     public let epsilon: Float
 
     /// Maximum number of iterations
-    public let maxIterations: Int
+    public let maximumIterations: Int
 
     /// Convergence tolerance
     ///
@@ -82,7 +82,7 @@ public struct Adam {
         beta1: Float = 0.9,
         beta2: Float = 0.999,
         epsilon: Float = 1e-8,
-        maxIterations: Int = 100,
+        maximumIterations: Int = 100,
         tolerance: Float = 1e-4,
         logInterval: Int = 10
     ) {
@@ -90,7 +90,7 @@ public struct Adam {
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
-        self.maxIterations = maxIterations
+        self.maximumIterations = maximumIterations
         self.tolerance = tolerance
         self.logInterval = logInterval
     }
@@ -110,26 +110,26 @@ public struct Adam {
         initialParams: ActuatorTimeSeries,
         constraints: ActuatorConstraints
     ) -> OptimizationResult {
-        var params = initialParams
-        var paramsArray = params.toMLXArray()
+        var parameters = initialParams
+        var paramsArray = parameters.asMLXArray()
 
         // Initialize moments
         var m = MLXArray.zeros(like: paramsArray)  // First moment
         var v = MLXArray.zeros(like: paramsArray)  // Second moment
 
         var bestLoss = Float.infinity
-        var bestParams = params
+        var bestParams = parameters
         var lossHistory: [Float] = []
 
         print("Adam Optimizer starting...")
         print("  Learning rate: \(learningRate)")
-        print("  Max iterations: \(maxIterations)")
+        print("  Max iterations: \(maximumIterations)")
         print("  Tolerance: \(tolerance)")
 
-        for t in 1...maxIterations {
+        for t in 1...maximumIterations {
             // Compute gradient
-            let gradient = problem.gradient(params)
-            let gradArray = gradient.toMLXArray()
+            let gradient = problem.gradient(parameters)
+            let gradArray = gradient.asMLXArray()
 
             // Update biased first moment estimate
             // m_t = β₁ m_{t-1} + (1-β₁) g_t
@@ -154,23 +154,23 @@ public struct Adam {
             paramsArray = applyConstraintsMLX(
                 paramsArray,
                 constraints: constraints,
-                nSteps: params.nSteps
+                stepCount: parameters.stepCount
             )
 
-            // Evaluate params array
+            // Evaluate parameters array
             eval(paramsArray)
 
             // Convert back to ActuatorTimeSeries (gradient-preserving)
-            params = ActuatorTimeSeries.fromMLXArray(paramsArray, nSteps: params.nSteps)
+            parameters = ActuatorTimeSeries(mlxArray: paramsArray, stepCount: parameters.stepCount)
 
             // Evaluate loss
-            let loss = problem.objective(params)
+            let loss = problem.objective(parameters)
             lossHistory.append(loss)
 
             // Update best
             if loss < bestLoss {
                 bestLoss = loss
-                bestParams = params
+                bestParams = parameters
             }
 
             // Log progress
@@ -200,7 +200,7 @@ public struct Adam {
         return OptimizationResult(
             actuators: bestParams,
             finalLoss: bestLoss,
-            iterations: maxIterations,
+            iterations: maximumIterations,
             converged: false,
             lossHistory: lossHistory
         )
@@ -214,35 +214,35 @@ public struct Adam {
     private func applyConstraintsMLX(
         _ array: MLXArray,
         constraints: ActuatorConstraints,
-        nSteps: Int
+        stepCount: Int
     ) -> MLXArray {
         // Create constraint bounds as MLXArrays
         let nActuators = 4
-        var minBounds = [Float](repeating: 0, count: nSteps * nActuators)
-        var maxBounds = [Float](repeating: 0, count: nSteps * nActuators)
+        var minBounds = [Float](repeating: 0, count: stepCount * nActuators)
+        var maxBounds = [Float](repeating: 0, count: stepCount * nActuators)
 
-        // P_ECRH bounds
-        for i in 0..<nSteps {
-            minBounds[i] = constraints.minECRH
-            maxBounds[i] = constraints.maxECRH
+        // ecrhPower bounds
+        for i in 0..<stepCount {
+            minBounds[i] = constraints.minimumECRHPower
+            maxBounds[i] = constraints.maximumECRHPower
         }
 
-        // P_ICRH bounds
-        for i in nSteps..<(2*nSteps) {
-            minBounds[i] = constraints.minICRH
-            maxBounds[i] = constraints.maxICRH
+        // icrhPower bounds
+        for i in stepCount..<(2*stepCount) {
+            minBounds[i] = constraints.minimumICRHPower
+            maxBounds[i] = constraints.maximumICRHPower
         }
 
-        // gas_puff bounds
-        for i in (2*nSteps)..<(3*nSteps) {
-            minBounds[i] = constraints.minGasPuff
-            maxBounds[i] = constraints.maxGasPuff
+        // gasPuffRate bounds
+        for i in (2*stepCount)..<(3*stepCount) {
+            minBounds[i] = constraints.minimumGasPuffRate
+            maxBounds[i] = constraints.maximumGasPuffRate
         }
 
-        // I_plasma bounds
-        for i in (3*nSteps)..<(4*nSteps) {
-            minBounds[i] = constraints.minCurrent
-            maxBounds[i] = constraints.maxCurrent
+        // plasmaCurrent bounds
+        for i in (3*stepCount)..<(4*stepCount) {
+            minBounds[i] = constraints.minimumCurrent
+            maxBounds[i] = constraints.maximumCurrent
         }
 
         let minArray = MLXArray(minBounds)
@@ -260,10 +260,10 @@ public struct Adam {
 /// Implement this protocol to define custom optimization objectives
 public protocol OptimizationProblem {
     /// Objective function (to minimize)
-    func objective(_ params: ActuatorTimeSeries) -> Float
+    func objective(_ parameters: ActuatorTimeSeries) -> Float
 
     /// Gradient of objective w.r.t. parameters
-    func gradient(_ params: ActuatorTimeSeries) -> ActuatorTimeSeries
+    func gradient(_ parameters: ActuatorTimeSeries) -> ActuatorTimeSeries
 }
 
 // MARK: - Optimization Result

@@ -13,7 +13,7 @@ struct UnitConversionTests {
         let config = BoundaryConfig(
             ionTemperature: 1000.0,      // 1000 eV
             electronTemperature: 2000.0,  // 2000 eV
-            density: 1e19,                // 10^19 m^-3
+            electronDensity: 1e19,                // 10^19 m^-3
             type: .dirichlet
         )
 
@@ -39,7 +39,7 @@ struct UnitConversionTests {
         let config = BoundaryConfig(
             ionTemperature: 100.0,
             electronTemperature: 100.0,
-            density: 1e19,  // 10^19 m^-3
+            electronDensity: 1e19,  // 10^19 m^-3
             type: .dirichlet
         )
 
@@ -58,7 +58,7 @@ struct UnitConversionTests {
         let config = BoundaryConfig(
             ionTemperature: 100.0,
             electronTemperature: 100.0,
-            density: 5e20,  // 5 × 10^20 m^-3
+            electronDensity: 5e20,  // 5 × 10^20 m^-3
             type: .dirichlet
         )
 
@@ -77,7 +77,7 @@ struct UnitConversionTests {
         let config = BoundaryConfig(
             ionTemperature: 1000.0,
             electronTemperature: 2000.0,
-            density: 1e19,
+            electronDensity: 1e19,
             type: .neumann  // Gradient boundary
         )
 
@@ -96,12 +96,12 @@ struct UnitConversionTests {
         let boundaries = BoundaryConfig(
             ionTemperature: 100.0,      // eV
             electronTemperature: 100.0,  // eV
-            density: 1e19               // m^-3
+            electronDensity: 1e19               // m^-3
         )
 
         let dynamicConfig = DynamicConfig(
             boundaries: boundaries,
-            transport: TransportConfig(modelType: .constant),
+            transport: .defaultConstant,
             initialProfile: .realistic  // Use 10× temperature ratio
         )
 
@@ -123,12 +123,12 @@ struct UnitConversionTests {
         let boundaries = BoundaryConfig(
             ionTemperature: 100.0,
             electronTemperature: 100.0,
-            density: 1e19  // m^-3
+            electronDensity: 1e19  // m^-3
         )
 
         let dynamicConfig = DynamicConfig(
             boundaries: boundaries,
-            transport: TransportConfig(modelType: .constant),
+            transport: .defaultConstant,
             initialProfile: .realistic  // Use 3× density ratio
         )
 
@@ -145,20 +145,20 @@ struct UnitConversionTests {
         }
     }
 
-    @Test("DynamicRuntimeParams uses eV, m^-3 (no conversion)")
+    @Test("DynamicRuntimeParameters uses eV, m^-3 (no conversion)")
     func testDynamicRuntimeParamsUnits() {
         let boundaries = BoundaryConfig(
             ionTemperature: 1000.0,  // 1000 eV
             electronTemperature: 2000.0,  // 2000 eV
-            density: 1e20  // 1e20 m^-3
+            electronDensity: 1e20  // 1e20 m^-3
         )
 
         let dynamicConfig = DynamicConfig(
             boundaries: boundaries,
-            transport: TransportConfig(modelType: .constant)
+            transport: .defaultConstant
         )
 
-        let runtimeParams = dynamicConfig.toDynamicRuntimeParams(dt: 0.01)
+        let runtimeParams = dynamicConfig.dynamicRuntimeParameters(timeStep: 0.01)
 
         // Verify boundary conditions use eV and m^-3 (no conversion)
         if case .value(let ti) = runtimeParams.boundaryConditions.ionTemperature.right {

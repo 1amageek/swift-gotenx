@@ -88,7 +88,7 @@ public struct DensityTransitionModel: TransportModel {
     public func computeCoefficients(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: TransportParameters
+        parameters: TransportParameters
     ) -> TransportCoefficients {
         let n_e = profiles.electronDensity.value
 
@@ -101,7 +101,7 @@ public struct DensityTransitionModel: TransportModel {
         let chi_itg = itgModel.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // Compute RI regime coefficients (high density)
@@ -109,7 +109,7 @@ public struct DensityTransitionModel: TransportModel {
         let chi_ri = riModel.computeCoefficients(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // Smooth blend: χ_eff = (1 - α) × χ_ITG + α × χ_RI
@@ -136,8 +136,8 @@ public struct DensityTransitionModel: TransportModel {
     /// - α = 0.5 at n_e = n_trans (balanced transition)
     /// - α → 1 as n_e → ∞ (pure RI)
     ///
-    /// - Parameter density: Electron density [nCells] in m⁻³
-    /// - Returns: Transition weight α [nCells] ∈ [0, 1]
+    /// - Parameter density: Electron density [cellCount] in m⁻³
+    /// - Returns: Transition weight α [cellCount] ∈ [0, 1]
     private func transitionWeight(density: MLXArray) -> MLXArray {
         // Sigmoid transition centered at n_trans with width Δn
         let delta_n = (density - transitionDensity) / transitionWidth
@@ -154,7 +154,7 @@ public struct DensityTransitionModel: TransportModel {
     /// - Parameters:
     ///   - lowDensity: ITG coefficients (α = 0)
     ///   - highDensity: RI coefficients (α = 1)
-    ///   - alpha: Transition weight [nCells] ∈ [0, 1]
+    ///   - alpha: Transition weight [cellCount] ∈ [0, 1]
     /// - Returns: Blended coefficients
     private func blendCoefficients(
         lowDensity: TransportCoefficients,
@@ -162,26 +162,26 @@ public struct DensityTransitionModel: TransportModel {
         alpha: MLXArray
     ) -> TransportCoefficients {
         // Blend ion heat diffusivity
-        let chiIon_blend = (1.0 - alpha) * lowDensity.chiIon.value
-                         + alpha * highDensity.chiIon.value
+        let blendedIonHeatDiffusivity = (1.0 - alpha) * lowDensity.ionHeatDiffusivity.value
+                                      + alpha * highDensity.ionHeatDiffusivity.value
 
         // Blend electron heat diffusivity
-        let chiElectron_blend = (1.0 - alpha) * lowDensity.chiElectron.value
-                              + alpha * highDensity.chiElectron.value
+        let blendedElectronHeatDiffusivity = (1.0 - alpha) * lowDensity.electronHeatDiffusivity.value
+                                           + alpha * highDensity.electronHeatDiffusivity.value
 
         // Blend particle diffusivity
-        let diffusivity_blend = (1.0 - alpha) * lowDensity.particleDiffusivity.value
-                              + alpha * highDensity.particleDiffusivity.value
+        let blendedParticleDiffusivity = (1.0 - alpha) * lowDensity.particleDiffusivity.value
+                                       + alpha * highDensity.particleDiffusivity.value
 
         // Blend convection velocity
-        let convection_blend = (1.0 - alpha) * lowDensity.convectionVelocity.value
-                             + alpha * highDensity.convectionVelocity.value
+        let blendedConvectionVelocity = (1.0 - alpha) * lowDensity.convectionVelocity.value
+                                      + alpha * highDensity.convectionVelocity.value
 
         return TransportCoefficients(
-            evaluatingChiIon: chiIon_blend,
-            chiElectron: chiElectron_blend,
-            particleDiffusivity: diffusivity_blend,
-            convectionVelocity: convection_blend
+            ionHeatDiffusivity: blendedIonHeatDiffusivity,
+            electronHeatDiffusivity: blendedElectronHeatDiffusivity,
+            particleDiffusivity: blendedParticleDiffusivity,
+            convectionVelocity: blendedConvectionVelocity
         )
     }
 }
@@ -211,7 +211,7 @@ extension DensityTransitionModel {
 
         // RI model
         let riModel = ResistiveInterchangeModel(
-            coefficientRI: riCoefficient,
+            riCoefficient: riCoefficient,
             ionMassNumber: ionMassNumber
         )
 

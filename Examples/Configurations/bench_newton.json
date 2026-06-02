@@ -2,7 +2,7 @@
   "runtime": {
     "static": {
       "mesh": {
-        "nCells": 100,
+        "cellCount": 100,
         "majorRadius": 3.0,
         "minorRadius": 1.0,
         "toroidalField": 2.5,
@@ -11,13 +11,13 @@
       "evolution": {
         "ionTemperature": true,
         "electronTemperature": true,
-        "density": true,
-        "current": false
+        "electronDensity": true,
+        "poloidalFlux": false
       },
       "solver": {
         "type": "newton",
         "tolerance": 1e-6,
-        "maxIterations": 5
+        "maximumIterations": 5
       },
       "scheme": {
         "theta": 1.0,
@@ -28,15 +28,15 @@
       "boundaries": {
         "ionTemperature": 100.0,
         "electronTemperature": 100.0,
-        "density": 1e19,
+        "electronDensity": 1e19,
         "type": "dirichlet"
       },
       "transport": {
         "modelType": "constant",
         "parameters": {
-          "chiIon": 1.0,
-          "chiElectron": 1.0,
-          "D": 0.5
+          "ionHeatDiffusivity": 1.0,
+          "electronHeatDiffusivity": 1.0,
+          "particleDiffusivity": 0.5
         }
       },
       "sources": {
@@ -50,7 +50,7 @@
   "time": {
     "start": 0.0,
     "end": 5e-5,
-    "initialDt": 1e-5
+    "initialTimeStep": 1e-5
   },
   "output": {
     "saveInterval": null,

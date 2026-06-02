@@ -15,7 +15,7 @@ struct GotenxConfigReaderTests {
 
     @Test("Load minimal configuration from JSON")
     func testLoadMinimalConfig() async throws {
-        let configPath = try createTestConfig(nCells: 100)
+        let configPath = try createTestConfig(cellCount: 100)
         defer { removeTestItemIfExists(atPath: configPath) }
 
         let reader = try await GotenxConfigReader.create(
@@ -26,16 +26,16 @@ struct GotenxConfigReaderTests {
         let config = try await reader.fetchConfiguration()
 
         // Verify basic structure
-        #expect(config.runtime.static.mesh.nCells > 0)
+        #expect(config.runtime.static.mesh.cellCount > 0)
         #expect(config.time.end > config.time.start)
-        #expect(config.time.initialDt > 0)
+        #expect(config.time.initialTimeStep > 0)
     }
 
     @Test("Load ITER-like configuration from JSON")
     func testLoadIterLikeConfig() async throws {
         // ITER-like: larger major/minor radius
         let configPath = try createTestConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 6.2,
             minorRadius: 2.0
         )
@@ -57,12 +57,12 @@ struct GotenxConfigReaderTests {
 
     @Test("CLI overrides take precedence over JSON")
     func testCLIOverrides() async throws {
-        let configPath = try createTestConfig(nCells: 100)
+        let configPath = try createTestConfig(cellCount: 100)
         defer { removeTestItemIfExists(atPath: configPath) }
 
         // Override mesh cells
         let cliOverrides = [
-            "runtime.static.mesh.nCells": "200",
+            "runtime.static.mesh.cellCount": "200",
             "time.end": "5.0"
         ]
 
@@ -74,7 +74,7 @@ struct GotenxConfigReaderTests {
         let config = try await reader.fetchConfiguration()
 
         // Verify overrides were applied
-        #expect(config.runtime.static.mesh.nCells == 200)
+        #expect(config.runtime.static.mesh.cellCount == 200)
         #expect(config.time.end == 5.0)
     }
 
@@ -108,27 +108,28 @@ struct GotenxConfigReaderTests {
         let configPath = try createTestConfig()
         defer { removeTestItemIfExists(atPath: configPath) }
 
-        // Set environment variable
-        setenv("GOTENX_MESH_NCELLS", "150", 1)
-        defer { unsetenv("GOTENX_MESH_NCELLS") }
-
         // Case 1: No CLI override - environment wins
         let reader1 = try await GotenxConfigReader.create(
             jsonPath: configPath,
-            cliOverrides: [:]
+            cliOverrides: [:],
+            environment: [
+                "GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT": "150"
+            ]
         )
         let config1 = try await reader1.fetchConfiguration()
-        // Note: swift-configuration EnvironmentVariablesProvider uses different naming
-        // This test documents the behavior, actual value depends on env var format
+        #expect(config1.runtime.static.mesh.cellCount == 150)
 
         // Case 2: CLI override - CLI wins over environment
-        let cliOverrides = ["runtime.static.mesh.nCells": "200"]
+        let cliOverrides = ["runtime.static.mesh.cellCount": "200"]
         let reader2 = try await GotenxConfigReader.create(
             jsonPath: configPath,
-            cliOverrides: cliOverrides
+            cliOverrides: cliOverrides,
+            environment: [
+                "GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT": "150"
+            ]
         )
         let config2 = try await reader2.fetchConfiguration()
-        #expect(config2.runtime.static.mesh.nCells == 200)
+        #expect(config2.runtime.static.mesh.cellCount == 200)
     }
 
     // MARK: - Configuration Validation Tests
@@ -150,7 +151,7 @@ struct GotenxConfigReaderTests {
 
         // Try to set invalid values
         let cliOverrides = [
-            "runtime.static.mesh.nCells": "-100",  // Negative cells
+            "runtime.static.mesh.cellCount": "-100",  // Negative cells
             "time.end": "-1.0"  // Negative time
         ]
 
@@ -165,12 +166,137 @@ struct GotenxConfigReaderTests {
         }
     }
 
+    @Test("Unknown JSON transport parameters throw validation errors")
+    func testUnknownJSONTransportParameter() async throws {
+        let configPath = try createTestConfig()
+        defer { removeTestItemIfExists(atPath: configPath) }
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+        guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var runtime = root["runtime"] as? [String: Any],
+              var dynamic = runtime["dynamic"] as? [String: Any],
+              var transport = dynamic["transport"] as? [String: Any] else {
+            Issue.record("Test fixture must contain runtime.dynamic.transport")
+            return
+        }
+
+        transport["parameters"] = [
+            "ionHeatDiffusivity": 0.01,
+            "electronHeatDiffusivity": 0.01,
+            "obsoleteParameter": 1.0
+        ]
+        dynamic["transport"] = transport
+        runtime["dynamic"] = dynamic
+        root["runtime"] = runtime
+
+        let encoded = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted])
+        try encoded.write(to: URL(fileURLWithPath: configPath))
+
+        let reader = try await GotenxConfigReader.create(
+            jsonPath: configPath,
+            cliOverrides: [:]
+        )
+
+        await #expect(throws: ConfigurationValidationError.self) {
+            _ = try await reader.fetchConfiguration()
+        }
+    }
+
+    @Test("Unknown CLI transport parameters throw validation errors")
+    func testUnknownCLITransportParameter() async throws {
+        let configPath = try createTestConfig()
+        defer { removeTestItemIfExists(atPath: configPath) }
+
+        let reader = try await GotenxConfigReader.create(
+            jsonPath: configPath,
+            cliOverrides: [
+                "runtime.dynamic.transport.parameters.obsoleteParameter": "1.0"
+            ]
+        )
+
+        await #expect(throws: ConfigurationValidationError.self) {
+            _ = try await reader.fetchConfiguration()
+        }
+    }
+
+    @Test("Unknown environment transport parameters throw validation errors")
+    func testUnknownEnvironmentTransportParameter() async throws {
+        let configPath = try createTestConfig()
+        defer { removeTestItemIfExists(atPath: configPath) }
+
+        let reader = try await GotenxConfigReader.create(
+            jsonPath: configPath,
+            cliOverrides: [:],
+            environment: [
+                "GOTENX_RUNTIME_DYNAMIC_TRANSPORT_PARAMETERS_OBSOLETE_PARAMETER": "1.0"
+            ]
+        )
+
+        await #expect(throws: ConfigurationValidationError.self) {
+            _ = try await reader.fetchConfiguration()
+        }
+    }
+
+    @Test("Environment transport parameters use full Swift API names")
+    func testEnvironmentTransportParametersUseFullSwiftAPINames() async throws {
+        let configPath = try createTestConfig()
+        defer { removeTestItemIfExists(atPath: configPath) }
+
+        let reader = try await GotenxConfigReader.create(
+            jsonPath: configPath,
+            cliOverrides: [:],
+            environment: [
+                "GOTENX_RUNTIME_DYNAMIC_TRANSPORT_PARAMETERS_ION_HEAT_DIFFUSIVITY": "0.002",
+                "GOTENX_RUNTIME_DYNAMIC_TRANSPORT_PARAMETERS_ELECTRON_HEAT_DIFFUSIVITY": "0.003",
+                "GOTENX_RUNTIME_DYNAMIC_TRANSPORT_PARAMETERS_PARTICLE_DIFFUSIVITY": "0.0005"
+            ]
+        )
+
+        let config = try await reader.fetchConfiguration()
+
+        #expect(abs((config.runtime.dynamic.transport.parameter("ionHeatDiffusivity") ?? -1) - 0.002) < 1e-7)
+        #expect(abs((config.runtime.dynamic.transport.parameter("electronHeatDiffusivity") ?? -1) - 0.003) < 1e-7)
+        #expect(abs((config.runtime.dynamic.transport.parameter("particleDiffusivity") ?? -1) - 0.0005) < 1e-7)
+    }
+
+    @Test("Non-object JSON transport parameters throw configuration errors")
+    func testNonObjectJSONTransportParameters() async throws {
+        let configPath = try createTestConfig()
+        defer { removeTestItemIfExists(atPath: configPath) }
+
+        let data = try Data(contentsOf: URL(fileURLWithPath: configPath))
+        guard var root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              var runtime = root["runtime"] as? [String: Any],
+              var dynamic = runtime["dynamic"] as? [String: Any],
+              var transport = dynamic["transport"] as? [String: Any] else {
+            Issue.record("Test fixture must contain runtime.dynamic.transport")
+            return
+        }
+
+        transport["parameters"] = 42
+        dynamic["transport"] = transport
+        runtime["dynamic"] = dynamic
+        root["runtime"] = runtime
+
+        let encoded = try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted])
+        try encoded.write(to: URL(fileURLWithPath: configPath))
+
+        let reader = try await GotenxConfigReader.create(
+            jsonPath: configPath,
+            cliOverrides: [:]
+        )
+
+        await #expect(throws: ConfigurationError.self) {
+            _ = try await reader.fetchConfiguration()
+        }
+    }
+
     // MARK: - Complete Configuration Tests
 
     @Test("All configuration sections are loaded")
     func testCompleteConfiguration() async throws {
         let configPath = try createTestConfig(
-            nCells: 100,
+            cellCount: 100,
             majorRadius: 6.2,
             minorRadius: 2.0
         )
@@ -184,7 +310,7 @@ struct GotenxConfigReaderTests {
         let config = try await reader.fetchConfiguration()
 
         // Runtime - Static
-        #expect(config.runtime.static.mesh.nCells > 0)
+        #expect(config.runtime.static.mesh.cellCount > 0)
         #expect(config.runtime.static.mesh.majorRadius > 0)
         #expect(config.runtime.static.mesh.minorRadius > 0)
         #expect(config.runtime.static.mesh.toroidalField > 0)
@@ -192,7 +318,7 @@ struct GotenxConfigReaderTests {
         // Runtime - Dynamic
         #expect(config.runtime.dynamic.boundaries.ionTemperature > 0)
         #expect(config.runtime.dynamic.boundaries.electronTemperature > 0)
-        #expect(config.runtime.dynamic.boundaries.density > 0)
+        #expect(config.runtime.dynamic.boundaries.electronDensity > 0)
 
         // Transport (modelType is enum, always valid)
         // No need to check - enum ensures valid value
@@ -203,7 +329,7 @@ struct GotenxConfigReaderTests {
         // Time
         #expect(config.time.start >= 0)
         #expect(config.time.end > config.time.start)
-        #expect(config.time.initialDt > 0)
+        #expect(config.time.initialTimeStep > 0)
 
         // Output
         #expect(!config.output.directory.isEmpty)
@@ -216,16 +342,15 @@ struct GotenxConfigReaderTests {
         let configPath = try createTestConfig()
         defer { removeTestItemIfExists(atPath: configPath) }
 
-        // Set environment variable
-        setenv("GOTENX_TIME_END", "3.0", 1)
-        defer { unsetenv("GOTENX_TIME_END") }
-
         // CLI override should win
         let cliOverrides = ["time.end": "10.0"]
 
         let reader = try await GotenxConfigReader.create(
             jsonPath: configPath,
-            cliOverrides: cliOverrides
+            cliOverrides: cliOverrides,
+            environment: [
+                "GOTENX_TIME_END": "3.0"
+            ]
         )
 
         let config = try await reader.fetchConfiguration()
@@ -239,7 +364,7 @@ struct GotenxConfigReaderTests {
     /// Create a minimal test JSON configuration
     /// This matches the pattern used in ConfigurationPriorityTests
     private func createTestConfig(
-        nCells: Int = 100,
+        cellCount: Int = 100,
         majorRadius: Double = 3.0,
         minorRadius: Double = 1.0
     ) throws -> String {
@@ -251,7 +376,7 @@ struct GotenxConfigReaderTests {
           "runtime": {
             "static": {
               "mesh": {
-                "nCells": \(nCells),
+                "cellCount": \(cellCount),
                 "majorRadius": \(majorRadius),
                 "minorRadius": \(minorRadius),
                 "toroidalField": 2.5,
@@ -266,7 +391,7 @@ struct GotenxConfigReaderTests {
               "solver": {
                 "type": "linear",
                 "tolerance": 1e-6,
-                "maxIterations": 30
+                "maximumIterations": 30
               },
               "scheme": {
                 "theta": 1.0
@@ -303,12 +428,12 @@ struct GotenxConfigReaderTests {
           "time": {
             "start": 0.0,
             "end": 1.0,
-            "initialDt": 0.001,
+            "initialTimeStep": 0.001,
             "adaptive": {
               "enabled": true,
               "safetyFactor": 0.9,
-              "minDt": 1e-6,
-              "maxDt": 0.1
+              "minimumTimeStep": 1e-6,
+              "maximumTimeStep": 0.1
             }
           },
           "output": {

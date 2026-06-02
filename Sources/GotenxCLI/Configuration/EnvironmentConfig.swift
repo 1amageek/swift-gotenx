@@ -36,7 +36,7 @@ struct EnvironmentConfig {
         // MLX GPU cache limit - ACTUAL API CALL
         if let limitMB = cacheLimitMB {
             let limitBytes = limitMB * 1024 * 1024
-            MLX.GPU.set(cacheLimit: limitBytes)
+            MLX.Memory.cacheLimit = limitBytes
             print("  • MLX GPU cache limit: \(limitMB) MB")
         } else {
             print("  • MLX GPU cache limit: default")
@@ -49,7 +49,7 @@ struct EnvironmentConfig {
     /// Display GPU memory information
     private func displayGPUInfo() {
         // Query actual GPU memory status using MLX API
-        let snapshot = MLX.GPU.snapshot()
+        let snapshot = MLX.Memory.snapshot()
 
         print("\nGPU Memory Status:")
         print("  • Active memory: \(formatBytes(snapshot.activeMemory))")

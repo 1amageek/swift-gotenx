@@ -8,8 +8,7 @@ public struct SolverConfig: Codable, Sendable, Equatable, Hashable {
     /// Solver type (using existing SolverType from RuntimeParams)
     public let type: String
 
-    /// Legacy convergence tolerance (deprecated, use tolerances instead)
-    /// Kept for backward compatibility
+    /// Scalar convergence tolerance fallback when per-equation tolerances are not supplied
     public let tolerance: Float?
 
     /// Per-equation numerical tolerances (recommended)
@@ -17,11 +16,11 @@ public struct SolverConfig: Codable, Sendable, Equatable, Hashable {
     public let tolerances: NumericalTolerances?
 
     /// Physical thresholds for diagnostics
-    /// Optional for backward compatibility with old JSON files
+    /// Optional physical thresholds
     public let physicalThresholds: PhysicalThresholds?
 
     /// Maximum iterations
-    public let maxIterations: Int
+    public let maximumIterations: Int
 
     /// Line search enabled (default: true)
     public let lineSearchEnabled: Bool
@@ -47,10 +46,10 @@ public struct SolverConfig: Codable, Sendable, Equatable, Hashable {
 
     public static let `default` = SolverConfig(
         type: "newtonRaphson",
-        tolerance: nil,  // Use new tolerances instead
+        tolerance: nil,
         tolerances: .iterScale,
         physicalThresholds: .default,
-        maxIterations: 30,
+        maximumIterations: 30,
         lineSearchEnabled: true,
         lineSearchMaxAlpha: 1.0
     )
@@ -60,7 +59,7 @@ public struct SolverConfig: Codable, Sendable, Equatable, Hashable {
         tolerance: Float? = nil,
         tolerances: NumericalTolerances? = .iterScale,
         physicalThresholds: PhysicalThresholds? = .default,
-        maxIterations: Int = 100,  // ✅ INCREASED: Match NewtonRaphsonSolver default
+        maximumIterations: Int = 100,
         lineSearchEnabled: Bool = true,
         lineSearchMaxAlpha: Float = 1.0
     ) {
@@ -68,19 +67,17 @@ public struct SolverConfig: Codable, Sendable, Equatable, Hashable {
         self.tolerance = tolerance
         self.tolerances = tolerances
         self.physicalThresholds = physicalThresholds
-        self.maxIterations = maxIterations
+        self.maximumIterations = maximumIterations
         self.lineSearchEnabled = lineSearchEnabled
         self.lineSearchMaxAlpha = lineSearchMaxAlpha
     }
-
-    // MARK: - Custom Decoding for Backward Compatibility
 
     enum CodingKeys: String, CodingKey {
         case type
         case tolerance
         case tolerances
         case physicalThresholds
-        case maxIterations
+        case maximumIterations
         case lineSearchEnabled
         case lineSearchMaxAlpha
     }
@@ -88,17 +85,25 @@ public struct SolverConfig: Codable, Sendable, Equatable, Hashable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
 
-        // Required fields (always present in old and new configs)
-        type = try container.decode(String.self, forKey: .type)
-        maxIterations = try container.decode(Int.self, forKey: .maxIterations)
+        type = try container.decodeIfPresent(String.self, forKey: .type) ?? "newtonRaphson"
+        maximumIterations = try container.decodeIfPresent(Int.self, forKey: .maximumIterations) ?? 30
 
-        // Optional legacy field
         tolerance = try container.decodeIfPresent(Float.self, forKey: .tolerance)
 
-        // Phase 1 new fields with defaults for backward compatibility
         tolerances = try container.decodeIfPresent(NumericalTolerances.self, forKey: .tolerances)
         physicalThresholds = try container.decodeIfPresent(PhysicalThresholds.self, forKey: .physicalThresholds)
         lineSearchEnabled = try container.decodeIfPresent(Bool.self, forKey: .lineSearchEnabled) ?? true
         lineSearchMaxAlpha = try container.decodeIfPresent(Float.self, forKey: .lineSearchMaxAlpha) ?? 1.0
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(tolerance, forKey: .tolerance)
+        try container.encodeIfPresent(tolerances, forKey: .tolerances)
+        try container.encodeIfPresent(physicalThresholds, forKey: .physicalThresholds)
+        try container.encode(maximumIterations, forKey: .maximumIterations)
+        try container.encode(lineSearchEnabled, forKey: .lineSearchEnabled)
+        try container.encode(lineSearchMaxAlpha, forKey: .lineSearchMaxAlpha)
     }
 }

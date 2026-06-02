@@ -34,7 +34,7 @@ This document specifies pre-simulation validation checks to ensure numerical sta
 |-------|-----------|----------|--------|
 | Temperature change per timestep | `ΔT/T < 0.5` | ERROR | Reduce `totalPower` or decrease `dt` |
 | Peak power density | `P_peak < 100 MW/m³` | WARNING | Review ECRH configuration |
-| Deposition width resolution | `depositionWidth > 3×Δr` | ERROR | Increase `depositionWidth` or `nCells` |
+| Deposition width resolution | `depositionWidth > 3×Δr` | ERROR | Increase `depositionWidth` or `cellCount` |
 
 **Implementation**:
 
@@ -97,7 +97,7 @@ func validateECRHStability(
             parameter: "ECRH depositionWidth",
             value: ecrh.depositionWidth,
             minimum: minWidthForResolution,
-            suggestion: "Increase depositionWidth to \(minWidthForResolution) or increase nCells to \(Int(3.0 * minorRadius / ecrh.depositionWidth))"
+            suggestion: "Increase depositionWidth to \(minWidthForResolution) or increase cellCount to \(Int(3.0 * minorRadius / ecrh.depositionWidth))"
         )
     }
 }
@@ -116,7 +116,7 @@ WARNING: High ECRH power density detected
 
 ERROR: Insufficient mesh resolution for ECRH
   depositionWidth: 0.08 m (minimum: 0.12 m for 3-cell resolution)
-  Suggestion: Increase depositionWidth to 0.12 or increase nCells to 150
+  Suggestion: Increase depositionWidth to 0.12 or increase cellCount to 150
 ```
 
 #### 1.2 Ohmic Heating Stability
@@ -219,8 +219,8 @@ func validateGasPuffStability(
 
 | Check | Condition | Severity | Action |
 |-------|-----------|----------|--------|
-| Ion thermal diffusion CFL | `CFL_i = χ_i dt/(Δr)² < 0.5` | ERROR | Reduce `chi_ion` or decrease `dt` |
-| Electron thermal diffusion CFL | `CFL_e = χ_e dt/(Δr)² < 0.5` | ERROR | Reduce `chi_electron` or decrease `dt` |
+| Ion thermal diffusion CFL | `CFL_i = χ_i dt/(Δr)² < 0.5` | ERROR | Reduce `ionHeatDiffusivity` or decrease `dt` |
+| Electron thermal diffusion CFL | `CFL_e = χ_e dt/(Δr)² < 0.5` | ERROR | Reduce `electronHeatDiffusivity` or decrease `dt` |
 | Negative diffusivity | `χ > 0` | ERROR | Check transport model configuration |
 
 **Implementation**:
@@ -231,39 +231,44 @@ func validateCFLCondition(
     dt: Float,
     cellSpacing: Float
 ) throws {
-    // Extract maximum diffusivities
-    let chi_ion = transport.parameters["chi_ion"] ?? 1.0
-    let chi_electron = transport.parameters["chi_electron"] ?? 1.0
+    try transport.validateParameterKeys()
+
+    guard let ionHeatDiffusivity = transport.parameter("ionHeatDiffusivity") else {
+        throw ValidationError.missingRequiredParameter(parameter: "ionHeatDiffusivity")
+    }
+    guard let electronHeatDiffusivity = transport.parameter("electronHeatDiffusivity") else {
+        throw ValidationError.missingRequiredParameter(parameter: "electronHeatDiffusivity")
+    }
 
     // Check positive
-    if chi_ion <= 0 || chi_electron <= 0 {
+    if ionHeatDiffusivity <= 0 || electronHeatDiffusivity <= 0 {
         throw ValidationError.negativeTransportCoefficient(
-            parameter: chi_ion <= 0 ? "chi_ion" : "chi_electron",
-            value: chi_ion <= 0 ? chi_ion : chi_electron
+            parameter: ionHeatDiffusivity <= 0 ? "ionHeatDiffusivity" : "electronHeatDiffusivity",
+            value: ionHeatDiffusivity <= 0 ? ionHeatDiffusivity : electronHeatDiffusivity
         )
     }
 
     // Compute CFL numbers
-    let CFL_ion = chi_ion * dt / (cellSpacing * cellSpacing)
-    let CFL_electron = chi_electron * dt / (cellSpacing * cellSpacing)
+    let ionCFL = ionHeatDiffusivity * dt / (cellSpacing * cellSpacing)
+    let electronCFL = electronHeatDiffusivity * dt / (cellSpacing * cellSpacing)
 
-    if CFL_ion > 0.5 {
+    if ionCFL > 0.5 {
         // To achieve CFL = 0.5: χ_new = χ × 0.5/CFL or dt_new = dt × 0.5/CFL
         throw ValidationError.cflViolation(
-            parameter: "chi_ion",
-            cfl: CFL_ion,
+            parameter: "ionHeatDiffusivity",
+            cfl: ionCFL,
             limit: 0.5,
-            suggestion: "Reduce chi_ion to \(chi_ion * 0.5 / CFL_ion) m²/s or decrease dt to \(dt * 0.5 / CFL_ion) s"
+            suggestion: "Reduce ionHeatDiffusivity to \(ionHeatDiffusivity * 0.5 / ionCFL) m²/s or decrease dt to \(dt * 0.5 / ionCFL) s"
         )
     }
 
-    if CFL_electron > 0.5 {
+    if electronCFL > 0.5 {
         // To achieve CFL = 0.5: χ_new = χ × 0.5/CFL or dt_new = dt × 0.5/CFL
         throw ValidationError.cflViolation(
-            parameter: "chi_electron",
-            cfl: CFL_electron,
+            parameter: "electronHeatDiffusivity",
+            cfl: electronCFL,
             limit: 0.5,
-            suggestion: "Reduce chi_electron to \(chi_electron * 0.5 / CFL_electron) m²/s or decrease dt to \(dt * 0.5 / CFL_electron) s"
+            suggestion: "Reduce electronHeatDiffusivity to \(electronHeatDiffusivity * 0.5 / electronCFL) m²/s or decrease dt to \(dt * 0.5 / electronCFL) s"
         )
     }
 }
@@ -272,9 +277,9 @@ func validateCFLCondition(
 **Example Error Messages**:
 
 ```
-ERROR: CFL condition violated for chi_ion
+ERROR: CFL condition violated for ionHeatDiffusivity
   CFL = 0.87 (limit: 0.5)
-  Suggestion: Reduce chi_ion to 0.57 m²/s or decrease dt to 5.7e-5 s
+  Suggestion: Reduce ionHeatDiffusivity to 0.57 m²/s or decrease dt to 5.7e-5 s
 ```
 
 #### 2.2 Particle Diffusion CFL
@@ -285,7 +290,7 @@ ERROR: CFL condition violated for chi_ion
 
 | Check | Condition | Severity | Action |
 |-------|-----------|----------|--------|
-| Particle diffusion CFL | `CFL_D = D dt/(Δr)² < 0.5` | ERROR | Reduce `particle_diffusivity` or decrease `dt` |
+| Particle diffusion CFL | `CFL_D = D dt/(Δr)² < 0.5` | ERROR | Reduce `particleDiffusivity` or decrease `dt` |
 
 **Implementation**:
 
@@ -297,7 +302,7 @@ func validateParticleCFL(
 ) throws {
     if particleDiffusivity <= 0 {
         throw ValidationError.negativeTransportCoefficient(
-            parameter: "particle_diffusivity",
+            parameter: "particleDiffusivity",
             value: particleDiffusivity
         )
     }
@@ -307,10 +312,10 @@ func validateParticleCFL(
     if CFL_particle > 0.5 {
         // To achieve CFL = 0.5: D_new = D × 0.5/CFL or dt_new = dt × 0.5/CFL
         throw ValidationError.cflViolation(
-            parameter: "particle_diffusivity",
+            parameter: "particleDiffusivity",
             cfl: CFL_particle,
             limit: 0.5,
-            suggestion: "Reduce particle_diffusivity to \(particleDiffusivity * 0.5 / CFL_particle) m²/s or decrease dt to \(dt * 0.5 / CFL_particle) s"
+            suggestion: "Reduce particleDiffusivity to \(particleDiffusivity * 0.5 / CFL_particle) m²/s or decrease dt to \(dt * 0.5 / CFL_particle) s"
         )
     }
 }
@@ -406,26 +411,30 @@ func validateDiffusionTimeScale(
     dt: Float,
     minorRadius: Float
 ) throws {
-    let chi_max = max(
-        transport.parameters["chi_ion"] ?? 1.0,
-        transport.parameters["chi_electron"] ?? 1.0
+    guard transport.modelType == .constant else {
+        return
+    }
+
+    let maximumHeatDiffusivity = max(
+        try transport.requireParameter("ionHeatDiffusivity"),
+        try transport.requireParameter("electronHeatDiffusivity")
     )
 
-    let tau_diffusion = minorRadius * minorRadius / chi_max
+    let diffusionTimeScale = minorRadius * minorRadius / maximumHeatDiffusivity
 
-    if dt > tau_diffusion {
+    if dt > diffusionTimeScale {
         throw ValidationError.timestepTooLarge(
             dt: dt,
-            timeScale: tau_diffusion,
-            suggestion: "Decrease dt to \(tau_diffusion / 10) s"
+            timeScale: diffusionTimeScale,
+            suggestion: "Decrease dt to \(diffusionTimeScale / 10) s"
         )
     }
 
-    if dt < tau_diffusion / 100 {
+    if dt < diffusionTimeScale / 100 {
         throw ValidationWarning.timestepTooSmall(
             dt: dt,
-            timeScale: tau_diffusion,
-            suggestion: "Consider increasing dt to \(tau_diffusion / 10) s for better efficiency"
+            timeScale: diffusionTimeScale,
+            suggestion: "Consider increasing dt to \(diffusionTimeScale / 10) s for better efficiency"
         )
     }
 
@@ -513,45 +522,45 @@ func validateHeatingTimeScale(
 
 | Check | Condition | Severity | Action |
 |-------|-----------|----------|--------|
-| Minimum cells | `nCells > 50` | ERROR | Increase `nCells` |
-| Gradient resolution | `nCells > 3 * exponent` | WARNING | Increase `nCells` for steep profiles |
-| Excessive cells | `nCells < 500` | WARNING | Reduce `nCells` for efficiency |
+| Minimum cells | `cellCount > 50` | ERROR | Increase `cellCount` |
+| Gradient resolution | `cellCount > 3 * exponent` | WARNING | Increase `cellCount` for steep profiles |
+| Excessive cells | `cellCount < 500` | WARNING | Reduce `cellCount` for efficiency |
 
 **Implementation**:
 
 ```swift
 func validateMeshResolution(
-    nCells: Int,
+    cellCount: Int,
     initialProfile: InitialProfileConfig
 ) throws {
-    if nCells < 50 {
+    if cellCount < 50 {
         throw ValidationError.insufficientMeshResolution(
-            nCells: nCells,
+            cellCount: cellCount,
             minimum: 50,
-            suggestion: "Increase nCells to at least 50"
+            suggestion: "Increase cellCount to at least 50"
         )
     }
 
-    if nCells > 500 {
+    if cellCount > 500 {
         throw ValidationWarning.excessiveMeshResolution(
-            nCells: nCells,
+            cellCount: cellCount,
             maximum: 500,
-            suggestion: "Consider reducing nCells to ~200 for better performance"
+            suggestion: "Consider reducing cellCount to ~200 for better performance"
         )
     }
 
     switch initialProfile {
     case .peaked(_, let exponent):
         // For parabolic profile T(ρ) ∝ (1-ρ)^n, gradient scale length L_T ~ a/n at mid-radius
-        // Require 3 cells per gradient scale length: nCells > 3n
+        // Require 3 cells per gradient scale length: cellCount > 3n
         // Use minimum of 50 cells even for small exponents
         let recommendedCells = max(50, Int(3.0 * exponent))
-        if nCells < recommendedCells {
+        if cellCount < recommendedCells {
             throw ValidationWarning.insufficientGradientResolution(
-                nCells: nCells,
+                cellCount: cellCount,
                 recommended: recommendedCells,
                 profileExponent: exponent,
-                suggestion: "Increase nCells to \(recommendedCells) to resolve gradient scale length L_T ~ a/\(Int(exponent))"
+                suggestion: "Increase cellCount to \(recommendedCells) to resolve gradient scale length L_T ~ a/\(Int(exponent))"
             )
         }
     case .flat:

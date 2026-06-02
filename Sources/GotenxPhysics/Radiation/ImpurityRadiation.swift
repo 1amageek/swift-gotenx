@@ -155,17 +155,17 @@ public struct ImpurityRadiationModel: Sendable {
     /// - Values outside this range are clamped
     /// - Extrapolation beyond validity range may be unreliable
     ///
-    /// - Parameter Te: Electron temperature [eV]
+    /// - Parameter electronTemperature: Electron temperature [eV]
     /// - Returns: Radiation coefficient L_z [W⋅m³]
-    private func computeRadiationCoefficient(Te: MLXArray) -> MLXArray {
+    private func computeRadiationCoefficient(electronTemperature: MLXArray) -> MLXArray {
         // Clamp temperature to valid range [0.1 keV, 100 keV] = [100 eV, 100,000 eV]
         // This matches TORAX implementation (Mavrin 2018 polynomial validity range)
-        let Te_clamped = MLX.clip(Te, min: 100.0, max: 100000.0)
+        let Te_clamped = MLX.clip(electronTemperature, min: 100.0, max: 100000.0)
 
         // Diagnostic warning for values outside validity range
         #if DEBUG
-        let Te_min = Te.min().item(Float.self)
-        let Te_max = Te.max().item(Float.self)
+        let Te_min = electronTemperature.min().item(Float.self)
+        let Te_max = electronTemperature.max().item(Float.self)
         if Te_min < 100.0 || Te_max > 100000.0 {
             print("⚠️  Warning: T_e outside ADAS validity range [\(Te_min), \(Te_max)] eV")
             print("   Valid range: [100, 100000] eV (0.1 - 100 keV)")
@@ -182,7 +182,7 @@ public struct ImpurityRadiationModel: Sendable {
 
         // Find which interval each temperature falls into
         // This implements searchsorted from TORAX
-        var log10_Lz = MLXArray.zeros(Te.shape)
+        var log10_Lz = MLXArray.zeros(electronTemperature.shape)
 
         for (idx, coeffs) in coefficientSets.enumerated() {
             // Create mask for this temperature interval
@@ -193,7 +193,7 @@ public struct ImpurityRadiationModel: Sendable {
                     mask = Te_keV .< intervals[0]
                 } else {
                     // Only one coefficient set, use for all temperatures
-                    mask = MLXArray.ones(Te.shape, dtype: .bool)
+                    mask = MLXArray.ones(electronTemperature.shape, dtype: .bool)
                 }
             } else if idx < intervals.count {
                 // Middle intervals: intervals[idx-1] <= T_e < intervals[idx]
@@ -248,19 +248,19 @@ public struct ImpurityRadiationModel: Sendable {
     /// **Note**: Returns NEGATIVE value (power loss convention)
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Te: Electron temperature [eV]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - electronTemperature: Electron temperature [eV]
     /// - Returns: Radiation power loss [W/m³] (NEGATIVE value)
-    public func compute(ne: MLXArray, Te: MLXArray) -> MLXArray {
+    public func compute(electronDensity: MLXArray, electronTemperature: MLXArray) -> MLXArray {
         // Compute radiation coefficient
-        let Lz = computeRadiationCoefficient(Te: Te)
+        let Lz = computeRadiationCoefficient(electronTemperature: electronTemperature)
 
         // Impurity density
-        let n_imp = impurityFraction * ne
+        let n_imp = impurityFraction * electronDensity
 
         // Radiation power: P_rad = -n_e × n_imp × L_z [W/m³]
         // Negative sign: radiation is a power LOSS
-        let P_rad = -(ne * n_imp * Lz)
+        let P_rad = -(electronDensity * n_imp * Lz)
 
         return P_rad
     }
@@ -286,11 +286,11 @@ public struct ImpurityRadiationModel: Sendable {
         _ sources: SourceTerms,
         profiles: CoreProfiles
     ) throws -> SourceTerms {
-        let ne = profiles.electronDensity.value
-        let Te = profiles.electronTemperature.value
+        let electronDensity = profiles.electronDensity.value
+        let electronTemperature = profiles.electronTemperature.value
 
         // Compute radiation power loss [W/m³] (returns NEGATIVE value)
-        let P_rad_watts = compute(ne: ne, Te: Te)
+        let P_rad_watts = compute(electronDensity: electronDensity, electronTemperature: electronTemperature)
 
         // Convert to MW/m³ for SourceTerms
         let P_rad_MW = PhysicsConstants.wattsToMegawatts(P_rad_watts)
@@ -317,11 +317,11 @@ public struct ImpurityRadiationModel: Sendable {
         geometry: Geometry
     ) -> SourceMetadata {
 
-        let ne = profiles.electronDensity.value
-        let Te = profiles.electronTemperature.value
+        let electronDensity = profiles.electronDensity.value
+        let electronTemperature = profiles.electronTemperature.value
 
         // Compute radiation power loss [W/m³] (returns NEGATIVE value)
-        let P_rad_watts = compute(ne: ne, Te: Te)
+        let P_rad_watts = compute(electronDensity: electronDensity, electronTemperature: electronTemperature)
 
         // Volume integration: ∫ P dV → [W/m³] × [m³] = [W]
         let cellVolumes = GeometricFactors.from(geometry: geometry).cellVolumes.value

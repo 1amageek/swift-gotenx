@@ -6,10 +6,10 @@ import MLX
 /// Transport coefficients for heat and particle transport
 public struct TransportCoefficients: Sendable, Equatable {
     /// Ion heat diffusivity [m^2/s]
-    public let chiIon: EvaluatedArray
+    public let ionHeatDiffusivity: EvaluatedArray
 
     /// Electron heat diffusivity [m^2/s]
-    public let chiElectron: EvaluatedArray
+    public let electronHeatDiffusivity: EvaluatedArray
 
     /// Particle diffusivity [m^2/s]
     public let particleDiffusivity: EvaluatedArray
@@ -18,34 +18,64 @@ public struct TransportCoefficients: Sendable, Equatable {
     public let convectionVelocity: EvaluatedArray
 
     public init(
-        chiIon: EvaluatedArray,
-        chiElectron: EvaluatedArray,
+        ionHeatDiffusivity: EvaluatedArray,
+        electronHeatDiffusivity: EvaluatedArray,
         particleDiffusivity: EvaluatedArray,
         convectionVelocity: EvaluatedArray
     ) {
-        self.chiIon = chiIon
-        self.chiElectron = chiElectron
+        self.ionHeatDiffusivity = ionHeatDiffusivity
+        self.electronHeatDiffusivity = electronHeatDiffusivity
         self.particleDiffusivity = particleDiffusivity
         self.convectionVelocity = convectionVelocity
     }
 
     public init(
-        evaluatingChiIon chiIon: MLXArray,
-        chiElectron: MLXArray,
+        ionHeatDiffusivity: MLXArray,
+        electronHeatDiffusivity: MLXArray,
         particleDiffusivity: MLXArray,
         convectionVelocity: MLXArray
     ) {
         let evaluated = EvaluatedArray.evaluatingBatch([
-            chiIon,
-            chiElectron,
+            ionHeatDiffusivity,
+            electronHeatDiffusivity,
             particleDiffusivity,
             convectionVelocity
         ])
         self.init(
-            chiIon: evaluated[0],
-            chiElectron: evaluated[1],
+            ionHeatDiffusivity: evaluated[0],
+            electronHeatDiffusivity: evaluated[1],
             particleDiffusivity: evaluated[2],
             convectionVelocity: evaluated[3]
         )
+    }
+}
+
+extension TransportCoefficients {
+    public func validateNumerics(expectedCellCount: Int) throws {
+        try NumericalValidation.validateShape(
+            ionHeatDiffusivity.value,
+            field: "ionHeatDiffusivity",
+            expected: [expectedCellCount]
+        )
+        try NumericalValidation.validateShape(
+            electronHeatDiffusivity.value,
+            field: "electronHeatDiffusivity",
+            expected: [expectedCellCount]
+        )
+        try NumericalValidation.validateShape(
+            particleDiffusivity.value,
+            field: "particleDiffusivity",
+            expected: [expectedCellCount]
+        )
+        try NumericalValidation.validateShape(
+            convectionVelocity.value,
+            field: "convectionVelocity",
+            expected: [expectedCellCount]
+        )
+
+        try NumericalValidation.validateNonNegative(ionHeatDiffusivity.value, field: "ionHeatDiffusivity")
+        try NumericalValidation.validateNonNegative(electronHeatDiffusivity.value, field: "electronHeatDiffusivity")
+        try NumericalValidation.validateNonNegative(particleDiffusivity.value, field: "particleDiffusivity")
+        try NumericalValidation.validateFinite(convectionVelocity.value, field: "convectionVelocity")
     }
 }

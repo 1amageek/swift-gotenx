@@ -11,9 +11,9 @@ struct GeometricFactorsTests {
     @Test("GeometricFactors created from Geometry includes metric tensors")
     func metricTensorInclusion() throws {
         // Create geometry with known metric tensor values
-        let nCells = 10
+        let cellCount = 10
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 5.0
@@ -24,27 +24,27 @@ struct GeometricFactorsTests {
         let geoFactors = GeometricFactors.from(geometry: geometry)
 
         // Verify metric tensors are included
-        #expect(geoFactors.jacobian.value.shape[0] == nCells)
-        #expect(geoFactors.g1.value.shape[0] == nCells)
-        #expect(geoFactors.g2.value.shape[0] == nCells)
+        #expect(geoFactors.jacobian.value.shape[0] == cellCount)
+        #expect(geoFactors.majorRadiusMetric.value.shape[0] == cellCount)
+        #expect(geoFactors.shapeMetric.value.shape[0] == cellCount)
 
         // Verify values are positive (physical requirement)
         let jacobianArray = geoFactors.jacobian.value.asArray(Float.self)
-        let g1Array = geoFactors.g1.value.asArray(Float.self)
-        let g2Array = geoFactors.g2.value.asArray(Float.self)
+        let majorRadiusMetricArray = geoFactors.majorRadiusMetric.value.asArray(Float.self)
+        let shapeMetricArray = geoFactors.shapeMetric.value.asArray(Float.self)
 
-        for i in 0..<nCells {
+        for i in 0..<cellCount {
             #expect(jacobianArray[i] > 0.0)  // Jacobian must be positive
-            #expect(g1Array[i].isFinite)     // g1 must be finite
-            #expect(g2Array[i].isFinite)     // g2 must be finite
+            #expect(majorRadiusMetricArray[i].isFinite)     // majorRadiusMetric must be finite
+            #expect(shapeMetricArray[i].isFinite)     // shapeMetric must be finite
         }
     }
 
     @Test("Metric tensor preserves shape consistency")
     func metricTensorShapeConsistency() throws {
-        let nCells = 20
+        let cellCount = 20
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 6.0,
             minorRadius: 2.0,
             toroidalField: 4.0
@@ -53,19 +53,19 @@ struct GeometricFactorsTests {
 
         let geoFactors = GeometricFactors.from(geometry: geometry)
 
-        // All cell-centered quantities should have shape [nCells]
-        #expect(geoFactors.cellVolumes.value.shape[0] == nCells)
-        #expect(geoFactors.rCell.value.shape[0] == nCells)
-        #expect(geoFactors.jacobian.value.shape[0] == nCells)
-        #expect(geoFactors.g1.value.shape[0] == nCells)
-        #expect(geoFactors.g2.value.shape[0] == nCells)
+        // All cell-centered quantities should have shape [cellCount]
+        #expect(geoFactors.cellVolumes.value.shape[0] == cellCount)
+        #expect(geoFactors.cellRadii.value.shape[0] == cellCount)
+        #expect(geoFactors.jacobian.value.shape[0] == cellCount)
+        #expect(geoFactors.majorRadiusMetric.value.shape[0] == cellCount)
+        #expect(geoFactors.shapeMetric.value.shape[0] == cellCount)
 
-        // Face-centered quantities should have shape [nFaces] = [nCells + 1]
-        #expect(geoFactors.faceAreas.value.shape[0] == nCells + 1)
-        #expect(geoFactors.rFace.value.shape[0] == nCells + 1)
+        // Face-centered quantities should have shape [faceCount] = [cellCount + 1]
+        #expect(geoFactors.faceAreas.value.shape[0] == cellCount + 1)
+        #expect(geoFactors.faceRadii.value.shape[0] == cellCount + 1)
 
-        // Cell distances between centers should have shape [nCells - 1]
-        #expect(geoFactors.cellDistances.value.shape[0] == nCells - 1)
+        // Cell distances between centers should have shape [cellCount - 1]
+        #expect(geoFactors.cellDistances.value.shape[0] == cellCount - 1)
     }
 
     @Test("Metric tensor flux divergence reduces to standard for uniform grid")
@@ -73,9 +73,9 @@ struct GeometricFactorsTests {
         // For uniform circular geometry with constant Jacobian,
         // metric tensor formulation should be equivalent to standard formulation
 
-        let nCells = 10
+        let cellCount = 10
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 5.0
@@ -89,7 +89,7 @@ struct GeometricFactorsTests {
         let jacobianArray = geoFactors.jacobian.value.asArray(Float.self)
 
         // Check that Jacobian doesn't vary by more than 50% (generous bound for circular geom)
-        let jMean = jacobianArray.reduce(0.0, +) / Float(nCells)
+        let jMean = jacobianArray.reduce(0.0, +) / Float(cellCount)
         for j in jacobianArray {
             let relativeVariation = abs(j - jMean) / jMean
             #expect(relativeVariation < 0.5)
@@ -98,12 +98,12 @@ struct GeometricFactorsTests {
 
     @Test("Cell volumes computed correctly from geometry")
     func cellVolumeComputation() throws {
-        let nCells = 10
+        let cellCount = 10
         let minorRadius: Float = 1.0
         let majorRadius: Float = 3.0
 
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: majorRadius,
             minorRadius: minorRadius,
             toroidalField: 5.0
@@ -113,8 +113,8 @@ struct GeometricFactorsTests {
         let geoFactors = GeometricFactors.from(geometry: geometry)
 
         // For uniform grid: V_cell = 2π R₀ Δr
-        let dr = minorRadius / Float(nCells)
-        let expectedVolume = 2.0 * Float.pi * majorRadius * dr
+        let radialSpacing = minorRadius / Float(cellCount)
+        let expectedVolume = 2.0 * Float.pi * majorRadius * radialSpacing
 
         let volumes = geoFactors.cellVolumes.value.asArray(Float.self)
 
@@ -125,11 +125,11 @@ struct GeometricFactorsTests {
 
     @Test("Face areas constant for cylindrical geometry")
     func faceAreaConstancy() throws {
-        let nCells = 10
+        let cellCount = 10
         let majorRadius: Float = 3.0
 
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: majorRadius,
             minorRadius: 1.0,
             toroidalField: 5.0

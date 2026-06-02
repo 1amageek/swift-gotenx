@@ -27,7 +27,7 @@ public struct NewtonRaphsonSolver: PDESolver {
     public let tolerance: Float
 
     /// Maximum number of Newton iterations
-    public let maxIterations: Int
+    public let maximumIterations: Int
 
     /// Theta parameter for time discretization (0: explicit, 0.5: Crank-Nicolson, 1: implicit)
     public let theta: Float
@@ -48,14 +48,14 @@ public struct NewtonRaphsonSolver: PDESolver {
 
     public init(
         tolerance: Float = 1e-6,
-        maxIterations: Int = 100,
+        maximumIterations: Int = 100,
         theta: Float = 1.0,
         linearSolver: HybridLinearSolver = HybridLinearSolver(),
         pereverzevFactor: Float = 0.5
     ) {
         precondition(theta >= 0.0 && theta <= 1.0, "Theta must be in [0, 1]")
         self.tolerance = tolerance
-        self.maxIterations = maxIterations
+        self.maximumIterations = maximumIterations
         self.theta = theta
         self.linearSolver = linearSolver
         self.pereverzevFactor = pereverzevFactor
@@ -64,10 +64,10 @@ public struct NewtonRaphsonSolver: PDESolver {
     // MARK: - PDESolver Protocol
 
     public func solve(
-        dt: Float,
-        staticParams: StaticRuntimeParams,
-        dynamicParamsT: DynamicRuntimeParams,
-        dynamicParamsTplusDt: DynamicRuntimeParams,
+        timeStep: Float,
+        staticParameters: StaticRuntimeParameters,
+        dynamicParamsT: DynamicRuntimeParameters,
+        dynamicParamsTplusDt: DynamicRuntimeParameters,
         geometryT: Geometry,
         geometryTplusDt: Geometry,
         xOld: (CellVariable, CellVariable, CellVariable, CellVariable),
@@ -75,11 +75,34 @@ public struct NewtonRaphsonSolver: PDESolver {
         coreProfilesTplusDt: CoreProfiles,
         coeffsCallback: @escaping CoeffsCallback
     ) -> SolverResult {
+        do {
+            try coreProfilesT.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+            try coreProfilesTplusDt.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+        } catch {
+            logger.error("Invalid solver input profiles", metadata: ["error": "\(error)"])
+            return validationFailureResult(
+                profiles: coreProfilesTplusDt,
+                timeStep: timeStep,
+                failureType: 4.0
+            )
+        }
+
         // Flatten initial guess
-        let xFlat = try! FlattenedState(profiles: coreProfilesTplusDt)
-        let xOldFlat = try! FlattenedState(profiles: CoreProfiles.fromTuple(xOld))
+        let xFlat: FlattenedState
+        let xOldFlat: FlattenedState
+        do {
+            xFlat = try FlattenedState(profiles: coreProfilesTplusDt)
+            xOldFlat = try FlattenedState(profiles: CoreProfiles.fromTuple(xOld))
+        } catch {
+            logger.error("Failed to flatten solver input profiles", metadata: ["error": "\(error)"])
+            return validationFailureResult(
+                profiles: coreProfilesTplusDt,
+                timeStep: timeStep,
+                failureType: 4.0
+            )
+        }
         let layout = xFlat.layout
-        let nCells = layout.nCells
+        let cellCount = layout.cellCount
 
         // GPU Variable Scaling: Create reference state for normalization.
         // Uses physically meaningful scales per variable (Ti~1keV, Te~1keV, ne~10^20, psi~1Wb)
@@ -94,6 +117,16 @@ public struct NewtonRaphsonSolver: PDESolver {
         // (or just below) zero temperature, which would make the old-time source
         // coefficients blow up to NaN before the new step can even begin.
         let coeffsOld = coeffsCallback(coreProfilesT.withPhysicalFloors(), geometryT)
+        do {
+            try coeffsOld.validateNumerics()
+        } catch {
+            logger.error("Invalid old-time coefficients", metadata: ["error": "\(error)"])
+            return validationFailureResult(
+                profiles: coreProfilesTplusDt,
+                timeStep: timeStep,
+                failureType: 5.0
+            )
+        }
 
         // Extract boundary conditions
         let boundaryConditions = dynamicParamsTplusDt.boundaryConditions
@@ -120,7 +153,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                 xNew: xNewFlatPhysical,
                 coeffsOld: coeffsOld,
                 coeffsNew: coeffsNew,
-                dt: dt,
+                timeStep: timeStep,
                 theta: self.theta,
                 layout: layout,
                 boundaryConditions: boundaryConditions
@@ -157,7 +190,7 @@ public struct NewtonRaphsonSolver: PDESolver {
         let jacobianBasis = MLXArray.eye(xScaled.values.value.shape[0])
         eval(jacobianBasis)
 
-        for iter in 0..<maxIterations {
+        for iter in 0..<maximumIterations {
             iterations = iter + 1
 
             // Guard against NaN/Inf creeping into the scaled state.
@@ -179,10 +212,10 @@ public struct NewtonRaphsonSolver: PDESolver {
             let residualScaled = residualFnScaled(xScaled.values.value)
 
             // Track residual norms by variable.
-            let residual_Ti = residualScaled[0..<nCells]
-            let residual_Te = residualScaled[nCells..<(2*nCells)]
-            let residual_ne = residualScaled[(2*nCells)..<(3*nCells)]
-            let residual_psi = residualScaled[(3*nCells)..<(4*nCells)]
+            let residual_Ti = residualScaled[0..<cellCount]
+            let residual_Te = residualScaled[cellCount..<(2*cellCount)]
+            let residual_ne = residualScaled[(2*cellCount)..<(3*cellCount)]
+            let residual_psi = residualScaled[(3*cellCount)..<(4*cellCount)]
 
             // Compute the total and per-variable residual norms in a single fused
             // graph, then pull all five scalars across with ONE GPU→CPU transfer
@@ -296,7 +329,7 @@ public struct NewtonRaphsonSolver: PDESolver {
 
             let deltaScaled: MLXArray
             do {
-                deltaScaled = try linearSolver.solve(jacobianScaled, -residualScaled)
+                deltaScaled = try linearSolver.solve(jacobianScaled, rightHandSide: -residualScaled)
             } catch {
                 logger.error("Linear solver failed", metadata: ["iter": "\(iter)", "error": "\(error)"])
                 let finalPhysical = xScaled.unscaled(by: referenceState)
@@ -308,7 +341,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                     converged: false,
                     metadata: [
                         "theta": theta,
-                        "dt": dt
+                        "dt": timeStep
                     ]
                 )
             }
@@ -346,7 +379,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                 logger.error("Linear solver error too high - aborting", metadata: [
                     "linearError": "\(String(format: "%.2e", linear_error))",
                     "threshold": "\(String(format: "%.2e", linearErrorThreshold))",
-                    "action": "trigger dt retry"
+                    "action": "trigger timeStep retry"
                 ])
 
                 // Return partial solution with converged=false
@@ -359,7 +392,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                     converged: false,
                     metadata: [
                         "theta": theta,
-                        "dt": dt,
+                        "dt": timeStep,
                         "linear_error": linear_error,
                         "failure_type": 1.0  // 1.0 = linear_solver_error
                     ]
@@ -369,7 +402,7 @@ public struct NewtonRaphsonSolver: PDESolver {
             if merit_descent <= 0 {
                 logger.error("Invalid descent direction - aborting", metadata: [
                     "meritDescent": "\(String(format: "%.2e", merit_descent))",
-                    "action": "trigger dt retry"
+                    "action": "trigger timeStep retry"
                 ])
 
                 // Return partial solution with converged=false
@@ -382,7 +415,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                     converged: false,
                     metadata: [
                         "theta": theta,
-                        "dt": dt,
+                        "dt": timeStep,
                         "descent_value": merit_descent,
                         "failure_type": 2.0  // 2.0 = invalid_descent_direction
                     ]
@@ -392,8 +425,8 @@ public struct NewtonRaphsonSolver: PDESolver {
             // Update solution with line search (in scaled space).
             // A nil result means no step along this direction reduces the residual:
             // the (frozen-coefficient) linearization is no longer trustworthy at this
-            // dt. Reject the step and report non-convergence so the orchestrator
-            // retries with a smaller dt — taking a residual-increasing fallback step
+            // timeStep. Reject the step and report non-convergence so the orchestrator
+            // retries with a smaller timeStep — taking a residual-increasing fallback step
             // here is what previously drove the stiff solve to diverge.
             guard let alpha = lineSearch(
                 residualFn: residualFnScaled,
@@ -405,7 +438,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                 logger.warning("Line search found no residual-reducing step - aborting", metadata: [
                     "iter": "\(iter)",
                     "residualNorm": "\(String(format: "%.2e", residualNorm))",
-                    "action": "trigger dt retry"
+                    "action": "trigger timeStep retry"
                 ])
                 // Non-converged result is discarded by the orchestrator (it retries
                 // from the previous step's profiles), so mirror the other abort paths
@@ -419,7 +452,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                     converged: false,
                     metadata: [
                         "theta": theta,
-                        "dt": dt,
+                        "dt": timeStep,
                         "failure_type": 3.0  // 3.0 = line_search_no_decrease
                     ]
                 )
@@ -439,6 +472,16 @@ public struct NewtonRaphsonSolver: PDESolver {
         // a small positivity limiter, inactive in well-resolved regions).
         let xFinalPhysical = xScaled.unscaled(by: referenceState)
         let finalProfiles = xFinalPhysical.toCoreProfiles().withPhysicalFloors()
+        do {
+            try finalProfiles.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+        } catch {
+            logger.error("Invalid final solver profiles", metadata: ["error": "\(error)"])
+            return validationFailureResult(
+                profiles: finalProfiles,
+                timeStep: timeStep,
+                failureType: 6.0
+            )
+        }
 
         return SolverResult(
             updatedProfiles: finalProfiles,
@@ -447,8 +490,26 @@ public struct NewtonRaphsonSolver: PDESolver {
             converged: converged,
             metadata: [
                 "theta": theta,
-                "dt": dt,
+                "dt": timeStep,
                 "variable_scaling": 1.0  // 1.0 = enabled, 0.0 = disabled
+            ]
+        )
+    }
+
+    private func validationFailureResult(
+        profiles: CoreProfiles,
+        timeStep: Float,
+        failureType: Float
+    ) -> SolverResult {
+        SolverResult(
+            updatedProfiles: profiles,
+            iterations: 0,
+            residualNorm: Float.greatestFiniteMagnitude,
+            converged: false,
+            metadata: [
+                "theta": theta,
+                "dt": timeStep,
+                "failure_type": failureType
             ]
         )
     }
@@ -457,7 +518,7 @@ public struct NewtonRaphsonSolver: PDESolver {
 
     /// Apply Pereverzev-Galeev stabilization to a transport channel's coefficients.
     ///
-    /// Adds artificial diffusion `D_pv = pereverzevFactor · dFace` together with a
+    /// Adds artificial diffusion `D_pv = pereverzevFactor · faceDiffusionCoefficient` together with a
     /// compensating pinch `v_pv = D_pv · ∇u_ref / u_ref`, evaluated at the frozen
     /// linearization point `u_ref = stopGradient(u)`. Because `u_ref == u` at every
     /// evaluation point, the extra diffusive and convective fluxes cancel exactly, so
@@ -473,47 +534,47 @@ public struct NewtonRaphsonSolver: PDESolver {
     ) -> EquationCoeffs {
         guard pereverzevFactor > 0 else { return coeffs }
 
-        let nCells = u.shape[0]
-        let dFace = coeffs.dFace.value          // [nFaces]
-        let vFace = coeffs.vFace.value          // [nFaces]
-        let dx = geometry.cellDistances.value   // [nCells-1]
+        let cellCount = u.shape[0]
+        let faceDiffusionCoefficient = coeffs.faceDiffusionCoefficient.value          // [faceCount]
+        let faceConvectionVelocity = coeffs.faceConvectionVelocity.value          // [faceCount]
+        let dx = geometry.cellDistances.value   // [cellCount-1]
 
         // Artificial diffusion proportional to the existing diffusion (unit-consistent).
-        let dPv = pereverzevFactor * dFace      // [nFaces]
+        let dPv = pereverzevFactor * faceDiffusionCoefficient      // [faceCount]
 
         // Pinch from the frozen linearization point u_ref = stopGradient(u).
         let uRef = stopGradient(u)
-        let uRefRight = uRef[1..<nCells]
-        let uRefLeft = uRef[0..<(nCells - 1)]
-        let gradInterior = (uRefRight - uRefLeft) / (dx + 1e-10)        // [nCells-1]
-        let uFaceInterior = 0.5 * (uRefLeft + uRefRight)               // [nCells-1]
-        let logGradInterior = gradInterior / (uFaceInterior + 1e-10)  // [nCells-1]
+        let uRefRight = uRef[1..<cellCount]
+        let uRefLeft = uRef[0..<(cellCount - 1)]
+        let gradInterior = (uRefRight - uRefLeft) / (dx + 1e-10)        // [cellCount-1]
+        let uFaceInterior = 0.5 * (uRefLeft + uRefRight)               // [cellCount-1]
+        let logGradInterior = gradInterior / (uFaceInterior + 1e-10)  // [cellCount-1]
         let zero1 = MLXArray.zeros([1])
         // No pinch at the domain boundaries.
-        let logGradFace = concatenated([zero1, logGradInterior, zero1], axis: 0)  // [nFaces]
+        let logGradFace = concatenated([zero1, logGradInterior, zero1], axis: 0)  // [faceCount]
 
-        let dFaceAug = dFace + dPv
-        let vFaceAug = vFace + dPv * logGradFace
+        let dFaceAug = faceDiffusionCoefficient + dPv
+        let vFaceAug = faceConvectionVelocity + dPv * logGradFace
 
         return EquationCoeffs(
-            dFace: EvaluatedArray(evaluating: dFaceAug),
-            vFace: EvaluatedArray(evaluating: vFaceAug),
-            sourceCell: coeffs.sourceCell,
-            sourceMatCell: coeffs.sourceMatCell,
-            transientCoeff: coeffs.transientCoeff
+            faceDiffusionCoefficient: EvaluatedArray(evaluating: dFaceAug),
+            faceConvectionVelocity: EvaluatedArray(evaluating: vFaceAug),
+            cellSource: coeffs.cellSource,
+            cellSourceMatrixCoefficient: coeffs.cellSourceMatrixCoefficient,
+            transientCoefficient: coeffs.transientCoefficient
         )
     }
 
     /// Compute residual for theta-method time discretization (VECTORIZED)
     ///
-    /// Theta-method: (x^{n+1} - x^n) / dt = θ*f(x^{n+1}) + (1-θ)*f(x^n)
-    /// Residual: R = (x^{n+1} - x^n) / dt - θ*f(x^{n+1}) - (1-θ)*f(x^n)
+    /// Theta-method: (x^{n+1} - x^n) / timeStep = θ*f(x^{n+1}) + (1-θ)*f(x^n)
+    /// Residual: R = (x^{n+1} - x^n) / timeStep - θ*f(x^{n+1}) - (1-θ)*f(x^n)
     private func computeThetaMethodResidual(
         xOld: MLXArray,
         xNew: MLXArray,
         coeffsOld: Block1DCoeffs,
         coeffsNew: Block1DCoeffs,
-        dt: Float,
+        timeStep: Float,
         theta: Float,
         layout: FlattenedState.StateLayout,
         boundaryConditions: BoundaryConditions
@@ -530,18 +591,18 @@ public struct NewtonRaphsonSolver: PDESolver {
         let psi_new = xNew[layout.psiRange]
 
         // Get transient coefficients.
-        // These multiply the time derivative term: transientCoeff * ∂u/∂t
-        let transientCoeff_Ti = coeffsNew.ionCoeffs.transientCoeff.value        // n_e for Ti
-        let transientCoeff_Te = coeffsNew.electronCoeffs.transientCoeff.value   // n_e for Te
-        let transientCoeff_ne = coeffsNew.densityCoeffs.transientCoeff.value    // 1.0 for ne
-        let transientCoeff_psi = coeffsNew.fluxCoeffs.transientCoeff.value      // L_p for psi
+        // These multiply the time derivative term: transientCoefficient * ∂u/∂t
+        let transientCoeff_Ti = coeffsNew.ionCoeffs.transientCoefficient.value        // n_e for Ti
+        let transientCoeff_Te = coeffsNew.electronCoeffs.transientCoefficient.value   // n_e for Te
+        let transientCoeff_ne = coeffsNew.densityCoeffs.transientCoefficient.value    // 1.0 for ne
+        let transientCoeff_psi = coeffsNew.fluxCoeffs.transientCoefficient.value      // L_p for psi
 
         // Time derivative terms WITH transient coefficients
-        // Correct form: transientCoeff * (u_new - u_old) / dt
-        let dTi_dt = transientCoeff_Ti * (Ti_new - Ti_old) / dt
-        let dTe_dt = transientCoeff_Te * (Te_new - Te_old) / dt
-        let dne_dt = transientCoeff_ne * (ne_new - ne_old) / dt
-        let dpsi_dt = transientCoeff_psi * (psi_new - psi_old) / dt
+        // Correct form: transientCoefficient * (u_new - u_old) / timeStep
+        let dTi_dt = transientCoeff_Ti * (Ti_new - Ti_old) / timeStep
+        let dTe_dt = transientCoeff_Te * (Te_new - Te_old) / timeStep
+        let dne_dt = transientCoeff_ne * (ne_new - ne_old) / timeStep
+        let dpsi_dt = transientCoeff_psi * (psi_new - psi_old) / timeStep
 
         // Spatial operators at new time (VECTORIZED) - with boundary conditions.
         // The transport channels (Ti, Te, ne) use Pereverzev-Galeev–augmented
@@ -663,7 +724,7 @@ public struct NewtonRaphsonSolver: PDESolver {
     /// linearization can yield a direction along which every step *increases* the
     /// residual. Taking a fixed fallback step there compounds into divergence
     /// (residual blows up, temperatures reach unphysical values). The caller treats
-    /// `nil` as "this dt is too large" and reduces the timestep instead of corrupting
+    /// `nil` as "this timeStep is too large" and reduces the timestep instead of corrupting
     /// the iterate with a residual-increasing step.
     private func lineSearch(
         residualFn: (MLXArray) -> MLXArray,
@@ -673,7 +734,7 @@ public struct NewtonRaphsonSolver: PDESolver {
         maxAlpha: Float
     ) -> Float? {
         let beta: Float = 0.5  // Reduction factor
-        let maxIterations = 10
+        let maximumIterations = 10
         let batchSize = 4
         var alpha = maxAlpha
 
@@ -688,11 +749,11 @@ public struct NewtonRaphsonSolver: PDESolver {
         alpha *= beta
         var checked = 1
 
-        while checked < maxIterations {
+        while checked < maximumIterations {
             var batchAlphas: [Float] = []
             var batchNorms: [MLXArray] = []
 
-            while batchAlphas.count < batchSize && checked < maxIterations {
+            while batchAlphas.count < batchSize && checked < maximumIterations {
                 let xNew = x + alpha * delta
                 let residualNew = residualFn(xNew)
                 batchAlphas.append(alpha)
@@ -710,7 +771,7 @@ public struct NewtonRaphsonSolver: PDESolver {
         }
 
         // No tried step reduces the residual: signal failure so the caller can
-        // reduce dt rather than take a residual-increasing (divergent) step.
+        // reduce timeStep rather than take a residual-increasing (divergent) step.
         return nil
     }
 }

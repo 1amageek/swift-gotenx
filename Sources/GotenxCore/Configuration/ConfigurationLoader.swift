@@ -6,17 +6,22 @@ import Foundation
 /// Configuration loader with hierarchical override
 ///
 /// Override priority (highest to lowest):
-/// 1. CLI arguments (--mesh-ncells=200)
-/// 2. Environment variables (GOTENX_MESH_NCELLS=200)
+/// 1. CLI arguments (--mesh-cell-count=200)
+/// 2. Environment variables (GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT=200)
 /// 3. JSON configuration file
 /// 4. Default values
 public struct ConfigurationLoader: Sendable {
     private let providers: [any ConfigurationProvider]
+    private let overrides: [ConfigurationOverrides]
 
     /// Initialize with custom providers
-    public init(providers: [any ConfigurationProvider]) {
+    public init(
+        providers: [any ConfigurationProvider],
+        overrides: [ConfigurationOverrides] = []
+    ) {
         // Sort by priority (highest first)
         self.providers = providers.sorted { $0.priority > $1.priority }
+        self.overrides = overrides
     }
 
     /// Initialize with standard providers
@@ -26,14 +31,6 @@ public struct ConfigurationLoader: Sendable {
     ) -> ConfigurationLoader {
         var providers: [any ConfigurationProvider] = []
 
-        // CLI provider (highest priority)
-        if !cliArguments.isEmpty {
-            providers.append(CLIConfigurationProvider(arguments: cliArguments))
-        }
-
-        // Environment provider
-        providers.append(EnvironmentConfigurationProvider())
-
         // JSON provider
         if let configFile = configFile {
             providers.append(JSONConfigurationProvider(filePath: configFile))
@@ -42,7 +39,13 @@ public struct ConfigurationLoader: Sendable {
         // Default provider (lowest priority)
         providers.append(DefaultConfigurationProvider())
 
-        return ConfigurationLoader(providers: providers)
+        return ConfigurationLoader(
+            providers: providers,
+            overrides: [
+                ConfigurationOverrides.fromEnvironment(),
+                ConfigurationOverrides.fromCLI(cliArguments)
+            ]
+        )
     }
 
     /// Load configuration with hierarchical override
@@ -63,8 +66,15 @@ public struct ConfigurationLoader: Sendable {
             }
         }
 
-        guard let finalConfig = config else {
+        guard var finalConfig = config else {
             throw ConfigurationError.missingRequired(key: "configuration")
+        }
+
+        for override in overrides where !override.isEmpty {
+            finalConfig = try Self.applyingOverrides(
+                to: finalConfig,
+                overrides: override
+            )
         }
 
         // Validate final configuration
@@ -89,6 +99,15 @@ public struct ConfigurationLoader: Sendable {
         baseConfig: SimulationConfiguration,
         overrides: ConfigurationOverrides
     ) throws -> SimulationConfiguration {
+        let config = try applyingOverrides(to: baseConfig, overrides: overrides)
+        try ConfigurationValidator.validate(config)
+        return config
+    }
+
+    private static func applyingOverrides(
+        to baseConfig: SimulationConfiguration,
+        overrides: ConfigurationOverrides
+    ) throws -> SimulationConfiguration {
         var builder = SimulationConfiguration.Builder()
 
         // Apply base config to builder
@@ -106,7 +125,7 @@ public struct ConfigurationLoader: Sendable {
 
         builder.time.start = baseConfig.time.start
         builder.time.end = baseConfig.time.end
-        builder.time.initialDt = baseConfig.time.initialDt
+        builder.time.initialTimeStep = baseConfig.time.initialTimeStep
         builder.time.adaptive = baseConfig.time.adaptive
 
         builder.output.saveInterval = baseConfig.output.saveInterval
@@ -114,8 +133,8 @@ public struct ConfigurationLoader: Sendable {
         builder.output.format = baseConfig.output.format
 
         // Apply overrides
-        if let nCells = overrides.meshNCells {
-            builder.runtime.static.mesh.nCells = nCells
+        if let cellCount = overrides.meshCellCount {
+            builder.runtime.static.mesh.cellCount = cellCount
         }
         if let majorRadius = overrides.meshMajorRadius {
             builder.runtime.static.mesh.majorRadius = majorRadius
@@ -126,50 +145,57 @@ public struct ConfigurationLoader: Sendable {
         if let timeEnd = overrides.timeEnd {
             builder.time.end = timeEnd
         }
-        if let initialDt = overrides.initialDt {
-            builder.time.initialDt = initialDt
+        if let initialTimeStep = overrides.initialTimeStep {
+            builder.time.initialTimeStep = initialTimeStep
         }
         if let outputDir = overrides.outputDirectory {
             builder.output.directory = outputDir
         }
 
-        let config = builder.build()
-        try ConfigurationValidator.validate(config)
-        return config
+        return builder.build()
     }
 }
 
 /// Configuration overrides from CLI/environment
 public struct ConfigurationOverrides: Sendable {
-    public var meshNCells: Int?
+    public var meshCellCount: Int?
     public var meshMajorRadius: Float?
     public var meshMinorRadius: Float?
     public var timeEnd: Float?
-    public var initialDt: Float?
+    public var initialTimeStep: Float?
     public var outputDirectory: String?
 
     public init(
-        meshNCells: Int? = nil,
+        meshCellCount: Int? = nil,
         meshMajorRadius: Float? = nil,
         meshMinorRadius: Float? = nil,
         timeEnd: Float? = nil,
-        initialDt: Float? = nil,
+        initialTimeStep: Float? = nil,
         outputDirectory: String? = nil
     ) {
-        self.meshNCells = meshNCells
+        self.meshCellCount = meshCellCount
         self.meshMajorRadius = meshMajorRadius
         self.meshMinorRadius = meshMinorRadius
         self.timeEnd = timeEnd
-        self.initialDt = initialDt
+        self.initialTimeStep = initialTimeStep
         self.outputDirectory = outputDirectory
+    }
+
+    public var isEmpty: Bool {
+        meshCellCount == nil &&
+        meshMajorRadius == nil &&
+        meshMinorRadius == nil &&
+        timeEnd == nil &&
+        initialTimeStep == nil &&
+        outputDirectory == nil
     }
 
     /// Parse from CLI arguments
     public static func fromCLI(_ arguments: [String: String]) -> ConfigurationOverrides {
         var overrides = ConfigurationOverrides()
 
-        if let value = arguments["mesh-ncells"], let intValue = Int(value) {
-            overrides.meshNCells = intValue
+        if let value = arguments["mesh-cell-count"], let intValue = Int(value) {
+            overrides.meshCellCount = intValue
         }
         if let value = arguments["mesh-major-radius"], let floatValue = Float(value) {
             overrides.meshMajorRadius = floatValue
@@ -180,8 +206,8 @@ public struct ConfigurationOverrides: Sendable {
         if let value = arguments["time-end"], let floatValue = Float(value) {
             overrides.timeEnd = floatValue
         }
-        if let value = arguments["initial-dt"], let floatValue = Float(value) {
-            overrides.initialDt = floatValue
+        if let value = arguments["initial-time-step"], let floatValue = Float(value) {
+            overrides.initialTimeStep = floatValue
         }
         if let value = arguments["output-dir"] {
             overrides.outputDirectory = value
@@ -195,22 +221,22 @@ public struct ConfigurationOverrides: Sendable {
         var overrides = ConfigurationOverrides()
         let env = ProcessInfo.processInfo.environment
 
-        if let value = env[prefix + "MESH_NCELLS"], let intValue = Int(value) {
-            overrides.meshNCells = intValue
+        if let value = env[prefix + "RUNTIME_STATIC_MESH_CELL_COUNT"], let intValue = Int(value) {
+            overrides.meshCellCount = intValue
         }
-        if let value = env[prefix + "MESH_MAJOR_RADIUS"], let floatValue = Float(value) {
+        if let value = env[prefix + "RUNTIME_STATIC_MESH_MAJOR_RADIUS"], let floatValue = Float(value) {
             overrides.meshMajorRadius = floatValue
         }
-        if let value = env[prefix + "MESH_MINOR_RADIUS"], let floatValue = Float(value) {
+        if let value = env[prefix + "RUNTIME_STATIC_MESH_MINOR_RADIUS"], let floatValue = Float(value) {
             overrides.meshMinorRadius = floatValue
         }
         if let value = env[prefix + "TIME_END"], let floatValue = Float(value) {
             overrides.timeEnd = floatValue
         }
-        if let value = env[prefix + "INITIAL_DT"], let floatValue = Float(value) {
-            overrides.initialDt = floatValue
+        if let value = env[prefix + "TIME_INITIAL_TIME_STEP"], let floatValue = Float(value) {
+            overrides.initialTimeStep = floatValue
         }
-        if let value = env[prefix + "OUTPUT_DIR"] {
+        if let value = env[prefix + "OUTPUT_DIRECTORY"] {
             overrides.outputDirectory = value
         }
 
@@ -222,7 +248,7 @@ public struct ConfigurationOverrides: Sendable {
 extension MeshConfig {
     public func toBuilder() -> SimulationConfiguration.MeshBuilder {
         var builder = SimulationConfiguration.MeshBuilder()
-        builder.nCells = self.nCells
+        builder.cellCount = self.cellCount
         builder.majorRadius = self.majorRadius
         builder.minorRadius = self.minorRadius
         builder.toroidalField = self.toroidalField

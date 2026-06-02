@@ -220,7 +220,7 @@ public struct DiagnosticsReport: Sendable, Codable {
     /// Get maximum conservation drift
     ///
     /// - Returns: Maximum relative drift across all laws
-    public func maxConservationDrift() -> Float {
+    public func maximumConservationDrift() -> Float {
         return conservationResults.map { $0.relativeDrift }.max() ?? 0.0
     }
 
@@ -235,7 +235,7 @@ public struct DiagnosticsReport: Sendable, Codable {
             "errorCount": results.filter { $0.severity == .error }.count,
             "criticalCount": results.filter { $0.severity == .critical }.count,
             "conservationLaws": conservationResults.map { $0.lawName }.uniqued(),
-            "maxConservationDrift": maxConservationDrift(),
+            "maximumConservationDrift": maximumConservationDrift(),
             "hasCriticalIssues": hasCriticalIssues()
         ]
     }

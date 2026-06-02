@@ -90,8 +90,8 @@ public struct CoreProfiles: Sendable {
 }
 
 public struct TransportCoefficients: Sendable {
-    public let chiIon: EvaluatedArray
-    public let chiElectron: EvaluatedArray
+    public let ionHeatDiffusivity: EvaluatedArray
+    public let electronHeatDiffusivity: EvaluatedArray
     public let particleDiffusivity: EvaluatedArray
     public let convectionVelocity: EvaluatedArray
 }
@@ -120,14 +120,14 @@ func computeTransport(_ profiles: CoreProfiles) -> TransportCoefficients {
     let te = profiles.electronTemperature.value
 
     // Chain operations (lazy)
-    let chiIon = exp(-1000.0 / ti)
-    let chiElectron = exp(-1000.0 / te)
+    let ionHeatDiffusivity = exp(-1000.0 / ti)
+    let electronHeatDiffusivity = exp(-1000.0 / te)
 
     // Force evaluation before wrapping
     return TransportCoefficients(
-        chiIon: EvaluatedArray(evaluating: chiIon),
-        chiElectron: EvaluatedArray(evaluating: chiElectron),
-        particleDiffusivity: EvaluatedArray(evaluating: chiElectron * 0.5),
+        ionHeatDiffusivity: EvaluatedArray(evaluating: ionHeatDiffusivity),
+        electronHeatDiffusivity: EvaluatedArray(evaluating: electronHeatDiffusivity),
+        particleDiffusivity: EvaluatedArray(evaluating: electronHeatDiffusivity * 0.5),
         convectionVelocity: EvaluatedArray.zeros([profiles.ionTemperature.shape[0]])
     )
 }

@@ -46,7 +46,7 @@ public struct DefaultConfigurationProvider: ConfigurationProvider {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 6.2,
                         minorRadius: 2.0,
                         toroidalField: 5.3,
@@ -60,14 +60,14 @@ public struct DefaultConfigurationProvider: ConfigurationProvider {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,        // CFL-safe for typical mesh/timestep
-                            "chi_electron": 0.01,   // CFL-safe for typical mesh/timestep
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     ),
                     sources: .default,
@@ -77,7 +77,7 @@ public struct DefaultConfigurationProvider: ConfigurationProvider {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 2.0,
-                initialDt: 1e-5,
+                initialTimeStep: 1e-5,
                 adaptive: .default
             ),
             output: .default
@@ -112,7 +112,7 @@ public struct JSONConfigurationProvider: ConfigurationProvider {
 /// Environment variable configuration provider
 ///
 /// Reads configuration overrides from environment variables with prefix "GOTENX_"
-/// Example: GOTENX_MESH_NCELLS=200, GOTENX_TIME_END=5.0
+/// Example: GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT=200, GOTENX_TIME_END=5.0
 public struct EnvironmentConfigurationProvider: ConfigurationProvider {
     public let priority: Int = ProviderPriority.environment
     private let prefix: String
@@ -129,7 +129,7 @@ public struct EnvironmentConfigurationProvider: ConfigurationProvider {
     }
 
     /// Get environment variable value
-    public func getValue(for key: String) -> String? {
+    public func value(for key: String) -> String? {
         let envKey = prefix + key.uppercased()
         return ProcessInfo.processInfo.environment[envKey]
     }
@@ -153,7 +153,7 @@ public struct CLIConfigurationProvider: ConfigurationProvider {
     }
 
     /// Get CLI argument value
-    public func getValue(for key: String) -> String? {
+    public func value(for key: String) -> String? {
         return arguments[key]
     }
 }

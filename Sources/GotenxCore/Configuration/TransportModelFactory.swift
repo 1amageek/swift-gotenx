@@ -11,32 +11,33 @@ public struct TransportModelFactory {
     /// - Returns: Instantiated transport model
     /// - Throws: ConfigurationError if model type is invalid or not implemented
     public static func create(config: TransportConfig) throws -> any TransportModel {
-        let params = config.toTransportParameters()
+        try config.validateParameterKeys()
+        let parameters = config.transportParameters()
 
         // config.modelType is already TransportModelType enum
         switch config.modelType {
         case .constant:
-            return ConstantTransportModel(params: params)
+            return try ConstantTransportModel(parameters: parameters)
 
         case .bohmGyrobohm:
-            return BohmGyroBohmTransportModel(params: params)
+            return try BohmGyroBohmTransportModel(parameters: parameters)
 
         case .qlknn:
-            return try QLKNNTransportModel(params: params)
+            return try QLKNNTransportModel(parameters: parameters)
 
         case .densityTransition:
             // Extract parameters with defaults
-            let riCoefficient = params.params["ri_coefficient"] ?? 0.5
-            let transitionDensity = params.params["transition_density"] ?? 2.5e19
-            let transitionWidth = params.params["transition_width"] ?? 0.5e19
-            let ionMassNumber = params.params["ion_mass_number"] ?? 2.0
+            let riCoefficient = parameters.parameters["riCoefficient"] ?? 0.5
+            let transitionDensity = parameters.parameters["transitionDensity"] ?? 2.5e19
+            let transitionWidth = parameters.parameters["transitionWidth"] ?? 0.5e19
+            let ionMassNumber = parameters.parameters["ionMassNumber"] ?? 2.0
 
             // Create ITG model (default: Bohm-GyroBohm)
             let itgModel = BohmGyroBohmTransportModel()
 
             // Create RI model
             let riModel = ResistiveInterchangeModel(
-                coefficientRI: riCoefficient,
+                riCoefficient: riCoefficient,
                 ionMassNumber: ionMassNumber
             )
 
@@ -57,8 +58,22 @@ public struct TransportModelFactory {
     /// - Returns: Instantiated transport model with default parameters
     /// - Throws: ConfigurationError if model type is not implemented
     public static func createDefault(_ modelType: TransportModelType) throws -> any TransportModel {
-        let config = TransportConfig(modelType: modelType)
-        return try create(config: config)
+        switch modelType {
+        case .constant:
+            return ConstantTransportModel(
+                ionHeatDiffusivity: 1.0,
+                electronHeatDiffusivity: 1.0
+            )
+
+        case .bohmGyrobohm:
+            return BohmGyroBohmTransportModel()
+
+        case .qlknn:
+            return try QLKNNTransportModel()
+
+        case .densityTransition:
+            return DensityTransitionModel.createDefault()
+        }
     }
 }
 

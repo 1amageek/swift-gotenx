@@ -7,11 +7,11 @@ extension CoreProfiles {
     /// Convert to tuple of CellVariables for solver interface
     ///
     /// - Parameters:
-    ///   - dr: Cell spacing
+    ///   - radialSpacing: Cell spacing
     ///   - boundaryConditions: Boundary conditions to apply
     /// - Returns: Tuple of (Ti, Te, ne, psi) as CellVariables
     public func asTuple(
-        dr: Float,
+        radialSpacing: Float,
         boundaryConditions: BoundaryConditions
     ) -> (CellVariable, CellVariable, CellVariable, CellVariable) {
         // Extract boundary conditions
@@ -23,35 +23,35 @@ extension CoreProfiles {
         return (
             CellVariable(
                 value: ionTemperature.value,
-                dr: dr,
+                radialSpacing: radialSpacing,
                 leftFaceConstraint: tiLeft.value,
-                leftFaceGradConstraint: tiLeft.gradient,
+                leftFaceGradientConstraint: tiLeft.gradient,
                 rightFaceConstraint: tiRight.value,
-                rightFaceGradConstraint: tiRight.gradient
+                rightFaceGradientConstraint: tiRight.gradient
             ),
             CellVariable(
                 value: electronTemperature.value,
-                dr: dr,
+                radialSpacing: radialSpacing,
                 leftFaceConstraint: teLeft.value,
-                leftFaceGradConstraint: teLeft.gradient,
+                leftFaceGradientConstraint: teLeft.gradient,
                 rightFaceConstraint: teRight.value,
-                rightFaceGradConstraint: teRight.gradient
+                rightFaceGradientConstraint: teRight.gradient
             ),
             CellVariable(
                 value: electronDensity.value,
-                dr: dr,
+                radialSpacing: radialSpacing,
                 leftFaceConstraint: neLeft.value,
-                leftFaceGradConstraint: neLeft.gradient,
+                leftFaceGradientConstraint: neLeft.gradient,
                 rightFaceConstraint: neRight.value,
-                rightFaceGradConstraint: neRight.gradient
+                rightFaceGradientConstraint: neRight.gradient
             ),
             CellVariable(
                 value: poloidalFlux.value,
-                dr: dr,
+                radialSpacing: radialSpacing,
                 leftFaceConstraint: psiLeft.value,
-                leftFaceGradConstraint: psiLeft.gradient,
+                leftFaceGradientConstraint: psiLeft.gradient,
                 rightFaceConstraint: psiRight.value,
-                rightFaceGradConstraint: psiRight.gradient
+                rightFaceGradientConstraint: psiRight.gradient
             )
         )
     }

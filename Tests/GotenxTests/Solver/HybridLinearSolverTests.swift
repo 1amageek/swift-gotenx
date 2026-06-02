@@ -15,7 +15,7 @@ struct HybridLinearSolverTests {
             gpuDimensionLimit: 3
         )
 
-        let solution = try solver.solve(matrix, rhs).asArray(Float.self)
+        let solution = try solver.solve(matrix, rightHandSide: rhs).asArray(Float.self)
 
         #expect(abs(solution[0] - 1.0) < 1e-4)
         #expect(abs(solution[1] - 2.0) < 1e-4)
@@ -36,7 +36,7 @@ struct HybridLinearSolverTests {
             gpuDimensionLimit: 16
         )
 
-        let solution = try solver.solve(matrix, rhs).asArray(Float.self)
+        let solution = try solver.solve(matrix, rightHandSide: rhs).asArray(Float.self)
         let maxError = zip(solution, expected)
             .map { abs($0 - $1) }
             .max() ?? .infinity

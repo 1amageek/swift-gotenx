@@ -23,34 +23,34 @@ public struct PowerLawScheme {
     /// Pe = V·Δx / D
     ///
     /// - Parameters:
-    ///   - vFace: Convection velocity at faces [m/s], shape [nFaces]
-    ///   - dFace: Diffusion coefficient at faces [m²/s], shape [nFaces]
-    ///   - dx: Cell spacing [m], shape [nFaces-1] or scalar
-    /// - Returns: Péclet number [dimensionless], shape [nFaces]
+    ///   - faceConvectionVelocity: Convection velocity at faces [m/s], shape [faceCount]
+    ///   - faceDiffusionCoefficient: Diffusion coefficient at faces [m²/s], shape [faceCount]
+    ///   - cellSpacing: Cell spacing [m], shape [faceCount-1] or scalar
+    /// - Returns: Péclet number [dimensionless], shape [faceCount]
     public static func computePecletNumber(
-        vFace: MLXArray,
-        dFace: MLXArray,
-        dx: MLXArray
+        faceConvectionVelocity: MLXArray,
+        faceDiffusionCoefficient: MLXArray,
+        cellSpacing: MLXArray
     ) -> MLXArray {
         // Prevent division by zero
-        let dFace_safe = dFace + 1e-30
+        let safeFaceDiffusionCoefficient = faceDiffusionCoefficient + 1e-30
 
-        // Broadcast dx to [nFaces] if needed
-        let dx_broadcast: MLXArray
-        if dx.ndim == 0 {
+        // Broadcast cellSpacing to [faceCount] if needed
+        let broadcastCellSpacing: MLXArray
+        if cellSpacing.ndim == 0 {
             // Scalar: create full array
-            dx_broadcast = MLXArray.full([vFace.shape[0]], values: dx)
-        } else if dx.shape[0] == vFace.shape[0] - 2 {
-            // dx is [nFaces-1] (interior only): pad boundaries
-            let dx_left = dx[0..<1]
-            let dx_right = dx[(dx.shape[0]-1)..<dx.shape[0]]
-            dx_broadcast = concatenated([dx_left, dx, dx_right], axis: 0)
+            broadcastCellSpacing = MLXArray.full([faceConvectionVelocity.shape[0]], values: cellSpacing)
+        } else if cellSpacing.shape[0] == faceConvectionVelocity.shape[0] - 2 {
+            // cellSpacing is [faceCount-1] (interior only): pad boundaries
+            let leftSpacing = cellSpacing[0..<1]
+            let rightSpacing = cellSpacing[(cellSpacing.shape[0]-1)..<cellSpacing.shape[0]]
+            broadcastCellSpacing = concatenated([leftSpacing, cellSpacing, rightSpacing], axis: 0)
         } else {
             // Already correct size
-            dx_broadcast = dx
+            broadcastCellSpacing = cellSpacing
         }
 
-        return vFace * dx_broadcast / dFace_safe
+        return faceConvectionVelocity * broadcastCellSpacing / safeFaceDiffusionCoefficient
     }
 
     /// Compute power-law weighting factor α for face interpolation
@@ -68,8 +68,8 @@ public struct PowerLawScheme {
     /// - Pe = 0: α = 1 → central differencing (2nd order accurate)
     /// - Pe = 10: α = 0 → full upwinding (1st order, stable)
     ///
-    /// - Parameter peclet: Péclet number [dimensionless], shape [nFaces]
-    /// - Returns: Weighting factor α ∈ [0,1], shape [nFaces]
+    /// - Parameter peclet: Péclet number [dimensionless], shape [faceCount]
+    /// - Returns: Weighting factor α ∈ [0,1], shape [faceCount]
     public static func computeWeightingFactor(peclet: MLXArray) -> MLXArray {
         let absPe = abs(peclet)
 
@@ -88,18 +88,18 @@ public struct PowerLawScheme {
     /// Compute face values using power-law weighting
     ///
     /// - Parameters:
-    ///   - cellValues: Values at cell centers [nCells]
-    ///   - peclet: Péclet number at faces [nFaces]
-    /// - Returns: Weighted face values [nFaces]
+    ///   - cellValues: Values at cell centers [cellCount]
+    ///   - peclet: Péclet number at faces [faceCount]
+    /// - Returns: Weighted face values [faceCount]
     public static func interpolateToFaces(
         cellValues: MLXArray,
         peclet: MLXArray
     ) -> MLXArray {
-        let nCells = cellValues.shape[0]
+        let cellCount = cellValues.shape[0]
 
         // Interior faces: power-law weighted
-        let leftCells = cellValues[0..<(nCells-1)]
-        let rightCells = cellValues[1..<nCells]
+        let leftCells = cellValues[0..<(cellCount-1)]
+        let rightCells = cellValues[1..<cellCount]
         let pecletInterior = peclet[1..<(peclet.shape[0]-1)]
 
         let alpha = computeWeightingFactor(peclet: pecletInterior)
@@ -123,7 +123,7 @@ public struct PowerLawScheme {
 
         // Boundary faces: use adjacent cell value
         let faceLeft = cellValues[0..<1]
-        let faceRight = cellValues[(nCells-1)..<nCells]
+        let faceRight = cellValues[(cellCount-1)..<cellCount]
 
         return concatenated([faceLeft, faceInterior, faceRight], axis: 0)
     }

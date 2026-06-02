@@ -13,10 +13,10 @@ public struct ConstantTransportModel: TransportModel {
     public let name = "constant"
 
     /// Ion heat diffusivity [m^2/s]
-    public let chiIonValue: Float
+    public let ionHeatDiffusivityValue: Float
 
     /// Electron heat diffusivity [m^2/s]
-    public let chiElectronValue: Float
+    public let electronHeatDiffusivityValue: Float
 
     /// Particle diffusivity [m^2/s]
     public let particleDiffusivityValue: Float
@@ -29,30 +29,38 @@ public struct ConstantTransportModel: TransportModel {
     /// Initialize constant transport model
     ///
     /// - Parameters:
-    ///   - chiIon: Ion heat diffusivity [m^2/s]
-    ///   - chiElectron: Electron heat diffusivity [m^2/s]
+    ///   - ionHeatDiffusivity: Ion heat diffusivity [m^2/s]
+    ///   - electronHeatDiffusivity: Electron heat diffusivity [m^2/s]
     ///   - particleDiffusivity: Particle diffusivity [m^2/s]
     ///   - convectionVelocity: Convection velocity [m/s]
     public init(
-        chiIon: Float,
-        chiElectron: Float,
+        ionHeatDiffusivity: Float,
+        electronHeatDiffusivity: Float,
         particleDiffusivity: Float = 0.0,
         convectionVelocity: Float = 0.0
     ) {
-        self.chiIonValue = chiIon
-        self.chiElectronValue = chiElectron
+        self.ionHeatDiffusivityValue = ionHeatDiffusivity
+        self.electronHeatDiffusivityValue = electronHeatDiffusivity
         self.particleDiffusivityValue = particleDiffusivity
         self.convectionVelocityValue = convectionVelocity
     }
 
     /// Initialize from parameters dictionary
     ///
-    /// - Parameter params: Transport parameters
-    public init(params: TransportParameters) {
-        self.chiIonValue = params.params["chi_ion"] ?? 1.0
-        self.chiElectronValue = params.params["chi_electron"] ?? 1.0
-        self.particleDiffusivityValue = params.params["particle_diffusivity"] ?? 0.0
-        self.convectionVelocityValue = params.params["convection_velocity"] ?? 0.0
+    /// - Parameter parameters: Transport parameters
+    public init(parameters: TransportParameters) throws {
+        self.ionHeatDiffusivityValue = try parameters.requireParameter(
+            "ionHeatDiffusivity",
+            modelType: .constant,
+            suggestion: "Specify ionHeatDiffusivity in constant transport parameters"
+        )
+        self.electronHeatDiffusivityValue = try parameters.requireParameter(
+            "electronHeatDiffusivity",
+            modelType: .constant,
+            suggestion: "Specify electronHeatDiffusivity in constant transport parameters"
+        )
+        self.particleDiffusivityValue = parameters.parameters["particleDiffusivity"] ?? 0.0
+        self.convectionVelocityValue = parameters.parameters["convectionVelocity"] ?? 0.0
     }
 
     // MARK: - TransportModel Protocol
@@ -60,16 +68,16 @@ public struct ConstantTransportModel: TransportModel {
     public func computeCoefficients(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: TransportParameters
+        parameters: TransportParameters
     ) -> TransportCoefficients {
-        let nCells = profiles.ionTemperature.shape[0]
+        let cellCount = profiles.ionTemperature.shape[0]
 
         // Create constant arrays
         return TransportCoefficients(
-            evaluatingChiIon: MLXArray.full([nCells], values: MLXArray(chiIonValue)),
-            chiElectron: MLXArray.full([nCells], values: MLXArray(chiElectronValue)),
-            particleDiffusivity: MLXArray.full([nCells], values: MLXArray(particleDiffusivityValue)),
-            convectionVelocity: MLXArray.full([nCells], values: MLXArray(convectionVelocityValue))
+            ionHeatDiffusivity: MLXArray.full([cellCount], values: MLXArray(ionHeatDiffusivityValue)),
+            electronHeatDiffusivity: MLXArray.full([cellCount], values: MLXArray(electronHeatDiffusivityValue)),
+            particleDiffusivity: MLXArray.full([cellCount], values: MLXArray(particleDiffusivityValue)),
+            convectionVelocity: MLXArray.full([cellCount], values: MLXArray(convectionVelocityValue))
         )
     }
 }

@@ -48,8 +48,8 @@ public struct MLXGradient {
         if n == 2 {
             // Only two points: use simple difference
             let df = field[1] - field[0]
-            let dr = radii[1] - radii[0]
-            let grad = df / dr
+            let radialSpacing = radii[1] - radii[0]
+            let grad = df / radialSpacing
             return stacked([grad, grad], axis: 0)
         }
 
@@ -87,7 +87,7 @@ public struct MLXGradient {
 
     /// Compute normalized gradient: L/L_T = -L(∇T/T)
     ///
-    /// **General Formula**: `L/L_T = -L * (dT/dr) / T`
+    /// **General Formula**: `L/L_T = -L * (dT/radialSpacing) / T`
     ///
     /// where L is an arbitrary normalization length scale:
     /// - L = a (minor radius): gives a/L_T (TORAX convention)
@@ -121,19 +121,9 @@ public struct MLXGradient {
         return -(normalizationLength * gradient) / profile
     }
 
-    @available(*, deprecated, renamed: "normalizedGradient(profile:radii:normalizationLength:)",
-               message: "Use normalizationLength parameter for clarity")
-    public static func normalizedGradient(
-        profile: MLXArray,
-        radii: MLXArray,
-        minorRadius: Float
-    ) -> MLXArray {
-        return normalizedGradient(profile: profile, radii: radii, normalizationLength: minorRadius)
-    }
-
     // MARK: - Magnetic Shear
 
-    /// Compute magnetic shear: s = (r/q)(dq/dr)
+    /// Compute magnetic shear: s = (r/q)(dq/radialSpacing)
     ///
     /// **Physical Interpretation**:
     /// - s > 0: Positive shear (q increases with r, stabilizing)
@@ -181,7 +171,7 @@ public struct MLXGradient {
     ///
     /// **Formula**:
     /// ```
-    /// ν* = (q R / ε^1.5) * C * Z_eff * ne * log(Λ) / Te^2
+    /// ν* = (q R / ε^1.5) * C * effectiveCharge * ne * log(Λ) / Te^2
     /// ```
     ///
     /// where:
@@ -195,39 +185,39 @@ public struct MLXGradient {
     /// - ν* > 10: Collisional regime (Pfirsch-Schlüter transport)
     ///
     /// **Units**:
-    /// - ne: [m^-3]
-    /// - Te: [eV]
-    /// - Ti: [eV] (not used in this simplified formula)
+    /// - electronDensity: [m^-3]
+    /// - electronTemperature: [eV]
+    /// - ionTemperature: [eV] (not used in this simplified formula)
     /// - Output: log10(ν*) (dimensionless)
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m^-3]
-    ///   - Te: Electron temperature [eV]
+    ///   - electronDensity: Electron density [m^-3]
+    ///   - electronTemperature: Electron temperature [eV]
     ///   - q: Safety factor profile
     ///   - radii: Minor radius coordinates [m]
     ///   - majorRadius: Major radius R [m]
-    ///   - Zeff: Effective charge (default: 1.0 for pure deuterium)
+    ///   - effectiveCharge: Effective charge (default: 1.0 for pure deuterium)
     /// - Returns: log10(ν*) [dimensionless]
     public static func collisionality(
-        ne: MLXArray,
-        Te: MLXArray,
+        electronDensity: MLXArray,
+        electronTemperature: MLXArray,
         q: MLXArray,
         radii: MLXArray,
         majorRadius: Float,
-        Zeff: Float = 1.0
+        effectiveCharge: Float = 1.0
     ) -> MLXArray {
         // Inverse aspect ratio
         let epsilon = radii / majorRadius
 
         // Coulomb logarithm: log(Λ) ≈ 15.2 - 0.5*log(ne/1e20) + log(Te/1000)
-        let logLambda = Float(15.2) - Float(0.5) * log(ne / Float(1e20)) + log(Te / Float(1000.0))
+        let logLambda = Float(15.2) - Float(0.5) * log(electronDensity / Float(1e20)) + log(electronTemperature / Float(1000.0))
 
         // Collision frequency constant [m³ eV² / s]
         let C: Float = 6.92e-15
 
-        // ν* = (q R / ε^1.5) * C * Z_eff * ne * log(Λ) / Te²
+        // ν* = (q R / ε^1.5) * C * effectiveCharge * ne * log(Λ) / Te²
         let nuStar = (q * majorRadius / pow(epsilon, Float(1.5)))
-                   * C * Zeff * ne * logLambda / pow(Te, Float(2))
+                   * C * effectiveCharge * electronDensity * logLambda / pow(electronTemperature, Float(2))
 
         // Return log10(ν*) for QLKNN input
         return log10(nuStar)
@@ -243,14 +233,14 @@ public struct MLXGradient {
     /// - Ti/Te < 0.8: Electron-dominated heating (ECRH, Ohmic)
     ///
     /// - Parameters:
-    ///   - Ti: Ion temperature [eV]
-    ///   - Te: Electron temperature [eV]
+    ///   - ionTemperature: Ion temperature [eV]
+    ///   - electronTemperature: Electron temperature [eV]
     /// - Returns: Ti/Te ratio [dimensionless]
     public static func temperatureRatio(
-        Ti: MLXArray,
-        Te: MLXArray
+        ionTemperature: MLXArray,
+        electronTemperature: MLXArray
     ) -> MLXArray {
-        return Ti / Te
+        return ionTemperature / electronTemperature
     }
 
     // MARK: - Density Ratio
@@ -262,13 +252,13 @@ public struct MLXGradient {
     /// For impurities: ni/ne < 1.0 (dilution effect)
     ///
     /// - Parameters:
-    ///   - ni: Ion density [m^-3]
-    ///   - ne: Electron density [m^-3]
+    ///   - ionDensity: Ion density [m^-3]
+    ///   - electronDensity: Electron density [m^-3]
     /// - Returns: ni/ne ratio [dimensionless]
     public static func densityRatio(
-        ni: MLXArray,
-        ne: MLXArray
+        ionDensity: MLXArray,
+        electronDensity: MLXArray
     ) -> MLXArray {
-        return ni / ne
+        return ionDensity / electronDensity
     }
 }

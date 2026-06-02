@@ -12,7 +12,7 @@ public struct BoundaryConfig: Codable, Sendable, Equatable {
     public let electronTemperature: Float
 
     /// Electron density at edge [m^-3]
-    public let density: Float
+    public let electronDensity: Float
 
     /// Boundary condition type
     public let type: BoundaryType
@@ -20,13 +20,39 @@ public struct BoundaryConfig: Codable, Sendable, Equatable {
     public init(
         ionTemperature: Float,
         electronTemperature: Float,
-        density: Float,
+        electronDensity: Float,
         type: BoundaryType = .dirichlet
     ) {
         self.ionTemperature = ionTemperature
         self.electronTemperature = electronTemperature
-        self.density = density
+        self.electronDensity = electronDensity
         self.type = type
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case ionTemperature
+        case electronTemperature
+        case electronDensity
+        case type
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+
+        self.init(
+            ionTemperature: try container.decode(Float.self, forKey: .ionTemperature),
+            electronTemperature: try container.decode(Float.self, forKey: .electronTemperature),
+            electronDensity: try container.decode(Float.self, forKey: .electronDensity),
+            type: try container.decodeIfPresent(BoundaryType.self, forKey: .type) ?? .dirichlet
+        )
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(ionTemperature, forKey: .ionTemperature)
+        try container.encode(electronTemperature, forKey: .electronTemperature)
+        try container.encode(electronDensity, forKey: .electronDensity)
+        try container.encode(type, forKey: .type)
     }
 }
 
@@ -69,7 +95,7 @@ extension BoundaryConfig {
             ),
             electronDensity: BoundaryCondition(
                 left: .gradient(0.0),
-                right: rightConstraint(density, type)
+                right: rightConstraint(electronDensity, type)
             ),
             poloidalFlux: BoundaryCondition(
                 left: .value(0.0),      // Flux = 0 at magnetic axis

@@ -136,10 +136,10 @@ public enum PhysicsValidation {
 
     /// Clamp Coulomb logarithm to physically reasonable bounds
     ///
-    /// - Parameter lnLambda: Raw Coulomb logarithm
+    /// - Parameter coulombLogarithm: Raw Coulomb logarithm
     /// - Returns: Bounded Coulomb logarithm [5, 25]
-    public static func clampCoulombLog(_ lnLambda: MLXArray) -> MLXArray {
+    public static func clampCoulombLog(_ coulombLogarithm: MLXArray) -> MLXArray {
         // Physical bounds: ln(Λ) ∈ [5, 25] for most plasmas
-        return MLX.clip(lnLambda, min: Float(5.0), max: Float(25.0))
+        return MLX.clip(coulombLogarithm, min: Float(5.0), max: Float(25.0))
     }
 }

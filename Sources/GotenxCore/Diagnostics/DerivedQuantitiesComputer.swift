@@ -54,48 +54,48 @@ public enum DerivedQuantitiesComputer {
         )
 
         return DerivedQuantities(
-            Ti_core: centralValues.Ti,
-            Te_core: centralValues.Te,
-            ne_core: centralValues.ne,
-            ne_avg: volumeAverages.ne,
-            Ti_avg: volumeAverages.Ti,
-            Te_avg: volumeAverages.Te,
-            W_thermal: totalEnergies.thermal,
-            W_ion: totalEnergies.ion,
-            W_electron: totalEnergies.electron,
-            P_fusion: advancedMetrics.P_fusion,
-            P_alpha: advancedMetrics.P_alpha,
-            P_auxiliary: advancedMetrics.P_auxiliary,
-            P_ohmic: advancedMetrics.P_ohmic,
-            Q_fusion: advancedMetrics.Q_fusion,
-            tau_E: advancedMetrics.tau_E,
-            tau_E_scaling: advancedMetrics.tau_E_scaling,
-            H_factor: advancedMetrics.H_factor,
-            beta_toroidal: advancedMetrics.beta_toroidal,
-            beta_poloidal: advancedMetrics.beta_poloidal,
-            beta_N: advancedMetrics.beta_N,
-            beta_N_limit: advancedMetrics.beta_N_limit,
-            I_plasma: advancedMetrics.I_plasma,
-            I_bootstrap: advancedMetrics.I_bootstrap,
-            f_bootstrap: advancedMetrics.f_bootstrap,
-            n_T_tau: advancedMetrics.n_T_tau
+            coreIonTemperature: centralValues.ionTemperature,
+            coreElectronTemperature: centralValues.electronTemperature,
+            coreElectronDensity: centralValues.electronDensity,
+            averageElectronDensity: volumeAverages.electronDensity,
+            averageIonTemperature: volumeAverages.ionTemperature,
+            averageElectronTemperature: volumeAverages.electronTemperature,
+            thermalEnergy: totalEnergies.thermal,
+            ionThermalEnergy: totalEnergies.ion,
+            electronThermalEnergy: totalEnergies.electron,
+            fusionPower: advancedMetrics.fusionPower,
+            alphaPower: advancedMetrics.alphaPower,
+            auxiliaryPower: advancedMetrics.auxiliaryPower,
+            ohmicPower: advancedMetrics.ohmicPower,
+            fusionGain: advancedMetrics.fusionGain,
+            energyConfinementTime: advancedMetrics.energyConfinementTime,
+            scalingEnergyConfinementTime: advancedMetrics.scalingEnergyConfinementTime,
+            confinementHFactor: advancedMetrics.confinementHFactor,
+            toroidalBeta: advancedMetrics.toroidalBeta,
+            poloidalBeta: advancedMetrics.poloidalBeta,
+            normalizedBeta: advancedMetrics.normalizedBeta,
+            normalizedBetaLimit: advancedMetrics.normalizedBetaLimit,
+            plasmaCurrent: advancedMetrics.plasmaCurrent,
+            bootstrapCurrent: advancedMetrics.bootstrapCurrent,
+            bootstrapFraction: advancedMetrics.bootstrapFraction,
+            tripleProduct: advancedMetrics.tripleProduct
         )
     }
 
     // MARK: - Central Values (ρ=0)
 
-    private static func computeCentralValues(profiles: CoreProfiles) -> (Ti: Float, Te: Float, ne: Float) {
+    private static func computeCentralValues(profiles: CoreProfiles) -> (ionTemperature: Float, electronTemperature: Float, electronDensity: Float) {
         // Extract central values (first cell, index 0)
         let Ti_array = profiles.ionTemperature.value
         let Te_array = profiles.electronTemperature.value
         let ne_array = profiles.electronDensity.value
 
         // GPU → CPU transfer (scalar only, cheap)
-        let Ti_core = Ti_array[0].item(Float.self)
-        let Te_core = Te_array[0].item(Float.self)
-        let ne_core = ne_array[0].item(Float.self)
+        let coreIonTemperature = Ti_array[0].item(Float.self)
+        let coreElectronTemperature = Te_array[0].item(Float.self)
+        let coreElectronDensity = ne_array[0].item(Float.self)
 
-        return (Ti_core, Te_core, ne_core)
+        return (coreIonTemperature, coreElectronTemperature, coreElectronDensity)
     }
 
     // MARK: - Volume Averages
@@ -103,7 +103,7 @@ public enum DerivedQuantitiesComputer {
     private static func computeVolumeAverages(
         profiles: CoreProfiles,
         geometry: Geometry
-    ) -> (Ti: Float, Te: Float, ne: Float) {
+    ) -> (ionTemperature: Float, electronTemperature: Float, electronDensity: Float) {
 
         // Get cell volumes from geometry
         let geometricFactors = GeometricFactors.from(geometry: geometry)
@@ -124,11 +124,11 @@ public enum DerivedQuantitiesComputer {
         // Batch evaluation for efficiency
         eval(totalVolume, Ti_weighted, Te_weighted, ne_weighted)
 
-        let Ti_avg = (Ti_weighted / totalVolume).item(Float.self)
-        let Te_avg = (Te_weighted / totalVolume).item(Float.self)
-        let ne_avg = (ne_weighted / totalVolume).item(Float.self)
+        let averageIonTemperature = (Ti_weighted / totalVolume).item(Float.self)
+        let averageElectronTemperature = (Te_weighted / totalVolume).item(Float.self)
+        let averageElectronDensity = (ne_weighted / totalVolume).item(Float.self)
 
-        return (Ti_avg, Te_avg, ne_avg)
+        return (averageIonTemperature, averageElectronTemperature, averageElectronDensity)
     }
 
     // MARK: - Total Energies
@@ -207,59 +207,59 @@ public enum DerivedQuantitiesComputer {
 
         // 2. Confinement time
         let confinement = computeConfinementMetrics(
-            W_thermal: totalEnergies.thermal,
+            thermalEnergy: totalEnergies.thermal,
             powers: powers,
             profiles: profiles,
             geometry: geometry
         )
 
-        // 3. Current metrics (MUST compute before beta to get I_plasma)
+        // 3. Current metrics (MUST compute before beta to get plasmaCurrent)
         let current = computeCurrentMetrics(
             profiles: profiles,
             geometry: geometry,
             transport: transport
         )
 
-        // 4. Beta limits (uses I_plasma from current metrics)
+        // 4. Beta limits (uses plasmaCurrent from current metrics)
         let beta = computeBetaMetrics(
             profiles: profiles,
             geometry: geometry,
             volumes: volumes,
-            I_plasma: current.I_plasma
+            plasmaCurrent: current.plasmaCurrent
         )
 
         // 5. Triple product
-        let n_T_tau = computeTripleProduct(
+        let tripleProduct = computeTripleProduct(
             profiles: profiles,
             geometry: geometry,
             volumes: volumes,
-            tau_E: confinement.tau_E
+            energyConfinementTime: confinement.energyConfinementTime
         )
 
-        // 6. Fusion gain Q = P_fusion / P_input
-        let Q_fusion = computeFusionGain(
-            P_fusion: powers.P_fusion,
-            P_auxiliary: powers.P_auxiliary,
-            P_ohmic: powers.P_ohmic
+        // 6. Fusion gain Q = fusionPower / P_input
+        let fusionGain = computeFusionGain(
+            fusionPower: powers.fusionPower,
+            auxiliaryPower: powers.auxiliaryPower,
+            ohmicPower: powers.ohmicPower
         )
 
         return AdvancedMetrics(
-            P_fusion: powers.P_fusion,
-            P_alpha: powers.P_alpha,
-            P_auxiliary: powers.P_auxiliary,
-            P_ohmic: powers.P_ohmic,
-            Q_fusion: Q_fusion,
-            tau_E: confinement.tau_E,
-            tau_E_scaling: confinement.tau_E_scaling,
-            H_factor: confinement.H_factor,
-            beta_toroidal: beta.toroidal,
-            beta_poloidal: beta.poloidal,
-            beta_N: beta.normalized,
-            beta_N_limit: beta.troyon_limit,
-            I_plasma: current.I_plasma,
-            I_bootstrap: current.I_bootstrap,
-            f_bootstrap: current.f_bootstrap,
-            n_T_tau: n_T_tau
+            fusionPower: powers.fusionPower,
+            alphaPower: powers.alphaPower,
+            auxiliaryPower: powers.auxiliaryPower,
+            ohmicPower: powers.ohmicPower,
+            fusionGain: fusionGain,
+            energyConfinementTime: confinement.energyConfinementTime,
+            scalingEnergyConfinementTime: confinement.scalingEnergyConfinementTime,
+            confinementHFactor: confinement.confinementHFactor,
+            toroidalBeta: beta.toroidal,
+            poloidalBeta: beta.poloidal,
+            normalizedBeta: beta.normalized,
+            normalizedBetaLimit: beta.troyon_limit,
+            plasmaCurrent: current.plasmaCurrent,
+            bootstrapCurrent: current.bootstrapCurrent,
+            bootstrapFraction: current.bootstrapFraction,
+            tripleProduct: tripleProduct
         )
     }
 
@@ -270,21 +270,17 @@ public enum DerivedQuantitiesComputer {
         profiles: CoreProfiles,
         geometry: Geometry,
         volumes: MLXArray
-    ) -> (P_fusion: Float, P_alpha: Float, P_auxiliary: Float, P_ohmic: Float) {
+    ) -> (fusionPower: Float, alphaPower: Float, auxiliaryPower: Float, ohmicPower: Float) {
 
         guard let sources = sources else {
             return (0, 0, 0, 0)
         }
 
-        // Phase 4a: Require metadata for accurate power balance
         guard let metadata = sources.metadata else {
-            #if DEBUG
-            // Debug builds: Fail fast to catch missing metadata
             preconditionFailure(
                 """
                 SourceTerms.metadata is required for accurate power balance computation.
 
-                Phase 3 fixed-ratio estimation has been deprecated due to inaccuracy.
                 All SourceModel implementations must provide SourceMetadata.
 
                 Fix: Update SourceModel to return SourceTerms with metadata:
@@ -297,66 +293,62 @@ public enum DerivedQuantitiesComputer {
                     return SourceTerms(..., metadata: SourceMetadataCollection(entries: [metadata]))
                 """
             )
-            #else
-            // Release builds: Print warning and return zeros
-            print(
-                """
-                ⚠️ Warning: SourceTerms.metadata is nil - power balance will be inaccurate.
-                Returning zero power values. Update SourceModel to provide metadata.
-                """
-            )
-            return (0, 0, 0, 0)
-            #endif
+        }
+
+        do {
+            try metadata.validatePowerAccounting()
+        } catch {
+            preconditionFailure("Invalid SourceTerms.metadata for power balance computation: \(error)")
         }
 
         // Convert from W to MW
-        let P_fusion = metadata.fusionPower / 1e6       // [W] → [MW]
-        let P_alpha = metadata.alphaPower / 1e6         // [W] → [MW]
-        let P_auxiliary = metadata.auxiliaryPower / 1e6 // [W] → [MW]
-        let P_ohmic = metadata.ohmicPower / 1e6         // [W] → [MW]
+        let fusionPower = metadata.fusionPower / 1e6       // [W] → [MW]
+        let alphaPower = metadata.alphaPower / 1e6         // [W] → [MW]
+        let auxiliaryPower = metadata.auxiliaryPower / 1e6 // [W] → [MW]
+        let ohmicPower = metadata.ohmicPower / 1e6         // [W] → [MW]
 
-        return (P_fusion, P_alpha, P_auxiliary, P_ohmic)
+        return (fusionPower, alphaPower, auxiliaryPower, ohmicPower)
     }
 
     // MARK: - Confinement Metrics
 
     private static func computeConfinementMetrics(
-        W_thermal: Float,
-        powers: (P_fusion: Float, P_alpha: Float, P_auxiliary: Float, P_ohmic: Float),
+        thermalEnergy: Float,
+        powers: (fusionPower: Float, alphaPower: Float, auxiliaryPower: Float, ohmicPower: Float),
         profiles: CoreProfiles,
         geometry: Geometry
-    ) -> (tau_E: Float, tau_E_scaling: Float, H_factor: Float) {
+    ) -> (energyConfinementTime: Float, scalingEnergyConfinementTime: Float, confinementHFactor: Float) {
 
         // Energy confinement time: τE = W / P_loss
-        // P_loss = P_input + P_alpha (external heating + alpha particle heating)
-        // Note: P_fusion is NOT included in P_loss (it's already counted via P_alpha)
-        let P_input = powers.P_auxiliary + powers.P_ohmic
-        let P_loss = P_input + powers.P_alpha  // Total heating power
+        // P_loss = P_input + alphaPower (external heating + alpha particle heating)
+        // Note: fusionPower is NOT included in P_loss (it's already counted via alphaPower)
+        let P_input = powers.auxiliaryPower + powers.ohmicPower
+        let P_loss = P_input + powers.alphaPower  // Total heating power
 
-        let tau_E: Float
-        if P_loss > PhysicalThresholds.default.minHeatingPowerForTauE {
-            tau_E = W_thermal / P_loss  // [MJ / MW = s]
+        let energyConfinementTime: Float
+        if P_loss > PhysicalThresholds.default.minimumHeatingPowerForEnergyConfinementTime {
+            energyConfinementTime = thermalEnergy / P_loss  // [MJ / MW = s]
         } else {
-            tau_E = 0
+            energyConfinementTime = 0
         }
 
         // ITER98y2 scaling law for H-mode
         // τE = 0.0562 * Ip^0.93 * Bt^0.15 * P^(-0.69) * n^0.41 * M^0.19 * R^1.97 * ε^0.58 * κ^0.78
         // Simplified version for circular geometry
-        let tau_E_scaling = computeITER98Scaling(
+        let scalingEnergyConfinementTime = computeITER98Scaling(
             profiles: profiles,
             geometry: geometry,
             P_loss: P_loss
         )
 
-        let H_factor: Float
-        if tau_E_scaling > 0 {
-            H_factor = tau_E / tau_E_scaling
+        let confinementHFactor: Float
+        if scalingEnergyConfinementTime > 0 {
+            confinementHFactor = energyConfinementTime / scalingEnergyConfinementTime
         } else {
-            H_factor = 0
+            confinementHFactor = 0
         }
 
-        return (tau_E, tau_E_scaling, H_factor)
+        return (energyConfinementTime, scalingEnergyConfinementTime, confinementHFactor)
     }
 
     private static func computeITER98Scaling(
@@ -382,8 +374,8 @@ public enum DerivedQuantitiesComputer {
         let total_volume = volumes.sum()
         eval(ne_weighted, total_volume)
 
-        let ne_avg = (ne_weighted / total_volume).item(Float.self)  // [m^-3]
-        let ne_19 = ne_avg / 1e19  // [10^19 m^-3]
+        let averageElectronDensity = (ne_weighted / total_volume).item(Float.self)  // [m^-3]
+        let ne_19 = averageElectronDensity / 1e19  // [10^19 m^-3]
 
         // Mass number (assume deuterium-tritium)
         let M: Float = 2.5
@@ -411,7 +403,7 @@ public enum DerivedQuantitiesComputer {
         profiles: CoreProfiles,
         geometry: Geometry,
         volumes: MLXArray,
-        I_plasma: Float
+        plasmaCurrent: Float
     ) -> (toroidal: Float, poloidal: Float, normalized: Float, troyon_limit: Float) {
 
         let mu0: Float = 4.0 * .pi * 1e-7  // Permeability [H/m]
@@ -433,20 +425,20 @@ public enum DerivedQuantitiesComputer {
 
         // Toroidal beta: βt = 2μ0⟨p⟩ / Bt^2
         let Bt = geometry.toroidalField
-        let beta_toroidal = (2.0 * mu0 * p_avg) / (Bt * Bt) * 100.0  // [%]
+        let toroidalBeta = (2.0 * mu0 * p_avg) / (Bt * Bt) * 100.0  // [%]
 
         // Poloidal beta: rough estimate as βp ≈ 2 * βt for typical tokamaks
-        let beta_poloidal = 2.0 * beta_toroidal
+        let poloidalBeta = 2.0 * toroidalBeta
 
         // Normalized beta: βN = β(%) * a(m) * Bt(T) / Ip(MA)
         // Use minimum 0.1 MA for small tokamaks (avoids unrealistic βN for low-current plasmas)
-        let Ip_MA = max(I_plasma, 0.1)  // Avoid division by zero
-        let beta_N = beta_toroidal * geometry.minorRadius * Bt / Ip_MA
+        let Ip_MA = max(plasmaCurrent, 0.1)  // Avoid division by zero
+        let normalizedBeta = toroidalBeta * geometry.minorRadius * Bt / Ip_MA
 
         // Troyon limit: βN_limit ≈ 2.8 (empirical)
-        let beta_N_limit: Float = 2.8
+        let normalizedBetaLimit: Float = 2.8
 
-        return (beta_toroidal, beta_poloidal, beta_N, beta_N_limit)
+        return (toroidalBeta, poloidalBeta, normalizedBeta, normalizedBetaLimit)
     }
 
     // MARK: - Current Metrics
@@ -455,7 +447,7 @@ public enum DerivedQuantitiesComputer {
         profiles: CoreProfiles,
         geometry: Geometry,
         transport: TransportCoefficients?
-    ) -> (I_plasma: Float, I_bootstrap: Float, f_bootstrap: Float) {
+    ) -> (plasmaCurrent: Float, bootstrapCurrent: Float, bootstrapFraction: Float) {
 
         // Compute plasma current from poloidal flux gradient
         let psi = profiles.poloidalFlux.value
@@ -466,17 +458,17 @@ public enum DerivedQuantitiesComputer {
 
         if psiRange > 0.01 {
             // Compute current density: j_∥ ≈ (1/μ₀R) * ∂ψ/∂r
-            let nCells = psi.shape[0]
-            let df = psi[1...] - psi[..<(nCells - 1)]
-            let dr = geometricFactors.cellDistances.value + 1e-10
-            let grad_psi_faces = df / dr
+            let cellCount = psi.shape[0]
+            let df = psi[1...] - psi[..<(cellCount - 1)]
+            let radialSpacing = geometricFactors.cellDistances.value + 1e-10
+            let grad_psi_faces = df / radialSpacing
 
             // Interpolate gradient to cell centers
             let grad0 = grad_psi_faces[0..<1]
-            let left = grad_psi_faces[0..<(nCells - 2)]
-            let right = grad_psi_faces[1..<(nCells - 1)]
+            let left = grad_psi_faces[0..<(cellCount - 2)]
+            let right = grad_psi_faces[1..<(cellCount - 1)]
             let gradInterior = (left + right) / 2.0
-            let gradN = grad_psi_faces[(nCells - 2)..<(nCells - 1)]
+            let gradN = grad_psi_faces[(cellCount - 2)..<(cellCount - 1)]
             let grad_psi = concatenated([grad0, gradInterior, gradN], axis: 0)
 
             let mu0: Float = 4.0 * .pi * 1e-7
@@ -486,20 +478,20 @@ public enum DerivedQuantitiesComputer {
             // Integrate over cross-section: I = ∫ j dA
             // For circular geometry, use cell volumes divided by 2πR
             // Volume = 2π²Rr²Δr → dA ≈ Volume / (2πR)
-            let volumes = geometricFactors.cellVolumes.value  // [nCells]
+            let volumes = geometricFactors.cellVolumes.value  // [cellCount]
 
             // Current density × area element
             let I_elements = abs(j_parallel) * volumes / (2.0 * Float.pi * R0)  // [A·m]
 
             // Total current
             let I_total = I_elements.sum().item(Float.self)  // [A]
-            let I_plasma = I_total * 1e-6  // [MA]
+            let plasmaCurrent = I_total * 1e-6  // [MA]
 
             // Bootstrap fraction: typical range 0.2-0.5 for ITER-like plasmas
-            let f_bootstrap: Float = 0.3  // Rough estimate
-            let I_bootstrap = I_plasma * f_bootstrap  // [MA]
+            let bootstrapFraction: Float = 0.3  // Rough estimate
+            let bootstrapCurrent = plasmaCurrent * bootstrapFraction  // [MA]
 
-            return (I_plasma, I_bootstrap, f_bootstrap)
+            return (plasmaCurrent, bootstrapCurrent, bootstrapFraction)
         } else {
             // Fallback: Estimate from geometry when flux is not available
             let a = geometry.minorRadius
@@ -508,11 +500,11 @@ public enum DerivedQuantitiesComputer {
             let mu0: Float = 4.0 * .pi * 1e-7
             let R0 = geometry.majorRadius
 
-            let I_plasma = (a * Bt) / (q_edge * mu0 * R0) * 1e-6  // [MA]
-            let f_bootstrap: Float = 0.3
-            let I_bootstrap = I_plasma * f_bootstrap
+            let plasmaCurrent = (a * Bt) / (q_edge * mu0 * R0) * 1e-6  // [MA]
+            let bootstrapFraction: Float = 0.3
+            let bootstrapCurrent = plasmaCurrent * bootstrapFraction
 
-            return (I_plasma, I_bootstrap, f_bootstrap)
+            return (plasmaCurrent, bootstrapCurrent, bootstrapFraction)
         }
     }
 
@@ -522,7 +514,7 @@ public enum DerivedQuantitiesComputer {
         profiles: CoreProfiles,
         geometry: Geometry,
         volumes: MLXArray,
-        tau_E: Float
+        energyConfinementTime: Float
     ) -> Float {
 
         // Lawson triple product: n⟨T⟩τE
@@ -539,19 +531,19 @@ public enum DerivedQuantitiesComputer {
         let ne_weighted = (ne * volumes).sum()
         let total_volume = volumes.sum()
         eval(ne_weighted, total_volume)
-        let ne_avg = (ne_weighted / total_volume).item(Float.self)  // [m^-3]
+        let averageElectronDensity = (ne_weighted / total_volume).item(Float.self)  // [m^-3]
 
         // Triple product: n⟨T⟩τE [eV s m^-3]
-        let n_T_tau = ne_avg * T_avg * tau_E
+        let tripleProduct = averageElectronDensity * T_avg * energyConfinementTime
 
-        return n_T_tau
+        return tripleProduct
     }
 
     // MARK: - Fusion Gain
 
-    /// Compute fusion gain Q = P_fusion / P_input
+    /// Compute fusion gain Q = fusionPower / P_input
     ///
-    /// **Definition**: Q = P_fusion / (P_auxiliary + P_ohmic)
+    /// **Definition**: Q = fusionPower / (auxiliaryPower + ohmicPower)
     ///
     /// **Physics**:
     /// - Q < 1: More input power than fusion power (typical for small devices)
@@ -559,30 +551,30 @@ public enum DerivedQuantitiesComputer {
     /// - Q = 5-10: High-performance operation (ITER target: Q = 10)
     /// - Q → ∞: Ignition (self-sustaining fusion, no external heating needed)
     ///
-    /// **Note**: Alpha power (P_alpha) is NOT counted as input since it's internally
+    /// **Note**: Alpha power (alphaPower) is NOT counted as input since it's internally
     /// generated. Only external heating sources count toward P_input.
     ///
     /// - Parameters:
-    ///   - P_fusion: Total fusion power [MW]
-    ///   - P_auxiliary: Auxiliary heating power [MW]
-    ///   - P_ohmic: Ohmic heating power [MW]
+    ///   - fusionPower: Total fusion power [MW]
+    ///   - auxiliaryPower: Auxiliary heating power [MW]
+    ///   - ohmicPower: Ohmic heating power [MW]
     /// - Returns: Fusion gain Q (dimensionless)
     private static func computeFusionGain(
-        P_fusion: Float,
-        P_auxiliary: Float,
-        P_ohmic: Float
+        fusionPower: Float,
+        auxiliaryPower: Float,
+        ohmicPower: Float
     ) -> Float {
         // Input power = external heating only (exclude alpha power)
-        let P_input = P_auxiliary + P_ohmic
+        let P_input = auxiliaryPower + ohmicPower
 
         // Handle edge cases
-        guard P_input > PhysicalThresholds.default.minFusionPowerForQ else {
+        guard P_input > PhysicalThresholds.default.minimumFusionPowerForGain else {
             // No input power: return 0 (avoid division by zero)
             return 0
         }
 
         // Fusion gain
-        let Q = P_fusion / P_input
+        let Q = fusionPower / P_input
 
         // Clamp to reasonable range [0, 100]
         // Q > 100 is unrealistic and likely indicates numerical issues
@@ -593,20 +585,20 @@ public enum DerivedQuantitiesComputer {
 // MARK: - Internal Data Structures
 
 private struct AdvancedMetrics {
-    let P_fusion: Float
-    let P_alpha: Float
-    let P_auxiliary: Float
-    let P_ohmic: Float
-    let Q_fusion: Float
-    let tau_E: Float
-    let tau_E_scaling: Float
-    let H_factor: Float
-    let beta_toroidal: Float
-    let beta_poloidal: Float
-    let beta_N: Float
-    let beta_N_limit: Float
-    let I_plasma: Float
-    let I_bootstrap: Float
-    let f_bootstrap: Float
-    let n_T_tau: Float
+    let fusionPower: Float
+    let alphaPower: Float
+    let auxiliaryPower: Float
+    let ohmicPower: Float
+    let fusionGain: Float
+    let energyConfinementTime: Float
+    let scalingEnergyConfinementTime: Float
+    let confinementHFactor: Float
+    let toroidalBeta: Float
+    let poloidalBeta: Float
+    let normalizedBeta: Float
+    let normalizedBetaLimit: Float
+    let plasmaCurrent: Float
+    let bootstrapCurrent: Float
+    let bootstrapFraction: Float
+    let tripleProduct: Float
 }

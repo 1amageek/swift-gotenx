@@ -30,7 +30,7 @@ public struct SimpleSawtoothTrigger: Sendable {
 
     /// Critical magnetic shear threshold
     ///
-    /// Crash occurs when shear s = (r/q)(dq/dr) at q=1 surface exceeds this value.
+    /// Crash occurs when shear s = (r/q)(dq/radialSpacing) at q=1 surface exceeds this value.
     /// **Typical value**: 0.2
     public let sCritical: Float
 
@@ -38,16 +38,16 @@ public struct SimpleSawtoothTrigger: Sendable {
     ///
     /// Prevents unphysically rapid crash sequences.
     /// **Typical value**: 0.01 s (10 ms)
-    public let minCrashInterval: Float
+    public let minimumCrashInterval: Float
 
     public init(
         minimumRadius: Float = 0.2,
         sCritical: Float = 0.2,
-        minCrashInterval: Float = 0.01
+        minimumCrashInterval: Float = 0.01
     ) {
         self.minimumRadius = minimumRadius
         self.sCritical = sCritical
-        self.minCrashInterval = minCrashInterval
+        self.minimumCrashInterval = minimumCrashInterval
     }
 
     /// Determine if sawtooth crash should occur
@@ -56,12 +56,12 @@ public struct SimpleSawtoothTrigger: Sendable {
     /// 1. q=1 surface exists (q(0) < 1)
     /// 2. rho_norm_q1 > minimumRadius (not too close to axis)
     /// 3. s_q1 > sCritical (sufficient magnetic shear)
-    /// 4. dt >= minCrashInterval (rate limiting)
+    /// 4. timeStep >= minimumCrashInterval (rate limiting)
     ///
     /// **Parameters**:
     /// - profiles: Current core profiles
     /// - geometry: Tokamak geometry
-    /// - dt: Current timestep [s]
+    /// - timeStep: Current timestep [s]
     ///
     /// **Returns**: Tuple of (triggered, rhoQ1)
     ///   - triggered: Whether crash should occur
@@ -69,11 +69,11 @@ public struct SimpleSawtoothTrigger: Sendable {
     public func shouldTrigger(
         profiles: CoreProfiles,
         geometry: Geometry,
-        dt: Float
+        timeStep: Float
     ) -> (triggered: Bool, rhoQ1: Float?) {
         // Rate limiting: only crash if timestep resolves the crash interval
-        // This prevents unphysical rapid crashes when dt << minCrashInterval
-        guard dt >= minCrashInterval else {
+        // This prevents unphysical rapid crashes when timeStep << minimumCrashInterval
+        guard timeStep >= minimumCrashInterval else {
             return (false, nil)
         }
 
@@ -123,7 +123,7 @@ public struct SimpleSawtoothTrigger: Sendable {
     /// - Interpolate to find exact rho_norm where q = 1
     ///
     /// **Parameters**:
-    /// - q: Safety factor profile [nCells]
+    /// - q: Safety factor profile [cellCount]
     /// - geometry: Tokamak geometry
     ///
     /// **Returns**: Tuple of (rho_norm_q1, index) or nil if no q=1 surface found
@@ -164,8 +164,8 @@ public struct SimpleSawtoothTrigger: Sendable {
     /// the shear value to get more accurate shear at exact q=1 location.
     ///
     /// **Parameters**:
-    /// - shear: Magnetic shear profile [nCells]
-    /// - q: Safety factor profile [nCells]
+    /// - shear: Magnetic shear profile [cellCount]
+    /// - q: Safety factor profile [cellCount]
     /// - indexQ1: Grid index where q crosses 1 (q[i] < 1, q[i+1] >= 1)
     /// - rhoQ1: Normalized radius of q=1 surface
     /// - geometry: Tokamak geometry

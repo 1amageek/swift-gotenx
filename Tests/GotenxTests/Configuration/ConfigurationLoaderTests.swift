@@ -14,7 +14,7 @@ struct ConfigurationLoaderTests {
         let config = try await provider.load()
 
         #expect(config != nil)
-        #expect(config?.runtime.static.mesh.nCells == 100)
+        #expect(config?.runtime.static.mesh.cellCount == 100)
         #expect(config?.runtime.static.mesh.majorRadius == 6.2)
     }
 
@@ -28,7 +28,7 @@ struct ConfigurationLoaderTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 75,
+                        cellCount: 75,
                         majorRadius: 4.0,
                         minorRadius: 1.5,
                         toroidalField: 3.0
@@ -38,14 +38,14 @@ struct ConfigurationLoaderTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 120.0,
                         electronTemperature: 120.0,
-                        density: 2e19
+                        electronDensity: 2e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,
-                            "chi_electron": 0.01,
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     )
                 )
@@ -53,7 +53,7 @@ struct ConfigurationLoaderTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.5,
-                initialDt: 1e-6
+                initialTimeStep: 1e-6
             )
         )
 
@@ -68,7 +68,7 @@ struct ConfigurationLoaderTests {
         let loaded = try await provider.load()
 
         #expect(loaded != nil)
-        #expect(loaded?.runtime.static.mesh.nCells == 75)
+        #expect(loaded?.runtime.static.mesh.cellCount == 75)
         #expect(loaded?.runtime.static.mesh.majorRadius == 4.0)
         #expect(loaded?.time.end == 1.5)
 
@@ -89,8 +89,25 @@ struct ConfigurationLoaderTests {
         let loader = ConfigurationLoader(providers: [DefaultConfigurationProvider()])
         let config = try await loader.load()
 
-        #expect(config.runtime.static.mesh.nCells == 100)
+        #expect(config.runtime.static.mesh.cellCount == 100)
         #expect(config.runtime.static.mesh.majorRadius == 6.2)
+    }
+
+    @Test("ConfigurationLoader.standard applies CLI overrides")
+    func testStandardLoaderAppliesCLIOverrides() async throws {
+        let loader = ConfigurationLoader.standard(
+            cliArguments: [
+                "mesh-cell-count": "250",
+                "time-end": "4.0",
+                "output-dir": "/tmp/gotenx_cli_override"
+            ]
+        )
+
+        let config = try await loader.load()
+
+        #expect(config.runtime.static.mesh.cellCount == 250)
+        #expect(config.time.end == 4.0)
+        #expect(config.output.directory == "/tmp/gotenx_cli_override")
     }
 
     @Test("ConfigurationLoader hierarchical override")
@@ -103,7 +120,7 @@ struct ConfigurationLoaderTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 200,
+                        cellCount: 200,
                         majorRadius: 5.0,
                         minorRadius: 1.8,
                         toroidalField: 4.0
@@ -113,14 +130,14 @@ struct ConfigurationLoaderTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 150.0,
                         electronTemperature: 150.0,
-                        density: 1.5e19
+                        electronDensity: 1.5e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,
-                            "chi_electron": 0.01,
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     )
                 )
@@ -128,7 +145,7 @@ struct ConfigurationLoaderTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 3.0,
-                initialDt: 1e-6
+                initialTimeStep: 1e-6
             )
         )
 
@@ -145,7 +162,7 @@ struct ConfigurationLoaderTests {
         let config = try await loader.load()
 
         // Should use JSON config, not defaults
-        #expect(config.runtime.static.mesh.nCells == 200)
+        #expect(config.runtime.static.mesh.cellCount == 200)
         #expect(config.runtime.static.mesh.majorRadius == 5.0)
         #expect(config.time.end == 3.0)
 
@@ -163,7 +180,7 @@ struct ConfigurationLoaderTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 150,
+                        cellCount: 150,
                         majorRadius: 7.0,
                         minorRadius: 2.5,
                         toroidalField: 6.0
@@ -173,14 +190,14 @@ struct ConfigurationLoaderTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 200.0,
                         electronTemperature: 200.0,
-                        density: 3e19
+                        electronDensity: 3e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,
-                            "chi_electron": 0.01,
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     )
                 )
@@ -188,7 +205,7 @@ struct ConfigurationLoaderTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 5.0,
-                initialDt: 1e-6
+                initialTimeStep: 1e-6
             )
         )
 
@@ -199,7 +216,7 @@ struct ConfigurationLoaderTests {
         // Load directly
         let config = try await ConfigurationLoader.loadFromJSON(tempFile.path)
 
-        #expect(config.runtime.static.mesh.nCells == 150)
+        #expect(config.runtime.static.mesh.cellCount == 150)
         #expect(config.runtime.static.mesh.majorRadius == 7.0)
 
         // Clean up
@@ -209,17 +226,19 @@ struct ConfigurationLoaderTests {
     @Test("ConfigurationOverrides from CLI")
     func testOverridesFromCLI() {
         let args: [String: String] = [
-            "mesh-ncells": "250",
+            "mesh-cell-count": "250",
             "mesh-major-radius": "8.0",
             "time-end": "10.0",
+            "initial-time-step": "0.002",
             "output-dir": "/custom/output"
         ]
 
         let overrides = ConfigurationOverrides.fromCLI(args)
 
-        #expect(overrides.meshNCells == 250)
+        #expect(overrides.meshCellCount == 250)
         #expect(overrides.meshMajorRadius == 8.0)
         #expect(overrides.timeEnd == 10.0)
+        #expect(overrides.initialTimeStep == 0.002)
         #expect(overrides.outputDirectory == "/custom/output")
     }
 
@@ -229,7 +248,7 @@ struct ConfigurationLoaderTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 6.0,
                         minorRadius: 2.0,
                         toroidalField: 5.0
@@ -239,14 +258,14 @@ struct ConfigurationLoaderTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,
-                            "chi_electron": 0.01,
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     )
                 )
@@ -254,12 +273,12 @@ struct ConfigurationLoaderTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 2.0,
-                initialDt: 1e-6
+                initialTimeStep: 1e-6
             )
         )
 
         let overrides = ConfigurationOverrides(
-            meshNCells: 300,
+            meshCellCount: 300,
             timeEnd: 5.0,
             outputDirectory: "/new/output"
         )
@@ -270,7 +289,7 @@ struct ConfigurationLoaderTests {
         )
 
         // Overrides should be applied
-        #expect(config.runtime.static.mesh.nCells == 300)
+        #expect(config.runtime.static.mesh.cellCount == 300)
         #expect(config.time.end == 5.0)
         #expect(config.output.directory == "/new/output")
 
@@ -289,7 +308,7 @@ struct ConfigurationLoaderTests {
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 100,
+                        cellCount: 100,
                         majorRadius: 3.0,
                         minorRadius: 1.0,
                         toroidalField: 2.5
@@ -299,14 +318,14 @@ struct ConfigurationLoaderTests {
                     boundaries: BoundaryConfig(
                         ionTemperature: -100.0,  // Invalid!
                         electronTemperature: 100.0,
-                        density: 1e19
+                        electronDensity: 1e19
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .constant,
                         parameters: [
-                            "chi_ion": 0.01,
-                            "chi_electron": 0.01,
-                            "particle_diffusivity": 0.005
+                            "ionHeatDiffusivity": 0.01,
+                            "electronHeatDiffusivity": 0.01,
+                            "particleDiffusivity": 0.005
                         ]
                     )
                 )
@@ -314,7 +333,7 @@ struct ConfigurationLoaderTests {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 1.0,
-                initialDt: 1e-6
+                initialTimeStep: 1e-6
             )
         )
 

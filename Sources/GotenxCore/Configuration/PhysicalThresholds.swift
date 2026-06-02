@@ -15,11 +15,11 @@ public struct PhysicalThresholds: Codable, Sendable, Equatable, Hashable {
 
     /// Minimum fusion power for Q calculation [MW] (default: 1e-3)
     /// Below 1 kW, fusion gain Q is meaningless
-    public let minFusionPowerForQ: Float
+    public let minimumFusionPowerForGain: Float
 
     /// Minimum heating power for τE calculation [MW] (default: 1e-2)
     /// Below 10 kW, energy confinement time is unreliable
-    public let minHeatingPowerForTauE: Float
+    public let minimumHeatingPowerForEnergyConfinementTime: Float
 
     /// Poloidal flux relative variation threshold (default: 1e-5)
     /// Skip Ohmic heating calculation if dψ/ψ < threshold
@@ -27,28 +27,28 @@ public struct PhysicalThresholds: Codable, Sendable, Equatable, Hashable {
 
     /// Minimum stored energy for diagnostics [MJ] (default: 1e-3)
     /// Below 1 kJ, plasma is negligible
-    public let minStoredEnergy: Float
+    public let minimumStoredEnergy: Float
 
     public init(
         fuelFractionTolerance: Float,
-        minFusionPowerForQ: Float,
-        minHeatingPowerForTauE: Float,
+        minimumFusionPowerForGain: Float,
+        minimumHeatingPowerForEnergyConfinementTime: Float,
         fluxVariationThreshold: Float,
-        minStoredEnergy: Float
+        minimumStoredEnergy: Float
     ) {
         self.fuelFractionTolerance = fuelFractionTolerance
-        self.minFusionPowerForQ = minFusionPowerForQ
-        self.minHeatingPowerForTauE = minHeatingPowerForTauE
+        self.minimumFusionPowerForGain = minimumFusionPowerForGain
+        self.minimumHeatingPowerForEnergyConfinementTime = minimumHeatingPowerForEnergyConfinementTime
         self.fluxVariationThreshold = fluxVariationThreshold
-        self.minStoredEnergy = minStoredEnergy
+        self.minimumStoredEnergy = minimumStoredEnergy
     }
 
     /// Default thresholds for ITER-scale tokamaks
     public static let `default` = PhysicalThresholds(
         fuelFractionTolerance: 1e-4,      // 0.01% (was 1e-6, too strict)
-        minFusionPowerForQ: 1e-3,         // 1 kW (was 1e-6 MW, unrealistic)
-        minHeatingPowerForTauE: 1e-2,     // 10 kW (was implicit 1e-6)
+        minimumFusionPowerForGain: 1e-3,         // 1 kW (was 1e-6 MW, unrealistic)
+        minimumHeatingPowerForEnergyConfinementTime: 1e-2,     // 10 kW (was implicit 1e-6)
         fluxVariationThreshold: 1e-5,     // 0.001% flux change (was 1e-6)
-        minStoredEnergy: 1e-3             // 1 kJ (was 1e-6 MJ, too small)
+        minimumStoredEnergy: 1e-3             // 1 kJ (was 1e-6 MJ, too small)
     )
 }

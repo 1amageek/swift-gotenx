@@ -14,7 +14,7 @@ import Foundation
 ///
 /// ```swift
 /// // Load TORAX reference data
-/// let toraxData = try ToraxReferenceData.load(
+/// let toraxData = try TORAXReferenceData.load(
 ///     from: "reference_data/torax_iter_baseline.nc"
 /// )
 ///
@@ -38,7 +38,7 @@ public struct ValidationConfigMatcher {
     /// Generate swift-Gotenx configuration matching TORAX reference data
     ///
     /// Aligns the following parameters:
-    /// - Mesh: nCells = rho.count
+    /// - Mesh: cellCount = rho.count
     /// - Time: start/end/saveInterval matched to TORAX time array
     /// - Geometry: R₀, a, B₀ from ITER Baseline
     /// - Transport: Bohm-GyroBohm (same as TORAX)
@@ -48,12 +48,12 @@ public struct ValidationConfigMatcher {
     /// - Returns: Swift-Gotenx configuration
     /// - Throws: ValidationError if TORAX data is incompatible
     public static func matchToTorax(
-        _ toraxData: ToraxReferenceData
+        _ toraxData: TORAXReferenceData
     ) throws -> SimulationConfiguration {
         // Extract mesh size from TORAX data
-        let nCells = toraxData.rho.count
-        guard nCells >= 10 && nCells <= 200 else {
-            throw ValidationConfigError.invalidMeshSize(nCells)
+        let cellCount = toraxData.normalizedRadius.count
+        guard cellCount >= 10 && cellCount <= 200 else {
+            throw ValidationConfigError.invalidMeshSize(cellCount)
         }
 
         // Extract time range from TORAX data
@@ -67,7 +67,7 @@ public struct ValidationConfigMatcher {
 
         // ITER Baseline geometry (matches TORAX settings)
         let geometry = MeshConfig(
-            nCells: nCells,              // Match TORAX mesh
+            cellCount: cellCount,              // Match TORAX mesh
             majorRadius: 6.2,            // [m] - ITER
             minorRadius: 2.0,            // [m] - ITER
             toroidalField: 5.3           // [T] - ITER
@@ -76,28 +76,28 @@ public struct ValidationConfigMatcher {
         // Boundary conditions (typical ITER edge values)
         // Extract from TORAX data at edge (rho ≈ 1.0)
         // Find edge index dynamically (maximum rho value)
-        let edgeIdx = toraxData.rho.enumerated().max(by: { $0.element < $1.element })!.offset
+        let edgeIdx = toraxData.normalizedRadius.enumerated().max(by: { $0.element < $1.element })!.offset
 
         // Verify edge rho is close to 1.0
-        let edgeRho = toraxData.rho[edgeIdx]
+        let edgeRho = toraxData.normalizedRadius[edgeIdx]
         guard abs(edgeRho - 1.0) < 0.05 else {
             throw ValidationConfigError.incompatibleTimeRanges(
                 "Edge rho = \(edgeRho), expected ~1.0. TORAX data may have unexpected rho range."
             )
         }
 
-        let Ti_edge = toraxData.Ti[0][edgeIdx]  // Initial edge temperature
-        let Te_edge = toraxData.Te[0][edgeIdx]
-        let ne_edge = toraxData.ne[0][edgeIdx]
+        let Ti_edge = toraxData.ionTemperature[0][edgeIdx]  // Initial edge temperature
+        let Te_edge = toraxData.electronTemperature[0][edgeIdx]
+        let ne_edge = toraxData.electronDensity[0][edgeIdx]
 
         let boundaries = BoundaryConfig(
             ionTemperature: Ti_edge,
             electronTemperature: Te_edge,
-            density: ne_edge
+            electronDensity: ne_edge
         )
 
         // Transport model: Bohm-GyroBohm (same as TORAX)
-        let transport = TransportConfig(
+        let transport = try TransportConfig(
             modelType: .bohmGyrobohm,
             parameters: [:]
         )
@@ -118,13 +118,13 @@ public struct ValidationConfigMatcher {
                     evolution: EvolutionConfig(
                         ionHeat: true,
                         electronHeat: true,
-                        density: true,
-                        current: false  // Match TORAX (no current evolution)
+                        electronDensity: true,
+                        poloidalFlux: false  // Match TORAX (no current evolution)
                     ),
                     solver: SolverConfig(
                         type: "newton_raphson",
                         tolerance: 1e-6,
-                        maxIterations: 30
+                        maximumIterations: 30
                     ),
                     scheme: SchemeConfig(theta: 1.0)  // Implicit Euler (TORAX default)
                 ),
@@ -135,7 +135,7 @@ public struct ValidationConfigMatcher {
                     pedestal: nil,
                     mhd: MHDConfig(
                         sawtoothEnabled: false,
-                        sawtoothParams: SawtoothParameters(),
+                        sawtoothParameters: SawtoothParameters(),
                         ntmEnabled: false
                     ),
                     restart: RestartConfig(doRestart: false)
@@ -144,10 +144,10 @@ public struct ValidationConfigMatcher {
             time: TimeConfiguration(
                 start: tStart,
                 end: tEnd,
-                initialDt: 1e-3,  // [s]
+                initialTimeStep: 1e-3,  // [s]
                 adaptive: AdaptiveTimestepConfig(
-                    minDt: 1e-6,
-                    maxDt: 1e-1,
+                    minimumTimeStep: 1e-6,
+                    maximumTimeStep: 1e-1,
                     safetyFactor: 0.9
                 )
             ),
@@ -166,14 +166,14 @@ public struct ValidationConfigMatcher {
     /// Uses design parameters from ITER Physics Basis.
     ///
     /// - Returns: Swift-Gotenx configuration for ITER Baseline
-    public static func matchToITERBaseline() -> SimulationConfiguration {
+    public static func matchToITERBaseline() throws -> SimulationConfiguration {
         let baseline = ITERBaselineData.load()
 
         let config = SimulationConfiguration(
             runtime: RuntimeConfiguration(
                 static: StaticConfig(
                     mesh: MeshConfig(
-                        nCells: 50,  // Standard resolution
+                        cellCount: 50,  // Standard resolution
                         majorRadius: baseline.geometry.majorRadius,
                         minorRadius: baseline.geometry.minorRadius,
                         toroidalField: baseline.geometry.toroidalField
@@ -181,13 +181,13 @@ public struct ValidationConfigMatcher {
                     evolution: EvolutionConfig(
                         ionHeat: true,
                         electronHeat: true,
-                        density: true,
-                        current: false
+                        electronDensity: true,
+                        poloidalFlux: false
                     ),
                     solver: SolverConfig(
                         type: "newton_raphson",
                         tolerance: 1e-6,
-                        maxIterations: 30
+                        maximumIterations: 30
                     ),
                     scheme: SchemeConfig(theta: 1.0)
                 ),
@@ -195,9 +195,9 @@ public struct ValidationConfigMatcher {
                     boundaries: BoundaryConfig(
                         ionTemperature: 100.0,    // [eV]
                         electronTemperature: 100.0,
-                        density: 2.0e19           // [m⁻³]
+                        electronDensity: 2.0e19           // [m⁻³]
                     ),
-                    transport: TransportConfig(
+                    transport: try TransportConfig(
                         modelType: .bohmGyrobohm,
                         parameters: [:]
                     ),
@@ -210,7 +210,7 @@ public struct ValidationConfigMatcher {
                     pedestal: nil,
                     mhd: MHDConfig(
                         sawtoothEnabled: false,
-                        sawtoothParams: SawtoothParameters(),
+                        sawtoothParameters: SawtoothParameters(),
                         ntmEnabled: false
                     ),
                     restart: RestartConfig(doRestart: false)
@@ -219,10 +219,10 @@ public struct ValidationConfigMatcher {
             time: TimeConfiguration(
                 start: 0.0,
                 end: 2.0,
-                initialDt: 1e-3,
+                initialTimeStep: 1e-3,
                 adaptive: AdaptiveTimestepConfig(
-                    minDt: 1e-6,
-                    maxDt: 1e-1,
+                    minimumTimeStep: 1e-6,
+                    maximumTimeStep: 1e-1,
                     safetyFactor: 0.9
                 )
             ),
@@ -262,8 +262,8 @@ public struct ValidationConfigMatcher {
     /// }
     /// ```
     public static func compareWithTorax(
-        gotenx: ToraxReferenceData,
-        torax: ToraxReferenceData,
+        gotenx: TORAXReferenceData,
+        torax: TORAXReferenceData,
         thresholds: ValidationThresholds = .torax
     ) -> [ComparisonResult] {
         var results: [ComparisonResult] = []
@@ -275,8 +275,8 @@ public struct ValidationConfigMatcher {
             // Compare Ti
             let tiResult = ProfileComparator.compare(
                 quantity: "ion_temperature",
-                predicted: gotenx.Ti[i],
-                reference: torax.Ti[i],
+                predicted: gotenx.ionTemperature[i],
+                reference: torax.ionTemperature[i],
                 time: time,
                 thresholds: thresholds
             )
@@ -285,8 +285,8 @@ public struct ValidationConfigMatcher {
             // Compare Te
             let teResult = ProfileComparator.compare(
                 quantity: "electron_temperature",
-                predicted: gotenx.Te[i],
-                reference: torax.Te[i],
+                predicted: gotenx.electronTemperature[i],
+                reference: torax.electronTemperature[i],
                 time: time,
                 thresholds: thresholds
             )
@@ -295,8 +295,8 @@ public struct ValidationConfigMatcher {
             // Compare ne
             let neResult = ProfileComparator.compare(
                 quantity: "electron_density",
-                predicted: gotenx.ne[i],
-                reference: torax.ne[i],
+                predicted: gotenx.electronDensity[i],
+                reference: torax.electronDensity[i],
                 time: time,
                 thresholds: thresholds
             )

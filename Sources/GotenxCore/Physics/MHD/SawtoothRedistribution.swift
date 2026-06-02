@@ -57,10 +57,10 @@ public struct SimpleSawtoothRedistribution: Sendable {
     /// 4. Return modified profiles
     ///
     /// **Conservation Laws**:
-    /// - Particle number: ∫ n(r) V(r) dr = constant
-    /// - Ion energy: ∫ Ti(r) n(r) V(r) dr = constant
-    /// - Electron energy: ∫ Te(r) n(r) V(r) dr = constant
-    /// - Current: ∫ j(r) A(r) dr = constant (within mixing radius)
+    /// - Particle number: ∫ n(r) V(r) radialSpacing = constant
+    /// - Ion energy: ∫ Ti(r) n(r) V(r) radialSpacing = constant
+    /// - Electron energy: ∫ Te(r) n(r) V(r) radialSpacing = constant
+    /// - Current: ∫ j(r) A(r) radialSpacing = constant (within mixing radius)
     ///
     /// **Parameters**:
     /// - profiles: Current core profiles
@@ -115,7 +115,7 @@ public struct SimpleSawtoothRedistribution: Sendable {
         )
 
         // 2. Energy conservation using CONSERVED density (not original)
-        // This ensures W = ∫ T(r) n_conserved(r) V(r) dr is physically consistent
+        // This ensures W = ∫ T(r) n_conserved(r) V(r) radialSpacing is physically consistent
         let Ti_conserved = enforceEnergyConservation(
             profileOld: profiles.ionTemperature.value,
             profileNew: Ti_flattened,
@@ -160,11 +160,11 @@ public struct SimpleSawtoothRedistribution: Sendable {
     /// - Beyond rho_mix: Original profile unchanged
     ///
     /// **Parameters**:
-    /// - profile: Original profile [nCells]
+    /// - profile: Original profile [cellCount]
     /// - upToIndex: Index of q=1 surface
     /// - mixingIndex: Index of mixing radius
     ///
-    /// **Returns**: Flattened profile [nCells]
+    /// **Returns**: Flattened profile [cellCount]
     private func flattenProfile(
         profile: MLXArray,
         upToIndex: Int,
@@ -205,7 +205,7 @@ public struct SimpleSawtoothRedistribution: Sendable {
                 let outerRegion = profile[(mixingIndex + 1)...]
 
                 // Concatenate: [0...upToIndex] + [upToIndex+1...mixingIndex] + [(mixingIndex+1)...]
-                // Sizes: (upToIndex+1) + transitionLength + (nCells - mixingIndex - 1) = nCells
+                // Sizes: (upToIndex+1) + transitionLength + (cellCount - mixingIndex - 1) = cellCount
                 return concatenated([innerFlattened, transitionBlend, outerRegion], axis: 0)
             } else {
                 // No transition region: use original from upToIndex+1 onward
@@ -220,7 +220,7 @@ public struct SimpleSawtoothRedistribution: Sendable {
 
     /// Enforce particle number conservation
     ///
-    /// Conserves: N = ∫ n(r) V(r) dr
+    /// Conserves: N = ∫ n(r) V(r) radialSpacing
     ///
     /// **Algorithm**:
     /// 1. Compute total particle number before and after
@@ -263,7 +263,7 @@ public struct SimpleSawtoothRedistribution: Sendable {
 
     /// Enforce thermal energy conservation
     ///
-    /// Conserves: W = ∫ T(r) n(r) V(r) dr
+    /// Conserves: W = ∫ T(r) n(r) V(r) radialSpacing
     ///
     /// **Algorithm**:
     /// 1. Compute total thermal energy before and after

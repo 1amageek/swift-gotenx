@@ -26,7 +26,7 @@ public actor SimulationOrchestrator {
     private var state: SimulationState
 
     /// Static configuration (triggers recompilation if changed)
-    private let staticParams: StaticRuntimeParams
+    private let staticParameters: StaticRuntimeParameters
 
     /// Transport model
     private let transport: any TransportModel
@@ -70,7 +70,7 @@ public actor SimulationOrchestrator {
     // MARK: - Pause/Resume State
 
     /// Pause state
-    private var isPaused: Bool = false
+    private var paused: Bool = false
 
     /// Continuation for pause/resume
     private var pauseContinuation: CheckedContinuation<Void, Never>?
@@ -78,7 +78,7 @@ public actor SimulationOrchestrator {
     // MARK: - Initialization
 
     public init(
-        staticParams: StaticRuntimeParams,
+        staticParameters: StaticRuntimeParameters,
         initialProfiles: SerializableProfiles,
         transport: any TransportModel,
         sources: [any SourceModel] = [],
@@ -86,7 +86,7 @@ public actor SimulationOrchestrator {
         samplingConfig: SamplingConfig = .balanced,
         adaptiveConfig: AdaptiveTimestepConfig = .default
     ) async {
-        self.staticParams = staticParams
+        self.staticParameters = staticParameters
         self.transport = transport
         self.sources = sources
         self.mhdModels = mhdModels
@@ -94,24 +94,24 @@ public actor SimulationOrchestrator {
         self.adaptiveConfig = adaptiveConfig
 
         logger.debug("AdaptiveTimestepConfig received", metadata: [
-            "minDt": "\(adaptiveConfig.minDt?.description ?? "nil")",
-            "minDtFraction": "\(adaptiveConfig.minDtFraction?.description ?? "nil")",
-            "maxDt": "\(adaptiveConfig.maxDt)",
-            "effectiveMinDt": "\(adaptiveConfig.effectiveMinDt)",
-            "maxTimestepGrowth": "\(adaptiveConfig.maxTimestepGrowth)"
+            "minimumTimeStep": "\(adaptiveConfig.minimumTimeStep?.description ?? "nil")",
+            "minimumTimeStepFraction": "\(adaptiveConfig.minimumTimeStepFraction?.description ?? "nil")",
+            "maximumTimeStep": "\(adaptiveConfig.maximumTimeStep)",
+            "effectiveMinimumTimeStep": "\(adaptiveConfig.effectiveMinimumTimeStep)",
+            "maximumTimeStepGrowth": "\(adaptiveConfig.maximumTimeStepGrowth)"
         ])
 
-        // Create geometry from static params
-        self.geometry = Geometry(config: staticParams.mesh)
+        // Create geometry from static parameters
+        self.geometry = Geometry(config: staticParameters.mesh)
 
         self.timeStepCalculator = TimeStepCalculator(
             stabilityFactor: adaptiveConfig.safetyFactor,
-            minTimestep: adaptiveConfig.effectiveMinDt,
-            maxTimestep: adaptiveConfig.maxDt
+            minimumTimeStep: adaptiveConfig.effectiveMinimumTimeStep,
+            maximumTimeStep: adaptiveConfig.maximumTimeStep
         )
 
         // Create solver based on configuration
-        switch staticParams.solverType {
+        switch staticParameters.solverType {
         case .linear:
             // The implicit theta-method requires an actual implicit solve to be
             // unconditionally stable. `LinearSolver` is an explicit predictor–corrector
@@ -121,22 +121,22 @@ public actor SimulationOrchestrator {
             // the Newton machinery, which assembles the implicit system and solves it
             // exactly in a single step (now fast thanks to the vectorized Jacobian).
             self.solver = NewtonRaphsonSolver(
-                tolerance: staticParams.solverTolerance,
-                maxIterations: staticParams.solverMaxIterations,
-                theta: staticParams.theta
+                tolerance: staticParameters.solverTolerance,
+                maximumIterations: staticParameters.solverMaximumIterations,
+                theta: staticParameters.theta
             )
         case .newtonRaphson:
             self.solver = NewtonRaphsonSolver(
-                tolerance: staticParams.solverTolerance,
-                maxIterations: staticParams.solverMaxIterations,
-                theta: staticParams.theta
+                tolerance: staticParameters.solverTolerance,
+                maximumIterations: staticParameters.solverMaximumIterations,
+                theta: staticParameters.theta
             )
         case .optimizer:
             // TODO: Implement optimizer solver
             self.solver = NewtonRaphsonSolver(
-                tolerance: staticParams.solverTolerance,
-                maxIterations: staticParams.solverMaxIterations,
-                theta: staticParams.theta
+                tolerance: staticParameters.solverTolerance,
+                maximumIterations: staticParameters.solverMaximumIterations,
+                theta: staticParameters.theta
             )
         }
 
@@ -144,7 +144,7 @@ public actor SimulationOrchestrator {
         self.state = SimulationState(
             profiles: CoreProfiles(from: initialProfiles),
             timeAccumulator: 0.0,
-            dt: 1e-4,
+            timeStep: 1e-4,
             step: 0
         )
 
@@ -158,12 +158,12 @@ public actor SimulationOrchestrator {
     ///
     /// - Parameters:
     ///   - endTime: Simulation end time [s]
-    ///   - dynamicParams: Time-dependent dynamic parameters
+    ///   - dynamicParameters: Time-dependent dynamic parameters
     ///   - saveInterval: Interval for saving time series (nil = use samplingConfig)
     /// - Returns: Simulation result
     public func run(
         until endTime: Float,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         saveInterval: Float? = nil  // Deprecated: Use samplingConfig instead
     ) async throws -> SimulationResult {
         let startWallTime = Date()
@@ -194,7 +194,7 @@ public actor SimulationOrchestrator {
             // Check for pause state
             await checkPauseState()
 
-            // Yield control periodically to allow getProgress() and other tasks to run
+            // Yield control periodically to allow progress() and other tasks to run
             // This prevents actor starvation when the simulation loop is running fast
             if state.step % 10 == 0 {
                 await Task.yield()
@@ -203,7 +203,7 @@ public actor SimulationOrchestrator {
             let stepStartTime = Date()
 
             // Perform single timestep
-            try await performStep(dynamicParams: dynamicParams, endTime: endTime)
+            try await performStep(dynamicParameters: dynamicParameters, endTime: endTime)
 
             let stepWallTime = Float(Date().timeIntervalSince(stepStartTime))
 
@@ -217,14 +217,11 @@ public actor SimulationOrchestrator {
                 timeSeries.append(captureTimePoint())
             }
 
-            // Legacy saveInterval support (deprecated)
-            // This is kept for backward compatibility but samplingConfig is preferred
-
             // Check for numerical issues
             if !state.statistics.converged {
                 throw SolverError.convergenceFailure(
                     iterations: state.statistics.totalIterations,
-                    residualNorm: state.statistics.maxResidualNorm
+                    residualNorm: state.statistics.maximumResidualNorm
                 )
             }
         }
@@ -257,7 +254,7 @@ public actor SimulationOrchestrator {
     /// Enable `SamplingConfig.enableLivePlotting` to include profiles and derived quantities.
     ///
     /// - Returns: Progress information with optional profiles
-    public func getProgress() async -> ProgressInfo {
+    public func progress() async -> ProgressInfo {
         let includeProfiles = samplingConfig.enableLivePlotting
 
         logger.debug("getProgress called", metadata: [
@@ -275,7 +272,7 @@ public actor SimulationOrchestrator {
         return ProgressInfo(
             currentTime: state.time,
             totalSteps: state.statistics.totalSteps,
-            lastDt: state.dt,
+            lastTimeStep: state.timeStep,
             converged: state.statistics.converged,
             profiles: serializedProfiles,
             derived: includeProfiles ? state.derived : nil
@@ -296,7 +293,7 @@ public actor SimulationOrchestrator {
     /// }
     /// ```
     public func pause() {
-        isPaused = true
+        paused = true
     }
 
     /// Resume the simulation
@@ -312,7 +309,7 @@ public actor SimulationOrchestrator {
     /// }
     /// ```
     public func resume() {
-        isPaused = false
+        paused = false
         pauseContinuation?.resume()
         pauseContinuation = nil
     }
@@ -320,8 +317,8 @@ public actor SimulationOrchestrator {
     /// Check if simulation is paused
     ///
     /// - Returns: true if simulation is currently paused
-    public func getIsPaused() -> Bool {
-        isPaused
+    public func isPaused() -> Bool {
+        paused
     }
 
     /// Enable conservation enforcement
@@ -349,7 +346,7 @@ public actor SimulationOrchestrator {
             throw OrchestratorError.noInitialState
         }
 
-        let geometry = createGeometry(from: staticParams.mesh)
+        let geometry = createGeometry(from: staticParameters.mesh)
 
         self.conservationEnforcer = ConservationEnforcer(
             laws: laws,
@@ -385,11 +382,11 @@ public actor SimulationOrchestrator {
     /// ## Example
     ///
     /// ```swift
-    /// let report = await orchestrator.getDiagnosticsReport()
+    /// let report = await orchestrator.diagnosticsReport()
     /// print(report.summary())
     /// try report.exportJSON(to: "diagnostics.json")
     /// ```
-    public func getDiagnosticsReport() async -> DiagnosticsReport {
+    public func diagnosticsReport() async -> DiagnosticsReport {
         guard let initial = initialState else {
             return DiagnosticsReport(
                 results: diagnosticResults,
@@ -419,14 +416,14 @@ public actor SimulationOrchestrator {
     /// **Thread Safety**: Actor-isolated, so only one step can pause at a time.
     private func checkPauseState() async {
         // Use while loop instead of recursion to handle repeated pause/resume cycles
-        while isPaused {
+        while paused {
             await withCheckedContinuation { continuation in
                 // Store continuation for resume()
                 // If pause() is called multiple times before resume(), only the latest continuation is kept
                 // (previous steps will have already resumed)
                 pauseContinuation = continuation
             }
-            // After resume, check isPaused again in case pause() was called during resume
+            // After resume, check paused again in case pause() was called during resume
         }
     }
 
@@ -436,11 +433,13 @@ public actor SimulationOrchestrator {
     private var lastSolverResult: SolverResult?
 
     /// Perform single timestep
-    private func performStep(dynamicParams: DynamicRuntimeParams, endTime: Float) async throws {
+    private func performStep(dynamicParameters: DynamicRuntimeParameters, endTime: Float) async throws {
         logger.debug("performStep start", metadata: ["step": "\(state.step)", "time": "\(state.time)s"])
 
+        try state.profiles.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+
         // Construct geometry from mesh configuration
-        let geometry = createGeometry(from: staticParams.mesh)
+        let geometry = createGeometry(from: staticParameters.mesh)
 
         // Calculate adaptive timestep (before MHD check)
         let computedDt: Float
@@ -449,23 +448,25 @@ public actor SimulationOrchestrator {
             let transportCoeffs = transport.computeCoefficients(
                 profiles: state.profiles,
                 geometry: geometry,
-                params: dynamicParams.transportParams
+                parameters: dynamicParameters.transportParameters
             )
+            try transportCoeffs.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+
             let rawDt = timeStepCalculator.compute(
                 transportCoeffs: transportCoeffs,
-                dr: staticParams.mesh.dr
+                radialSpacing: staticParameters.mesh.radialSpacing
             )
 
             // Enforce the growth cap to prevent Newton solver instability.
-            // This prevents aggressive dt jumps that cause:
+            // This prevents aggressive timeStep jumps that cause:
             // - Jacobian condition number explosion (κ > 1e6)
             // - Linear solver accuracy degradation (errors > 1e-2)
             // - Invalid Newton merit descent direction (-R·JΔ < 0)
-            let growthCap = adaptiveConfig.maxTimestepGrowth
-            let cappedDt = min(rawDt, state.dt * growthCap)
+            let growthCap = adaptiveConfig.maximumTimeStepGrowth
+            let cappedDt = min(rawDt, state.timeStep * growthCap)
 
             if cappedDt < rawDt {
-                let growthRatio = rawDt / state.dt
+                let growthRatio = rawDt / state.timeStep
                 logger.info("dt growth capped", metadata: [
                     "raw": "\(String(format: "%.2e", rawDt))s",
                     "capped": "\(String(format: "%.2e", cappedDt))s",
@@ -477,16 +478,16 @@ public actor SimulationOrchestrator {
             computedDt = cappedDt
 
             if state.step < 5 {
-                logger.debug("Adaptive dt calculated", metadata: ["dt": "\(computedDt)s"])
+                logger.debug("Adaptive timeStep calculated", metadata: ["dt": "\(computedDt)s"])
             }
         } else {
             // First step: use configured timestep with safety lower bound
-            computedDt = max(dynamicParams.dt, 1e-5)
-            logger.debug("First step dt", metadata: ["dt": "\(computedDt)s", "configured": "\(dynamicParams.dt)s"])
+            computedDt = max(dynamicParameters.timeStep, 1e-5)
+            logger.debug("First step dt", metadata: ["dt": "\(computedDt)s", "configured": "\(dynamicParameters.timeStep)s"])
         }
 
         let remainingTime = state.remainingTime(until: endTime)
-        let dt = selectStepDuration(computedDt: computedDt, remainingTime: remainingTime)
+        let timeStep = selectStepDuration(computedDt: computedDt, remainingTime: remainingTime)
 
         // Check for MHD events (sawteeth, NTMs, etc.)
         for model in mhdModels {
@@ -495,19 +496,20 @@ public actor SimulationOrchestrator {
                 to: state.profiles,
                 geometry: geometry,
                 time: state.time,
-                dt: dt
+                timeStep: timeStep
             )
 
             // Check if profiles were modified (MHD event occurred)
             if modifiedProfiles != state.profiles {
                 // MHD event occurred: bypass PDE solver and advance time
+                try modifiedProfiles.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
 
                 // Get crash step duration if this is a sawtooth model
                 let crashDt: Float
                 if let sawtoothModel = model as? SawtoothModel {
-                    crashDt = min(sawtoothModel.params.crashStepDuration, remainingTime)
+                    crashDt = min(sawtoothModel.parameters.crashStepDuration, remainingTime)
                 } else {
-                    crashDt = dt  // Use normal dt for other MHD models
+                    crashDt = timeStep  // Use normal timeStep for other MHD models
                 }
 
                 // Update state with modified profiles
@@ -515,7 +517,7 @@ public actor SimulationOrchestrator {
                     totalIterations: state.statistics.totalIterations,
                     totalSteps: state.statistics.totalSteps + 1,
                     converged: true,
-                    maxResidualNorm: 0.0,  // No solver used
+                    maximumResidualNorm: 0.0,  // No solver used
                     wallTime: state.statistics.wallTime
                 )
 
@@ -535,32 +537,33 @@ public actor SimulationOrchestrator {
         let transportCoeffs = transport.computeCoefficients(
             profiles: state.profiles,
             geometry: geometry,
-            params: dynamicParams.transportParams
+            parameters: dynamicParameters.transportParameters
         )
+        try transportCoeffs.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
 
         // Build CoeffsCallback with closure capture
         // Note: Source terms are computed inside the callback because they depend
         // on the profiles being solved, which may be updated iteratively (Newton-Raphson)
-        let coeffsCallback: CoeffsCallback = { [transport, sources, dynamicParams, staticParams] profiles, geo in
+        let coeffsCallback: CoeffsCallback = { [transport, sources, dynamicParameters, staticParameters] profiles, geo in
             // Capture context from outer scope
             let transportCoeffs = transport.computeCoefficients(
                 profiles: profiles,
                 geometry: geo,
-                params: dynamicParams.transportParams
+                parameters: dynamicParameters.transportParameters
             )
 
             let sourceTerms = sources.reduce(
                 into: SourceTerms.zero(
-                    nCells: staticParams.mesh.nCells,
+                    cellCount: staticParameters.mesh.cellCount,
                     metadata: nil,
                     validateDebugUnits: false
                 )
             ) { total, model in
-                if let params = dynamicParams.sourceParams[model.name] {
+                if let parameters = dynamicParameters.sourceParameters[model.name] {
                     let contribution = model.computeTermsForSolver(
                         profiles: profiles,
                         geometry: geo,
-                        params: params
+                        parameters: parameters
                     )
                     total = total.adding(contribution, validateDebugUnits: false)
                 }
@@ -570,23 +573,23 @@ public actor SimulationOrchestrator {
                 transport: transportCoeffs,
                 sources: sourceTerms,
                 geometry: geo,
-                staticParams: staticParams,
+                staticParameters: staticParameters,
                 profiles: profiles
             )
         }
 
         // Convert profiles to CellVariable tuple
         let xOld = state.profiles.asTuple(
-            dr: staticParams.mesh.dr,
-            boundaryConditions: dynamicParams.boundaryConditions
+            radialSpacing: staticParameters.mesh.radialSpacing,
+            boundaryConditions: dynamicParameters.boundaryConditions
         )
 
         // Solve PDE (with adaptive retrial if not converged)
-        let maxSolverRetries = 5
+        let maxSolverRetries = 8
         var attempt = 0
-        var dtAttempt = dt
+        var dtAttempt = timeStep
         var accumulatedIterations = 0
-        var worstResidual: Float = state.statistics.maxResidualNorm
+        var worstResidual: Float = state.statistics.maximumResidualNorm
         var finalResult: SolverResult? = nil
 
         while attempt <= maxSolverRetries {
@@ -595,10 +598,10 @@ public actor SimulationOrchestrator {
             ])
 
             let result = solver.solve(
-                dt: dtAttempt,
-                staticParams: staticParams,
-                dynamicParamsT: dynamicParams,
-                dynamicParamsTplusDt: dynamicParams,
+                timeStep: dtAttempt,
+                staticParameters: staticParameters,
+                dynamicParamsT: dynamicParameters,
+                dynamicParamsTplusDt: dynamicParameters,
                 geometryT: geometry,
                 geometryTplusDt: geometry,
                 xOld: xOld,
@@ -630,16 +633,18 @@ public actor SimulationOrchestrator {
                 )
             }
 
-            let minimumTimestep = timeStepCalculator.minimumTimestep
+            let adaptiveMinimumTimestep = timeStepCalculator.minimumTimestep
+            let retryMinimumTimestep = Self.retryMinimumTimestep(for: adaptiveMinimumTimestep)
             let proposedDt = dtAttempt * 0.5
-            let nextDt = max(proposedDt, minimumTimestep)
+            let nextDt = max(proposedDt, retryMinimumTimestep)
 
             // Evaluate retry possibility
             logger.info("Solver did not converge, evaluating retry", metadata: [
                 "currentDt": "\(dtAttempt)",
                 "proposedDt": "\(proposedDt)",
                 "retryDt": "\(nextDt)",
-                "minTimestep": "\(minimumTimestep)",
+                "adaptiveMinTimestep": "\(adaptiveMinimumTimestep)",
+                "retryMinTimestep": "\(retryMinimumTimestep)",
                 "attempt": "\(attempt)",
                 "maxRetries": "\(maxSolverRetries)"
             ])
@@ -648,7 +653,8 @@ public actor SimulationOrchestrator {
                 logger.error("Cannot retry: timestep is already at minimum", metadata: [
                     "currentDt": "\(dtAttempt)",
                     "nextDt": "\(nextDt)",
-                    "minTimestep": "\(minimumTimestep)"
+                    "adaptiveMinTimestep": "\(adaptiveMinimumTimestep)",
+                    "retryMinTimestep": "\(retryMinimumTimestep)"
                 ])
                 throw SolverError.convergenceFailure(
                     iterations: accumulatedIterations,
@@ -674,21 +680,30 @@ public actor SimulationOrchestrator {
         lastSolverResult = resolvedResult
 
         let finalProfiles = resolvedResult.updatedProfiles
+        try finalProfiles.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+
         let finalTransportCoeffs = transport.computeCoefficients(
             profiles: finalProfiles,
             geometry: geometry,
-            params: dynamicParams.transportParams
+            parameters: dynamicParameters.transportParameters
         )
-        let finalSourceTerms = sources.reduce(into: SourceTerms.zero(nCells: staticParams.mesh.nCells)) { total, model in
-            if let params = dynamicParams.sourceParams[model.name] {
-                let contribution = model.computeTerms(
+        try finalTransportCoeffs.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+
+        var finalSourceTerms = SourceTerms.zero(cellCount: staticParameters.mesh.cellCount)
+        for model in sources {
+            if let parameters = dynamicParameters.sourceParameters[model.name] {
+                let contribution = try model.computeTerms(
                     profiles: finalProfiles,
                     geometry: geometry,
-                    params: params
+                    parameters: parameters
                 )
-                total = total + contribution
+                finalSourceTerms = finalSourceTerms + contribution
             }
         }
+        try finalSourceTerms.validateNumerics(
+            expectedCellCount: staticParameters.mesh.cellCount,
+            requiresMetadata: true
+        )
 
         // Update state using high-precision time accumulation
         var newStats = state.statistics
@@ -697,7 +712,7 @@ public actor SimulationOrchestrator {
         newStats.converged = true
         // Use final successful attempt's residual, not worst from failed attempts
         // This prevents false alarms in diagnostics when retries occurred
-        newStats.maxResidualNorm = max(newStats.maxResidualNorm, resolvedResult.residualNorm)
+        newStats.maximumResidualNorm = max(newStats.maximumResidualNorm, resolvedResult.residualNorm)
 
         // Use advanced(by:profiles:statistics:transport:sources:) for high-precision time accumulation
         // This prevents cumulative round-off errors over long simulations (20,000+ steps)
@@ -712,7 +727,7 @@ public actor SimulationOrchestrator {
         )
 
         logger.debug("performStep end", metadata: [
-            "step": "\(state.step)", "time": "\(state.time)s", "dt": "\(state.dt)s"
+            "step": "\(state.step)", "time": "\(state.time)s", "dt": "\(state.timeStep)s"
         ])
 
         // Apply conservation enforcement if enabled
@@ -723,6 +738,7 @@ public actor SimulationOrchestrator {
                 step: state.step,
                 time: state.time
             )
+            try correctedProfiles.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
 
             // Update state with corrected profiles (preserving time accumulator)
             state = state.updated(profiles: correctedProfiles)
@@ -744,6 +760,10 @@ public actor SimulationOrchestrator {
 
     private static func finalTimeTolerance(for endTime: Float) -> Double {
         Double(endTime.ulp) * 4
+    }
+
+    private static func retryMinimumTimestep(for adaptiveMinimumTimestep: Float) -> Float {
+        max(adaptiveMinimumTimestep * 0.001, 1e-12)
     }
 
     private func selectStepDuration(computedDt: Float, remainingTime: Float) -> Float {
@@ -786,7 +806,7 @@ public actor SimulationOrchestrator {
         if samplingConfig.enableDiagnostics, let solverResult = lastSolverResult {
             diagnostics = NumericalDiagnosticsCollector.collectWithConservation(
                 from: solverResult,
-                dt: state.dt,
+                timeStep: state.timeStep,
                 wallTime: stepWallTime,
                 cflNumber: 0,  // TODO: Compute CFL number
                 currentProfiles: state.profiles,
@@ -827,37 +847,37 @@ public actor SimulationOrchestrator {
 
         case 1:
             // Minor warning: 1-5% drift
-            let maxDrift = max(
-                abs(diagnostics.particle_drift),
-                abs(diagnostics.energy_drift),
-                abs(diagnostics.current_drift)
+            let maximumDrift = max(
+                abs(diagnostics.particleDrift),
+                abs(diagnostics.energyDrift),
+                abs(diagnostics.currentDrift)
             )
             if state.step % 1000 == 0 {  // Log every 1000 steps to avoid spam
                 logger.warning("Conservation drift detected", metadata: [
                     "step": "\(state.step)",
                     "time": "\(state.time)s",
-                    "maxDrift": "\(maxDrift * 100)%",
-                    "particleDrift": "\(diagnostics.particle_drift * 100)%",
-                    "energyDrift": "\(diagnostics.energy_drift * 100)%",
-                    "currentDrift": "\(diagnostics.current_drift * 100)%"
+                    "maximumDrift": "\(maximumDrift * 100)%",
+                    "particleDrift": "\(diagnostics.particleDrift * 100)%",
+                    "energyDrift": "\(diagnostics.energyDrift * 100)%",
+                    "currentDrift": "\(diagnostics.currentDrift * 100)%"
                 ])
             }
 
         case 2:
             // Critical warning: > 5% drift
-            let maxDrift = max(
-                abs(diagnostics.particle_drift),
-                abs(diagnostics.energy_drift),
-                abs(diagnostics.current_drift)
+            let maximumDrift = max(
+                abs(diagnostics.particleDrift),
+                abs(diagnostics.energyDrift),
+                abs(diagnostics.currentDrift)
             )
             logger.critical("Large conservation drift", metadata: [
                 "step": "\(state.step)",
                 "time": "\(state.time)s",
-                "maxDrift": "\(maxDrift * 100)%",
-                "particleDrift": "\(diagnostics.particle_drift * 100)%",
-                "energyDrift": "\(diagnostics.energy_drift * 100)%",
-                "currentDrift": "\(diagnostics.current_drift * 100)%",
-                "recommendation": "check timestep (dt=\(state.dt)s) and mesh resolution"
+                "maximumDrift": "\(maximumDrift * 100)%",
+                "particleDrift": "\(diagnostics.particleDrift * 100)%",
+                "energyDrift": "\(diagnostics.energyDrift * 100)%",
+                "currentDrift": "\(diagnostics.currentDrift * 100)%",
+                "recommendation": "check timestep (timeStep=\(state.timeStep)s) and mesh resolution"
             ])
 
         default:

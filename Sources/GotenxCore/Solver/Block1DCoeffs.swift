@@ -4,9 +4,9 @@ import MLX
 /// Block-structured coefficients for coupled 1D transport equations
 ///
 /// Manages coefficients for 4 coupled PDEs representing tokamak core transport:
-/// - Ti: Ion temperature (eV)
-/// - Te: Electron temperature (eV)
-/// - ne: Electron density (m⁻³)
+/// - ionTemperature: Ion temperature (eV)
+/// - electronTemperature: Electron temperature (eV)
+/// - electronDensity: Electron density (m⁻³)
 /// - psi: Poloidal flux (Wb)
 ///
 /// Each equation has its own set of coefficients (EquationCoeffs), allowing
@@ -68,78 +68,78 @@ public struct Block1DCoeffs: Sendable {
 /// - Radial coordinates
 /// - Metric tensor components for non-uniform grids
 public struct GeometricFactors: Sendable {
-    /// Cell volumes [nCells]
+    /// Cell volumes [cellCount]
     ///
     /// For cylindrical geometry: V_i = 2π R₀ Δr_i
     /// where R₀ is major radius, Δr_i is radial cell width
     public let cellVolumes: EvaluatedArray
 
-    /// Face areas [nFaces]
+    /// Face areas [faceCount]
     ///
     /// For cylindrical geometry: A_j = 2π R₀
     /// (constant for 1D slab approximation)
     public let faceAreas: EvaluatedArray
 
-    /// Distance between adjacent cell centers [nCells-1]
+    /// Distance between adjacent cell centers [cellCount-1]
     ///
     /// Δx_j = r_{i+1} - r_i (for face j between cells i and i+1)
     public let cellDistances: EvaluatedArray
 
-    /// Radial coordinate at cell centers [nCells]
+    /// Radial coordinate at cell centers [cellCount]
     ///
     /// Normalized radial coordinate: r/a where a is minor radius
-    public let rCell: EvaluatedArray
+    public let cellRadii: EvaluatedArray
 
-    /// Radial coordinate at cell faces [nFaces]
+    /// Radial coordinate at cell faces [faceCount]
     ///
     /// Normalized radial coordinate at faces (boundaries between cells)
-    public let rFace: EvaluatedArray
+    public let faceRadii: EvaluatedArray
 
-    /// Metric tensor component g₀ = √g (Jacobian of flux coordinates) [nCells]
+    /// Metric tensor component g₀ = √g (Jacobian of flux coordinates) [cellCount]
     ///
     /// For circular geometry: g₀ = F / B_p where F is flux function
     /// Used for flux divergence: ∇·F = (1/√g) ∂(√g·F)/∂ψ
     public let jacobian: EvaluatedArray
 
-    /// Metric tensor component g₁ [nCells]
+    /// Metric tensor component g₁ [cellCount]
     ///
     /// Geometric factor for non-uniform grids
-    public let g1: EvaluatedArray
+    public let majorRadiusMetric: EvaluatedArray
 
-    /// Metric tensor component g₂ [nCells]
+    /// Metric tensor component g₂ [cellCount]
     ///
     /// Geometric factor for non-uniform grids
-    public let g2: EvaluatedArray
+    public let shapeMetric: EvaluatedArray
 
     /// Create geometric factors
     ///
     /// - Parameters:
-    ///   - cellVolumes: Cell volumes [nCells]
-    ///   - faceAreas: Face areas [nFaces]
-    ///   - cellDistances: Distances between cell centers [nCells-1]
-    ///   - rCell: Radial coordinates at cells [nCells]
-    ///   - rFace: Radial coordinates at faces [nFaces]
-    ///   - jacobian: Metric tensor g₀ (Jacobian) [nCells]
-    ///   - g1: Metric tensor g₁ [nCells]
-    ///   - g2: Metric tensor g₂ [nCells]
+    ///   - cellVolumes: Cell volumes [cellCount]
+    ///   - faceAreas: Face areas [faceCount]
+    ///   - cellDistances: Distances between cell centers [cellCount-1]
+    ///   - cellRadii: Radial coordinates at cells [cellCount]
+    ///   - faceRadii: Radial coordinates at faces [faceCount]
+    ///   - jacobian: Metric tensor g₀ (Jacobian) [cellCount]
+    ///   - majorRadiusMetric: Metric tensor g₁ [cellCount]
+    ///   - shapeMetric: Metric tensor g₂ [cellCount]
     public init(
         cellVolumes: EvaluatedArray,
         faceAreas: EvaluatedArray,
         cellDistances: EvaluatedArray,
-        rCell: EvaluatedArray,
-        rFace: EvaluatedArray,
+        cellRadii: EvaluatedArray,
+        faceRadii: EvaluatedArray,
         jacobian: EvaluatedArray,
-        g1: EvaluatedArray,
-        g2: EvaluatedArray
+        majorRadiusMetric: EvaluatedArray,
+        shapeMetric: EvaluatedArray
     ) {
         self.cellVolumes = cellVolumes
         self.faceAreas = faceAreas
         self.cellDistances = cellDistances
-        self.rCell = rCell
-        self.rFace = rFace
+        self.cellRadii = cellRadii
+        self.faceRadii = faceRadii
         self.jacobian = jacobian
-        self.g1 = g1
-        self.g2 = g2
+        self.majorRadiusMetric = majorRadiusMetric
+        self.shapeMetric = shapeMetric
     }
 
     /// Create geometric factors from Geometry (UNIFORM GRID ONLY)
@@ -149,81 +149,81 @@ public struct GeometricFactors: Sendable {
     /// - For uniform grids: Generates correct geometric factors with constant Δr
     /// - For non-uniform grids: **Incorrect** - need to specify actual grid in Geometry
     ///
-    /// **Future improvement**: Add explicit grid arrays (rFace, rCell) to `Geometry` struct
+    /// **Future improvement**: Add explicit grid arrays (faceRadii, cellRadii) to `Geometry` struct
     /// to support non-uniform grids. Current implementation is adequate for:
     /// - Initial development and testing
     /// - Uniform grid configurations
     /// - Simple tokamak geometries
     ///
     /// For production simulations with edge-refined grids, consider:
-    /// 1. Adding `rFace: EvaluatedArray` to `Geometry` struct
+    /// 1. Adding `faceRadii: EvaluatedArray` to `Geometry` struct
     /// 2. Computing geometric factors from actual grid coordinates
     ///
     /// - Parameter geometry: Tokamak geometry
     /// - Returns: Geometric factors for finite volume discretization
     public static func from(geometry: Geometry) -> GeometricFactors {
-        let nCells = geometry.nCells
-        let nFaces = nCells + 1
-        let dr = geometry.dr  // Assumes uniform spacing
+        let cellCount = geometry.cellCount
+        let faceCount = cellCount + 1
+        let radialSpacing = geometry.radialSpacing  // Assumes uniform spacing
 
         // Validate geometry shape consistency
         let radiiShape = geometry.radii.shape[0]
-        let g0Shape = geometry.g0.shape[0]
+        let fluxSurfaceMetricShape = geometry.fluxSurfaceMetric.shape[0]
 
-        guard radiiShape == nCells else {
+        guard radiiShape == cellCount else {
             fatalError("""
                 GeometricFactors.from: Geometry.radii shape mismatch.
-                Expected radii.shape[0] = \(nCells) (nCells)
+                Expected radii.shape[0] = \(cellCount) (cellCount)
                 Got radii.shape[0] = \(radiiShape)
                 This indicates inconsistent Geometry construction.
                 """)
         }
 
-        guard g0Shape == nFaces else {
+        guard fluxSurfaceMetricShape == faceCount else {
             fatalError("""
-                GeometricFactors.from: Geometry.g0 shape mismatch.
-                Expected g0.shape[0] = \(nFaces) (nCells + 1, face-centered)
-                Got g0.shape[0] = \(g0Shape)
+                GeometricFactors.from: Geometry.fluxSurfaceMetric shape mismatch.
+                Expected fluxSurfaceMetric.shape[0] = \(faceCount) (cellCount + 1, face-centered)
+                Got fluxSurfaceMetric.shape[0] = \(fluxSurfaceMetricShape)
                 This indicates incorrect Geometry construction.
                 Use createGeometry(from:) or Geometry(config:) to ensure correct shapes.
                 """)
         }
 
         // Use existing radii from geometry (ensures consistency)
-        let rCell = geometry.radii.value  // [nCells]
+        let cellRadii = geometry.radii.value  // [cellCount]
 
         // Face radii: uniformly spaced from 0 to minorRadius
-        let rFace = MLXArray(0..<nFaces).asType(.float32) * dr  // [nFaces]
+        let faceRadii = MLXArray(0..<faceCount).asType(.float32) * radialSpacing  // [faceCount]
 
         // Cell volumes (2π R₀ Δr for cylindrical geometry)
-        let volumeValue: Float = 2.0 * Float.pi * geometry.majorRadius * dr
-        let cellVolumes = MLXArray.full([nCells], values: MLXArray(volumeValue))
+        let volumeValue: Float = 2.0 * Float.pi * geometry.majorRadius * radialSpacing
+        let cellVolumes = MLXArray.full([cellCount], values: MLXArray(volumeValue))
 
         // Face areas (2π R₀ - constant)
         let areaValue: Float = 2.0 * Float.pi * geometry.majorRadius
-        let faceAreas = MLXArray.full([nFaces], values: MLXArray(areaValue))
+        let faceAreas = MLXArray.full([faceCount], values: MLXArray(areaValue))
 
-        // Cell distances (uniform grid: all equal to dr)
-        let cellDistances = MLXArray.full([nCells - 1], values: MLXArray(dr))
+        // Cell distances (uniform grid: all equal to radialSpacing)
+        let cellDistances = MLXArray.full([cellCount - 1], values: MLXArray(radialSpacing))
 
         // Metric tensor components from geometry
-        // ALL metric tensors (g0, g1, g2) are face-centered [nFaces]
-        // Convert to cell-centered [nCells] using arithmetic average
+        // ALL metric tensors (fluxSurfaceMetric, majorRadiusMetric, shapeMetric) are face-centered [faceCount]
+        // Convert to cell-centered [cellCount] using arithmetic average
 
         // Validate shapes first
-        guard geometry.g0.value.shape[0] == nFaces else {
-            fatalError("GeometricFactors.from: g0 shape mismatch. Expected \(nFaces) (nFaces), got \(geometry.g0.value.shape[0])")
+        guard geometry.fluxSurfaceMetric.value.shape[0] == faceCount else {
+            fatalError("GeometricFactors.from: fluxSurfaceMetric shape mismatch. Expected \(faceCount) (faceCount), got \(geometry.fluxSurfaceMetric.value.shape[0])")
         }
-        guard geometry.g1.value.shape[0] == nFaces else {
-            fatalError("GeometricFactors.from: g1 shape mismatch. Expected \(nFaces) (nFaces), got \(geometry.g1.value.shape[0])")
+        guard geometry.majorRadiusMetric.value.shape[0] == faceCount else {
+            fatalError("GeometricFactors.from: majorRadiusMetric shape mismatch. Expected \(faceCount) (faceCount), got \(geometry.majorRadiusMetric.value.shape[0])")
         }
-        guard geometry.g2.value.shape[0] == nFaces else {
-            fatalError("GeometricFactors.from: g2 shape mismatch. Expected \(nFaces) (nFaces), got \(geometry.g2.value.shape[0])")
+        guard geometry.shapeMetric.value.shape[0] == faceCount else {
+            fatalError("GeometricFactors.from: shapeMetric shape mismatch. Expected \(faceCount) (faceCount), got \(geometry.shapeMetric.value.shape[0])")
         }
 
         // Use a 1D cylindrical approximation for the Jacobian.
         // In 1D cylindrical coordinates: √g = 2πR₀ (constant)
-        // The original implementation used g0 = (R₀ + r)², which varies with r
+        // The original implementation used fluxSurfaceMetric = (R₀ + r)², which varies with r
         // This caused flux divergence to become O(10³⁰), leading to solver failure
         //
         // Physical justification for constant Jacobian:
@@ -233,25 +233,24 @@ public struct GeometricFactors: Sendable {
         // Alternative (if full toroidal geometry needed):
         // - Use 2D (r, θ) solver instead of 1D approximation
         let jacobianValue = 2.0 * Float.pi * geometry.majorRadius
-        let jacobian = MLXArray.full([nCells], values: MLXArray(jacobianValue))
+        let jacobian = MLXArray.full([cellCount], values: MLXArray(jacobianValue))
 
-        // Keep g1, g2 from geometry (not critical for 1D cylindrical)
-        let g0Faces = geometry.g0.value
-        let g1Faces = geometry.g1.value
-        let g2Faces = geometry.g2.value
+        // Keep majorRadiusMetric, shapeMetric from geometry (not critical for 1D cylindrical)
+        let majorRadiusMetricFaces = geometry.majorRadiusMetric.value
+        let shapeMetricFaces = geometry.shapeMetric.value
 
-        let g1 = 0.5 * (g1Faces[0..<nCells] + g1Faces[1..<(nCells+1)])
-        let g2 = 0.5 * (g2Faces[0..<nCells] + g2Faces[1..<(nCells+1)])
+        let majorRadiusMetric = 0.5 * (majorRadiusMetricFaces[0..<cellCount] + majorRadiusMetricFaces[1..<(cellCount+1)])
+        let shapeMetric = 0.5 * (shapeMetricFaces[0..<cellCount] + shapeMetricFaces[1..<(cellCount+1)])
 
         return GeometricFactors(
             cellVolumes: EvaluatedArray(evaluating: cellVolumes),
             faceAreas: EvaluatedArray(evaluating: faceAreas),
             cellDistances: EvaluatedArray(evaluating: cellDistances),
-            rCell: EvaluatedArray(evaluating: rCell),
-            rFace: EvaluatedArray(evaluating: rFace),
+            cellRadii: EvaluatedArray(evaluating: cellRadii),
+            faceRadii: EvaluatedArray(evaluating: faceRadii),
             jacobian: EvaluatedArray(evaluating: jacobian),
-            g1: EvaluatedArray(evaluating: g1),
-            g2: EvaluatedArray(evaluating: g2)
+            majorRadiusMetric: EvaluatedArray(evaluating: majorRadiusMetric),
+            shapeMetric: EvaluatedArray(evaluating: shapeMetric)
         )
     }
 }
@@ -263,38 +262,57 @@ extension Block1DCoeffs {
     ///
     /// - Throws: ValidationError if any coefficient has inconsistent shape
     public func validate() throws {
-        let nCells = geometry.rCell.value.shape[0]
+        let cellCount = geometry.cellRadii.value.shape[0]
 
-        try ionCoeffs.validate(nCells: nCells)
-        try electronCoeffs.validate(nCells: nCells)
-        try densityCoeffs.validate(nCells: nCells)
-        try fluxCoeffs.validate(nCells: nCells)
+        try ionCoeffs.validate(cellCount: cellCount)
+        try electronCoeffs.validate(cellCount: cellCount)
+        try densityCoeffs.validate(cellCount: cellCount)
+        try fluxCoeffs.validate(cellCount: cellCount)
 
         // Validate geometry
-        let nFaces = nCells + 1
+        let faceCount = cellCount + 1
 
-        guard geometry.cellVolumes.value.shape[0] == nCells else {
+        guard geometry.cellVolumes.value.shape[0] == cellCount else {
             throw ValidationError.inconsistentShape(
                 field: "geometry.cellVolumes",
-                expected: [nCells],
+                expected: [cellCount],
                 actual: geometry.cellVolumes.value.shape
             )
         }
 
-        guard geometry.faceAreas.value.shape[0] == nFaces else {
+        guard geometry.faceAreas.value.shape[0] == faceCount else {
             throw ValidationError.inconsistentShape(
                 field: "geometry.faceAreas",
-                expected: [nFaces],
+                expected: [faceCount],
                 actual: geometry.faceAreas.value.shape
             )
         }
 
-        guard geometry.cellDistances.value.shape[0] == nCells - 1 else {
+        guard geometry.cellDistances.value.shape[0] == cellCount - 1 else {
             throw ValidationError.inconsistentShape(
                 field: "geometry.cellDistances",
-                expected: [nCells - 1],
+                expected: [cellCount - 1],
                 actual: geometry.cellDistances.value.shape
             )
         }
+    }
+
+    public func validateNumerics() throws {
+        try validate()
+
+        let cellCount = geometry.cellRadii.value.shape[0]
+        try ionCoeffs.validateNumerics(cellCount: cellCount, name: "ionCoeffs")
+        try electronCoeffs.validateNumerics(cellCount: cellCount, name: "electronCoeffs")
+        try densityCoeffs.validateNumerics(cellCount: cellCount, name: "densityCoeffs")
+        try fluxCoeffs.validateNumerics(cellCount: cellCount, name: "fluxCoeffs")
+
+        try NumericalValidation.validatePositive(geometry.cellVolumes.value, field: "geometry.cellVolumes")
+        try NumericalValidation.validatePositive(geometry.faceAreas.value, field: "geometry.faceAreas")
+        try NumericalValidation.validatePositive(geometry.cellDistances.value, field: "geometry.cellDistances")
+        try NumericalValidation.validateFinite(geometry.cellRadii.value, field: "geometry.cellRadii")
+        try NumericalValidation.validateFinite(geometry.faceRadii.value, field: "geometry.faceRadii")
+        try NumericalValidation.validatePositive(geometry.jacobian.value, field: "geometry.jacobian")
+        try NumericalValidation.validateFinite(geometry.majorRadiusMetric.value, field: "geometry.majorRadiusMetric")
+        try NumericalValidation.validateFinite(geometry.shapeMetric.value, field: "geometry.shapeMetric")
     }
 }

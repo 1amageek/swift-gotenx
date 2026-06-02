@@ -29,16 +29,16 @@ public actor CompilationCache {
     private var cache: [CacheKey: Any] = [:]
 
     /// Maximum number of cached entries
-    private let maxEntries: Int
+    private let maximumEntries: Int
 
     /// Initialization
     ///
-    /// - Parameter maxEntries: Maximum cache size (default: 10)
-    public init(maxEntries: Int = 10) {
-        self.maxEntries = maxEntries
+    /// - Parameter maximumEntries: Maximum cache size (default: 10)
+    public init(maximumEntries: Int = 10) {
+        self.maximumEntries = maximumEntries
     }
 
-    /// Get or compile function
+    /// Return a cached compiled function, or compile and cache it.
     ///
     /// If a compiled function for the given key exists in cache, return it.
     /// Otherwise, compile the function, cache it, and return it.
@@ -47,8 +47,8 @@ public actor CompilationCache {
     ///   - key: Cache key (based on static configuration)
     ///   - compile: Closure that compiles the function
     /// - Returns: Compiled function (cached or newly compiled)
-    public func getOrCompile<In, Out>(
-        key: CacheKey,
+    public func compiledFunction<In, Out>(
+        for key: CacheKey,
         compile: () -> (In) -> Out
     ) -> (In) -> Out {
         // Check cache
@@ -60,7 +60,7 @@ public actor CompilationCache {
         let compiled = compile()
 
         // Store in cache (with LRU eviction if full)
-        if cache.count >= maxEntries {
+        if cache.count >= maximumEntries {
             // Remove first entry (simple eviction strategy)
             if let firstKey = cache.keys.first {
                 cache.removeValue(forKey: firstKey)
@@ -98,7 +98,7 @@ public actor CompilationCache {
 /// Cache key based on static configuration
 ///
 /// Two configurations are considered identical for caching if:
-/// - Mesh resolution is the same (nCells)
+/// - Mesh resolution is the same (cellCount)
 /// - Solver type is the same
 /// - Evolution flags are the same (which PDEs to solve)
 ///
@@ -128,7 +128,7 @@ public struct CacheKey: Hashable {
     public init(staticConfig: StaticConfig) {
         // Hash mesh parameters that affect graph structure
         var hasher = Hasher()
-        hasher.combine(staticConfig.mesh.nCells)
+        hasher.combine(staticConfig.mesh.cellCount)
         hasher.combine(staticConfig.mesh.geometryType.rawValue)
         self.meshHash = hasher.finalize()
 
@@ -139,8 +139,8 @@ public struct CacheKey: Hashable {
         var flags = 0
         if staticConfig.evolution.ionHeat { flags |= (1 << 0) }
         if staticConfig.evolution.electronHeat { flags |= (1 << 1) }
-        if staticConfig.evolution.density { flags |= (1 << 2) }
-        if staticConfig.evolution.current { flags |= (1 << 3) }
+        if staticConfig.evolution.electronDensity { flags |= (1 << 2) }
+        if staticConfig.evolution.poloidalFlux { flags |= (1 << 3) }
         self.evolutionFlags = flags
 
         // Theta parameter affects discretization
@@ -206,7 +206,7 @@ extension CompilationCache {
     /// Default: 10 entries
     ///
     /// - Returns: Maximum number of cache entries
-    public static func getSizeLimit() -> Int {
+    public static func sizeLimit() -> Int {
         guard let envValue = ProcessInfo.processInfo.environment["GOTENX_COMPILATION_CACHE_SIZE"],
               let size = Int(envValue), size > 0 else {
             return 10  // Default size

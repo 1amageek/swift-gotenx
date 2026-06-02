@@ -13,7 +13,7 @@
 **Root Cause**: `SimulationRunner.swift` was not passing the `adaptiveConfig` parameter to `SimulationOrchestrator`, causing it to use the default configuration instead of the user-specified configuration.
 
 **Impact**:
-- Configured `minDt: 1e-5` was being ignored
+- Configured `minimumTimeStep: 1e-5` was being ignored
 - Default `effectiveMinDt = 1e-4` was used instead
 - This prevented dt retry loop from working when `nextDt < minimumTimestep`
 
@@ -28,7 +28,7 @@
 ```
 SimulationPresets.swift (Gotenx app)
   ↓
-  AdaptiveTimestepConfig(minDt: 1e-5, ...)
+  AdaptiveTimestepConfig(minimumTimeStep: 1e-5, ...)
   ↓
   SimulationConfiguration.time.adaptive
   ↓
@@ -55,17 +55,17 @@ From `TimeConfiguration.swift:66-72`:
 
 ```swift
 public static let `default` = AdaptiveTimestepConfig(
-    minDt: nil,              // Use fraction instead
-    minDtFraction: 0.001,    // maxDt / 1000
-    maxDt: 1e-1,             // 0.1s
+    minimumTimeStep: nil,              // Use fraction instead
+    minimumTimeStepFraction: 0.001,    // maximumTimeStep / 1000
+    maximumTimeStep: 1e-1,             // 0.1s
     safetyFactor: 0.9,
-    maxTimestepGrowth: 1.2
+    maximumTimeStepGrowth: 1.2
 )
 ```
 
 **Computed value**:
 ```swift
-effectiveMinDt = maxDt * minDtFraction
+effectiveMinDt = maximumTimeStep * minimumTimeStepFraction
                = 1e-1 * 0.001
                = 1e-4  ← This is what we were seeing!
 ```
@@ -92,17 +92,17 @@ From `SimulationPresets.swift:83-89`:
 
 ```swift
 let adaptiveConfig = AdaptiveTimestepConfig(
-    minDt: 1e-5,             // ← Configured but ignored!
-    minDtFraction: nil,
-    maxDt: 1e-3,
+    minimumTimeStep: 1e-5,             // ← Configured but ignored!
+    minimumTimeStepFraction: nil,
+    maximumTimeStep: 1e-3,
     safetyFactor: 0.9,
-    maxTimestepGrowth: 1.2
+    maximumTimeStepGrowth: 1.2
 )
 ```
 
-With `minDt: 1e-5` explicitly set:
+With `minimumTimeStep: 1e-5` explicitly set:
 ```swift
-effectiveMinDt = minDt  // Explicit value takes precedence
+effectiveMinDt = minimumTimeStep  // Explicit value takes precedence
                = 1e-5   // ← Should be this!
 ```
 
@@ -152,7 +152,7 @@ self.orchestrator = await SimulationOrchestrator(
 ```
 SimulationPresets.swift (Gotenx app)
   ↓
-  AdaptiveTimestepConfig(minDt: 1e-5, ...)
+  AdaptiveTimestepConfig(minimumTimeStep: 1e-5, ...)
   ↓
   SimulationConfiguration.time.adaptive
   ↓
@@ -181,15 +181,15 @@ SimulationPresets.swift (Gotenx app)
 
 ```
 [DEBUG-PRESET] AdaptiveTimestepConfig created:
-[DEBUG-PRESET]   minDt: Optional(1e-05)
-[DEBUG-PRESET]   minDtFraction: nil
-[DEBUG-PRESET]   maxDt: 0.001
+[DEBUG-PRESET]   minimumTimeStep: Optional(1e-05)
+[DEBUG-PRESET]   minimumTimeStepFraction: nil
+[DEBUG-PRESET]   maximumTimeStep: 0.001
 [DEBUG-PRESET]   effectiveMinDt: 1e-05
     ↓
 [DEBUG-INIT] AdaptiveTimestepConfig received:
-[DEBUG-INIT]   minDt: Optional(1e-05)
-[DEBUG-INIT]   minDtFraction: nil
-[DEBUG-INIT]   maxDt: 0.001
+[DEBUG-INIT]   minimumTimeStep: Optional(1e-05)
+[DEBUG-INIT]   minimumTimeStepFraction: nil
+[DEBUG-INIT]   maximumTimeStep: 0.001
 [DEBUG-INIT]   effectiveMinDt: 1e-05
     ↓
 [DEBUG-TSCALC] TimeStepCalculator init:
@@ -247,7 +247,7 @@ After rebuilding Gotenx app with updated swift-gotenx:
    - Lines 22, 52-53: minimumTimestep property
 
 5. **SimulationPresets.swift** (Gotenx app - Already correct)
-   - Lines 83-89: User configuration with minDt: 1e-5
+   - Lines 83-89: User configuration with minimumTimeStep: 1e-5
 
 ---
 
@@ -331,8 +331,8 @@ Build complete! (3.52s)
 
 ## Status Update
 
-**Before Fix**: ❌ Configuration ignored, used default minDt=1e-4, retry failed
-**After Fix**: ✅ Configuration respected, uses minDt=1e-5, retry should work
+**Before Fix**: ❌ Configuration ignored, used default minimumTimeStep=1e-4, retry failed
+**After Fix**: ✅ Configuration respected, uses minimumTimeStep=1e-5, retry should work
 **Build Status**: ✅ Compiled successfully
 **Ready for Testing**: Yes - please rebuild Gotenx app and retest
 

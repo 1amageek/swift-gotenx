@@ -96,7 +96,7 @@ public struct ECRHConfig: Codable, Sendable, Equatable {
 
     /// Deposition location (normalized radius ρ)
     /// Typical range: 0.0 (core) - 0.9 (near edge)
-    public let depositionRho: Float
+    public let normalizedDepositionRadius: Float
 
     /// Deposition width (3σ width of Gaussian profile)
     /// Typical range: 0.05 - 0.15
@@ -115,7 +115,7 @@ public struct ECRHConfig: Codable, Sendable, Equatable {
 
     public static let `default` = ECRHConfig(
         totalPower: 20e6,          // 20 MW
-        depositionRho: 0.5,        // Mid-radius
+        normalizedDepositionRadius: 0.5,        // Mid-radius
         depositionWidth: 0.1,      // Moderately focused
         launchAngle: nil,
         frequency: nil,
@@ -124,14 +124,14 @@ public struct ECRHConfig: Codable, Sendable, Equatable {
 
     public init(
         totalPower: Float = 20e6,
-        depositionRho: Float = 0.5,
+        normalizedDepositionRadius: Float = 0.5,
         depositionWidth: Float = 0.1,
         launchAngle: Float? = nil,
         frequency: Float? = nil,
         currentDriveEnabled: Bool = false
     ) {
         self.totalPower = totalPower
-        self.depositionRho = depositionRho
+        self.normalizedDepositionRadius = normalizedDepositionRadius
         self.depositionWidth = depositionWidth
         self.launchAngle = launchAngle
         self.frequency = frequency
@@ -201,21 +201,21 @@ extension SourcesConfig {
     /// - "ecrh": Electron Cyclotron Resonance Heating
     /// - "gasPuff": Gas puff particle source
     /// - "impurityRadiation": Impurity radiation loss
-    public func toSourceParams() -> [String: SourceParameters] {
-        var params: [String: SourceParameters] = [:]
+    public func sourceParameters() -> [String: SourceParameters] {
+        var parameters: [String: SourceParameters] = [:]
 
         // Add "composite" entry for CompositeSourceModel
-        // (CompositeSourceModel doesn't use params, but orchestrator requires it)
-        params["composite"] = SourceParameters(
+        // (CompositeSourceModel doesn't use parameters, but orchestrator requires it)
+        parameters["composite"] = SourceParameters(
             modelType: "composite",
-            params: [:],
+            parameters: [:],
             timeDependent: false
         )
 
         if fusionPower, let fusionConfig = fusionConfig {
-            params["fusion"] = SourceParameters(
+            parameters["fusion"] = SourceParameters(
                 modelType: "fusion",
-                params: [
+                parameters: [
                     "deuteriumFraction": fusionConfig.deuteriumFraction,
                     "tritiumFraction": fusionConfig.tritiumFraction,
                     "dilution": fusionConfig.dilution
@@ -225,35 +225,35 @@ extension SourcesConfig {
         }
 
         if ohmicHeating {
-            params["ohmic"] = SourceParameters(
+            parameters["ohmic"] = SourceParameters(
                 modelType: "ohmic",
-                params: [:],
+                parameters: [:],
                 timeDependent: false
             )
         }
 
         if ionElectronExchange {
-            params["ionElectronExchange"] = SourceParameters(
+            parameters["ionElectronExchange"] = SourceParameters(
                 modelType: "ionElectronExchange",
-                params: [:],
+                parameters: [:],
                 timeDependent: false
             )
         }
 
         if bremsstrahlung {
-            params["bremsstrahlung"] = SourceParameters(
+            parameters["bremsstrahlung"] = SourceParameters(
                 modelType: "bremsstrahlung",
-                params: [:],
+                parameters: [:],
                 timeDependent: false
             )
         }
 
         if let ecrhConfig = ecrh {
-            params["ecrh"] = SourceParameters(
+            parameters["ecrh"] = SourceParameters(
                 modelType: "ecrh",
-                params: [
+                parameters: [
                     "total_power": ecrhConfig.totalPower,
-                    "deposition_rho": ecrhConfig.depositionRho,
+                    "deposition_rho": ecrhConfig.normalizedDepositionRadius,
                     "deposition_width": ecrhConfig.depositionWidth,
                     "launch_angle": ecrhConfig.launchAngle ?? 0.0,
                     "frequency": ecrhConfig.frequency ?? 0.0,
@@ -264,9 +264,9 @@ extension SourcesConfig {
         }
 
         if let gasPuffConfig = gasPuff {
-            params["gasPuff"] = SourceParameters(
+            parameters["gasPuff"] = SourceParameters(
                 modelType: "gasPuff",
-                params: [
+                parameters: [
                     "puff_rate": gasPuffConfig.puffRate,
                     "penetration_depth": gasPuffConfig.penetrationDepth
                 ],
@@ -285,9 +285,9 @@ extension SourcesConfig {
             default: atomicNumber = 18  // Default to argon
             }
 
-            params["impurityRadiation"] = SourceParameters(
+            parameters["impurityRadiation"] = SourceParameters(
                 modelType: "impurityRadiation",
-                params: [
+                parameters: [
                     "impurity_fraction": impurityConfig.impurityFraction,
                     "atomic_number": atomicNumber
                 ],
@@ -295,6 +295,6 @@ extension SourcesConfig {
             )
         }
 
-        return params
+        return parameters
     }
 }

@@ -11,7 +11,7 @@ public enum PlotType: String, Sendable, Codable {
     case tempDensity = "temp_density"           // Temperature and density vs ρ
     case currentDensity = "current_density"     // Current densities vs ρ
     case qProfile = "q_profile"                 // Safety factor q vs ρ
-    case psi = "psi"                            // Poloidal flux vs ρ
+    case poloidalFlux = "poloidalFlux"                            // Poloidal flux vs ρ
 
     // 2D Transport Coefficients
     case chiEffective = "chi_eff"               // Effective heat diffusivity
@@ -23,7 +23,7 @@ public enum PlotType: String, Sendable, Codable {
     case particleSources = "particle_sources"   // Particle sources
 
     // Time Series
-    case plasmaCurrent = "plasma_current"       // Ip, Ibootstrap, IECRH vs time
+    case plasmaCurrent = "plasma_current"       // Ip, Ibootstrap, ecrhCurrent vs time
     case fusionPower = "fusion_power"           // Fusion gain Q vs time
     case energyBalance = "energy_balance"       // Power balance vs time
 

@@ -8,7 +8,7 @@ import GotenxCore
 /// D + T → He⁴ (3.5 MeV) + n (14.1 MeV)
 ///
 /// Physical equation:
-/// P_fusion = n_D * n_T * ⟨σv⟩(T_i) * E_alpha
+/// fusionPower = n_D * n_T * ⟨σv⟩(T_i) * E_alpha
 ///
 /// Uses Bosch-Hale parameterization for reactivity ⟨σv⟩(T_i).
 ///
@@ -16,7 +16,7 @@ import GotenxCore
 ///
 /// Units:
 /// - Input: n_e [m⁻³], T_i [eV]
-/// - Output: P_fusion [W/m³]
+/// - Output: fusionPower [W/m³]
 public struct FusionPower: Sendable {
 
     /// Fuel mixture configuration
@@ -24,11 +24,11 @@ public struct FusionPower: Sendable {
         /// Equal 50-50 D-T mixture
         case equalDT
         /// Custom fuel fractions (must sum to ≤ 1)
-        case custom(nD_frac: Float, nT_frac: Float)
+        case custom(deuteriumFraction: Float, tritiumFraction: Float)
     }
 
     /// Fuel mixture configuration
-    public let fuelMix: FuelMixture
+    public let fuelMixture: FuelMixture
 
     /// Alpha particle energy [MeV]
     public let alphaEnergy: Float
@@ -75,13 +75,13 @@ public struct FusionPower: Sendable {
     /// Create fusion power model
     ///
     /// - Parameters:
-    ///   - fuelMix: Fuel mixture configuration (default: equal D-T)
+    ///   - fuelMixture: Fuel mixture configuration (default: equal D-T)
     ///   - alphaEnergy: Alpha particle energy in MeV (default: 3.5 MeV)
     ///   - fuelDilution: Fraction of n_e from fuel ions (default: 0.9 for ~10% impurities)
     ///   - thresholds: Physical thresholds (default: .default)
     /// - Throws: PhysicsError if parameters are out of valid range
     public init(
-        fuelMix: FuelMixture = .equalDT,
+        fuelMixture: FuelMixture = .equalDT,
         alphaEnergy: Float = 3.5,
         fuelDilution: Float = 0.9,
         thresholds: PhysicalThresholds = .default
@@ -94,7 +94,7 @@ public struct FusionPower: Sendable {
         }
 
         // Validate custom fuel mixture fractions
-        if case .custom(let fD, let fT) = fuelMix {
+        if case .custom(let fD, let fT) = fuelMixture {
             guard fD >= 0.0 && fT >= 0.0 else {
                 throw PhysicsError.parameterOutOfRange(
                     "Fuel fractions must be non-negative, got fD=\(fD), fT=\(fT)"
@@ -108,7 +108,7 @@ public struct FusionPower: Sendable {
             }
         }
 
-        self.fuelMix = fuelMix
+        self.fuelMixture = fuelMixture
         self.alphaEnergy = alphaEnergy
         self.fuelDilution = fuelDilution
         self.thresholds = thresholds
@@ -117,35 +117,35 @@ public struct FusionPower: Sendable {
     /// Compute fusion power density
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³], shape [nCells]
-    ///   - Ti: Ion temperature [eV], shape [nCells]
-    /// - Returns: Fusion power [W/m³], shape [nCells]
+    ///   - electronDensity: Electron density [m⁻³], shape [cellCount]
+    ///   - ionTemperature: Ion temperature [eV], shape [cellCount]
+    /// - Returns: Fusion power [W/m³], shape [cellCount]
     /// - Throws: PhysicsError if inputs are invalid
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
-    public func compute(ne: MLXArray, Ti: MLXArray) throws -> MLXArray {
+    public func compute(electronDensity: MLXArray, ionTemperature: MLXArray) throws -> MLXArray {
 
         // Validate inputs (CRITICAL FIX #3)
-        try PhysicsValidation.validateDensity(ne, name: "ne")
-        try PhysicsValidation.validateTemperature(Ti, name: "Ti")
-        try PhysicsValidation.validateShapes([ne, Ti], names: ["ne", "Ti"])
+        try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
+        try PhysicsValidation.validateTemperature(ionTemperature, name: "ionTemperature")
+        try PhysicsValidation.validateShapes([electronDensity, ionTemperature], names: ["electronDensity", "ionTemperature"])
 
         // Convert temperature to keV
-        let Ti_keV = Ti / Float(1000.0)
+        let ionTemperatureKeV = ionTemperature / Float(1000.0)
 
         // Compute Bosch-Hale reactivity ⟨σv⟩ with bounds (MEDIUM FIX #3)
-        let sigma_v = computeReactivity(Ti_keV: Ti_keV)
+        let sigma_v = computeReactivity(ionTemperatureKeV: ionTemperatureKeV)
 
         // Compute fuel densities with impurity dilution
-        let (nD, nT) = computeFuelDensities(ne: ne)
+        let (nD, nT) = computeFuelDensities(electronDensity: electronDensity)
 
         // Fusion power [W/m³]
-        // P_fusion = n_D * n_T * ⟨σv⟩ * E_alpha
+        // fusionPower = n_D * n_T * ⟨σv⟩ * E_alpha
         // CRITICAL: Multiply small values first to prevent Float32 overflow
         // nD ≈ 10^20, nT ≈ 10^20, sigma_v ≈ 10^-22, E_alpha_J ≈ 5.6e-13
         // Order: (nD * sigma_v) * nT * E_alpha_J avoids 10^40 overflow
-        let E_alpha_J = PhysicsConstants.MeVToJoules(alphaEnergy)
+        let E_alpha_J = PhysicsConstants.megaelectronVoltsToJoules(alphaEnergy)
         let P_fusion_watts = nD * sigma_v * nT * E_alpha_J
 
         // Return lazy MLXArray - caller will eval() when needed
@@ -154,12 +154,12 @@ public struct FusionPower: Sendable {
 
     /// Compute D-T reactivity using Bosch-Hale parameterization
     ///
-    /// - Parameter Ti_keV: Ion temperature [keV]
+    /// - Parameter ionTemperatureKeV: Ion temperature [keV]
     /// - Returns: Reactivity ⟨σv⟩ [m³/s]
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
-    public func computeReactivity(Ti_keV: MLXArray) -> MLXArray {
+    public func computeReactivity(ionTemperatureKeV: MLXArray) -> MLXArray {
 
         // Bosch-Hale formula:
         // θ = T / (1 - (T*(C2 + T*(C4 + T*C6))) / (1 + T*(C3 + T*(C5 + T*C7))))
@@ -167,8 +167,8 @@ public struct FusionPower: Sendable {
         // ⟨σv⟩ = C1 * θ * √(ξ/(m_rc²*T)) * exp(-3ξ)
 
         // Clamp temperature to valid range (MEDIUM FIX #3)
-        // Valid range: 0.2 keV < Ti < 1000 keV
-        let T = MLX.clip(Ti_keV, min: Float(0.2), max: Float(1000.0))
+        // Valid range: 0.2 keV < ionTemperature < 1000 keV
+        let T = MLX.clip(ionTemperatureKeV, min: Float(0.2), max: Float(1000.0))
 
         let numerator = T * (C2 + T * (C4 + T * C6))
         let denominator = Float(1.0) + T * (C3 + T * (C5 + T * C7))
@@ -199,16 +199,16 @@ public struct FusionPower: Sendable {
     /// - fuelDilution = 1.0 → no impurities, (n_D + n_T) = n_e
     /// - fuelDilution = 0.9 → 10% impurities, (n_D + n_T) = 0.9 * n_e
     ///
-    /// - Parameter ne: Electron density [m⁻³]
+    /// - Parameter electronDensity: Electron density [m⁻³]
     /// - Returns: (n_D, n_T) fuel densities [m⁻³]
-    private func computeFuelDensities(ne: MLXArray) -> (MLXArray, MLXArray) {
+    private func computeFuelDensities(electronDensity: MLXArray) -> (MLXArray, MLXArray) {
         let nD: MLXArray
         let nT: MLXArray
 
         // Total fuel ion density accounting for impurities
-        let n_fuel_total = ne * fuelDilution
+        let n_fuel_total = electronDensity * fuelDilution
 
-        switch fuelMix {
+        switch fuelMixture {
         case .equalDT:
             // 50-50 D-T mixture
             nD = n_fuel_total / Float(2.0)
@@ -241,52 +241,52 @@ public struct FusionPower: Sendable {
     /// n * T * τ_E criterion for ignition.
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Ti: Ion temperature [eV]
-    ///   - tauE: Energy confinement time [s]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - ionTemperature: Ion temperature [eV]
+    ///   - energyConfinementTime: Energy confinement time [s]
     /// - Returns: Triple product [m⁻³ · eV · s]
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
     public func computeTripleProduct(
-        ne: MLXArray,
-        Ti: MLXArray,
-        tauE: Float
+        electronDensity: MLXArray,
+        ionTemperature: MLXArray,
+        energyConfinementTime: Float
     ) -> MLXArray {
-        return ne * Ti * tauE
+        return electronDensity * ionTemperature * energyConfinementTime
     }
 
     /// Compute fraction of alpha energy going to ions (HIGH FIX #2)
     ///
     /// Based on alpha slowing-down physics. Critical energy:
-    /// E_crit = 14.8 * Te [keV] * (A_i/Z_i²)^(1/3)
+    /// E_crit = 14.8 * electronTemperature [keV] * (A_i/Z_i²)^(1/3)
     ///
     /// For D-T plasma: A_i ≈ 2.5 (average), Z_i = 1
-    /// E_crit ≈ 18 * Te [keV]
+    /// E_crit ≈ 18 * electronTemperature [keV]
     ///
     /// Simplified model:
     /// - f_e = E_alpha / (E_alpha + E_crit)
     /// - f_i = E_crit / (E_alpha + E_crit)
     ///
-    /// - Parameter Te: Electron temperature [eV]
+    /// - Parameter electronTemperature: Electron temperature [eV]
     /// - Returns: Fraction of alpha power to ions [0, 1]
     ///
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
-    public func computeAlphaIonFraction(Te: MLXArray) -> MLXArray {
-        // Convert Te to keV
-        let Te_keV = Te / Float(1000.0)
+    public func computeAlphaIonFraction(electronTemperature: MLXArray) -> MLXArray {
+        // Convert electronTemperature to keV
+        let Te_keV = electronTemperature / Float(1000.0)
 
         // Critical energy for D-T plasma
-        // E_crit ≈ 18 * Te [keV]
+        // E_crit ≈ 18 * electronTemperature [keV]
         let E_crit = Float(18.0) * Te_keV
 
         // Alpha energy in keV
         let E_alpha_keV = alphaEnergy * Float(1000.0)  // MeV → keV
 
         // Ion fraction using slowing-down formula
-        // At low Te: E_crit small → f_i ≈ 0 → more to electrons (fast slowing-down)
-        // At high Te: E_crit large → f_i ≈ E_crit/(E_alpha+E_crit) → more to ions
+        // At low electronTemperature: E_crit small → f_i ≈ 0 → more to electrons (fast slowing-down)
+        // At high electronTemperature: E_crit large → f_i ≈ E_crit/(E_alpha+E_crit) → more to ions
         let f_i = E_crit / (E_alpha_keV + E_crit)
 
         // Clamp to reasonable range [0.05, 0.5]
@@ -306,9 +306,9 @@ extension FusionPower {
     /// HIGH FIX #2: Alpha particles (3.5 MeV) heat ions and electrons through collisions.
     /// The split depends on electron temperature via critical energy.
     ///
-    /// Physics: E_crit ≈ 14.8 * Te [keV] * (A_i/Z_i²)^(1/3)
-    /// - Low Te → E_alpha >> E_crit → More power to ions
-    /// - High Te → E_alpha < E_crit → More power to electrons
+    /// Physics: E_crit ≈ 14.8 * electronTemperature [keV] * (A_i/Z_i²)^(1/3)
+    /// - Low electronTemperature → E_alpha >> E_crit → More power to ions
+    /// - High electronTemperature → E_alpha < E_crit → More power to electrons
     ///
     /// - Parameters:
     ///   - sources: Source terms to modify
@@ -321,20 +321,20 @@ extension FusionPower {
     ) throws -> SourceTerms {
 
         let P_fusion_watts = try compute(
-            ne: profiles.electronDensity.value,
-            Ti: profiles.ionTemperature.value
+            electronDensity: profiles.electronDensity.value,
+            ionTemperature: profiles.ionTemperature.value
         )
 
         // Convert to MW/m³ for SourceTerms
-        let P_fusion = PhysicsConstants.wattsToMegawatts(P_fusion_watts)
+        let fusionPower = PhysicsConstants.wattsToMegawatts(P_fusion_watts)
 
         // Compute alpha energy deposition split based on electron temperature
-        let Te = profiles.electronTemperature.value
-        let ionFraction = computeAlphaIonFraction(Te: Te)
+        let electronTemperature = profiles.electronTemperature.value
+        let ionFraction = computeAlphaIonFraction(electronTemperature: electronTemperature)
 
         // Split fusion power between ions and electrons
-        let P_ion = P_fusion * ionFraction
-        let P_electron = P_fusion * (Float(1.0) - ionFraction)
+        let P_ion = fusionPower * ionFraction
+        let P_electron = fusionPower * (Float(1.0) - ionFraction)
 
         // Create new SourceTerms with updated heating
         return SourceTerms(
@@ -367,13 +367,13 @@ extension FusionPower {
     ) throws -> SourceMetadata {
 
         let P_fusion_watts = try compute(
-            ne: profiles.electronDensity.value,
-            Ti: profiles.ionTemperature.value
+            electronDensity: profiles.electronDensity.value,
+            ionTemperature: profiles.ionTemperature.value
         )
 
         // Compute alpha energy deposition split based on electron temperature
-        let Te = profiles.electronTemperature.value
-        let ionFraction = computeAlphaIonFraction(Te: Te)
+        let electronTemperature = profiles.electronTemperature.value
+        let ionFraction = computeAlphaIonFraction(electronTemperature: electronTemperature)
 
         // Split fusion power between ions and electrons [W/m^3]
         let P_ion_density = P_fusion_watts * ionFraction
@@ -411,17 +411,17 @@ extension FusionPower {
     /// Compute total fusion power
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Ti: Ion temperature [eV]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - ionTemperature: Ion temperature [eV]
     ///   - geometry: Tokamak geometry
     /// - Returns: Total fusion power [W]
     public func computeTotalPower(
-        ne: MLXArray,
-        Ti: MLXArray,
+        electronDensity: MLXArray,
+        ionTemperature: MLXArray,
         geometry: Geometry
     ) throws -> Float {
 
-        let P_fusion_density = try compute(ne: ne, Ti: Ti)
+        let P_fusion_density = try compute(electronDensity: electronDensity, ionTemperature: ionTemperature)
 
         // Integrate over volume
         let cellVolumes = GeometricFactors.from(geometry: geometry).cellVolumes.value
@@ -430,41 +430,41 @@ extension FusionPower {
         return P_total.item(Float.self)
     }
 
-    /// Compute fusion gain Q = P_fusion / P_input
+    /// Compute fusion gain Q = fusionPower / P_input
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Ti: Ion temperature [eV]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - ionTemperature: Ion temperature [eV]
     ///   - geometry: Tokamak geometry
     ///   - inputPower: Total input power [W]
     /// - Returns: Fusion gain Q (dimensionless)
     public func computeFusionGain(
-        ne: MLXArray,
-        Ti: MLXArray,
+        electronDensity: MLXArray,
+        ionTemperature: MLXArray,
         geometry: Geometry,
         inputPower: Float
     ) throws -> Float {
 
-        let P_fusion = try computeTotalPower(ne: ne, Ti: Ti, geometry: geometry)
-        return P_fusion / (inputPower + 1e-10)
+        let fusionPower = try computeTotalPower(electronDensity: electronDensity, ionTemperature: ionTemperature, geometry: geometry)
+        return fusionPower / (inputPower + 1e-10)
     }
 
     /// Check if plasma is ignited (Q > 1)
     ///
     /// - Parameters:
-    ///   - ne: Electron density [m⁻³]
-    ///   - Ti: Ion temperature [eV]
+    ///   - electronDensity: Electron density [m⁻³]
+    ///   - ionTemperature: Ion temperature [eV]
     ///   - geometry: Tokamak geometry
     ///   - inputPower: Total input power [W]
     /// - Returns: True if fusion gain Q > 1
     public func isIgnited(
-        ne: MLXArray,
-        Ti: MLXArray,
+        electronDensity: MLXArray,
+        ionTemperature: MLXArray,
         geometry: Geometry,
         inputPower: Float
     ) throws -> Bool {
 
-        let Q = try computeFusionGain(ne: ne, Ti: Ti, geometry: geometry, inputPower: inputPower)
+        let Q = try computeFusionGain(electronDensity: electronDensity, ionTemperature: ionTemperature, geometry: geometry, inputPower: inputPower)
         return Q > 1.0
     }
 }

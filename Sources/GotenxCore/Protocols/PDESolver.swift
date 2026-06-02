@@ -6,7 +6,7 @@ import Foundation
 /// Coefficient calculation callback (synchronous, thread-safe)
 ///
 /// The callback accepts only (CoreProfiles, Geometry) as parameters.
-/// Additional context (dynamicParams, staticParams, etc.) is provided via closure capture.
+/// Additional context (dynamicParameters, staticParameters, etc.) is provided via closure capture.
 public typealias CoeffsCallback = @Sendable (CoreProfiles, Geometry) -> Block1DCoeffs
 
 // MARK: - PDE Solver Protocol
@@ -19,22 +19,22 @@ public protocol PDESolver {
     /// Solve PDE system for one timestep
     ///
     /// - Parameters:
-    ///   - dt: Time step [s]
-    ///   - staticParams: Static runtime parameters
+    ///   - timeStep: Time step [s]
+    ///   - staticParameters: Static runtime parameters
     ///   - dynamicParamsT: Dynamic parameters at time t
-    ///   - dynamicParamsTplusDt: Dynamic parameters at time t+dt
+    ///   - dynamicParamsTplusDt: Dynamic parameters at time t+timeStep
     ///   - geometryT: Geometry at time t
-    ///   - geometryTplusDt: Geometry at time t+dt
+    ///   - geometryTplusDt: Geometry at time t+timeStep
     ///   - xOld: Old state (Ti, Te, ne, psi) as CellVariable tuple
     ///   - coreProfilesT: Core profiles at time t
-    ///   - coreProfilesTplusDt: Core profiles at time t+dt (initial guess)
+    ///   - coreProfilesTplusDt: Core profiles at time t+timeStep (initial guess)
     ///   - coeffsCallback: Callback for computing coefficients
     /// - Returns: Solver result with updated profiles
     func solve(
-        dt: Float,
-        staticParams: StaticRuntimeParams,
-        dynamicParamsT: DynamicRuntimeParams,
-        dynamicParamsTplusDt: DynamicRuntimeParams,
+        timeStep: Float,
+        staticParameters: StaticRuntimeParameters,
+        dynamicParamsT: DynamicRuntimeParameters,
+        dynamicParamsTplusDt: DynamicRuntimeParameters,
         geometryT: Geometry,
         geometryTplusDt: Geometry,
         xOld: (CellVariable, CellVariable, CellVariable, CellVariable),

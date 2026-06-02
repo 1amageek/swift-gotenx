@@ -12,34 +12,34 @@ struct PlotDataTests {
 
     @Test("PlotData initialization with valid data")
     func testPlotDataInitialization() {
-        let plotData = createMockPlotData(nCells: 10, nTime: 5)
+        let plotData = createMockPlotData(cellCount: 10, timeCount: 5)
 
-        #expect(plotData.nCells == 10)
-        #expect(plotData.nTime == 5)
-        #expect(plotData.rho.count == 10)
+        #expect(plotData.cellCount == 10)
+        #expect(plotData.timeCount == 5)
+        #expect(plotData.normalizedRadius.count == 10)
         #expect(plotData.time.count == 5)
     }
 
     @Test("Rho coordinate generation")
     func testRhoCoordinate() {
-        let plotData = createMockPlotData(nCells: 10, nTime: 1)
+        let plotData = createMockPlotData(cellCount: 10, timeCount: 1)
 
-        // Verify rho coordinate (normalized radius from 0 to 1)
-        #expect(plotData.rho.first! == 0.0)
-        #expect(plotData.rho.last! == 1.0)
-        #expect(plotData.rho.count == 10)
+        // Verify normalizedRadius coordinate (normalized radius from 0 to 1)
+        #expect(plotData.normalizedRadius.first! == 0.0)
+        #expect(plotData.normalizedRadius.last! == 1.0)
+        #expect(plotData.normalizedRadius.count == 10)
 
         // Check spacing
         let expectedSpacing = 1.0 / Float(10 - 1)
         for i in 0..<9 {
-            let spacing = plotData.rho[i + 1] - plotData.rho[i]
+            let spacing = plotData.normalizedRadius[i + 1] - plotData.normalizedRadius[i]
             #expect(abs(spacing - expectedSpacing) < 1e-6)
         }
     }
 
     @Test("Time range calculation")
     func testTimeRange() {
-        let plotData = createMockPlotData(nCells: 5, nTime: 10)
+        let plotData = createMockPlotData(cellCount: 5, timeCount: 10)
 
         let range = plotData.timeRange
         #expect(range.lowerBound == plotData.time.first!)
@@ -48,55 +48,55 @@ struct PlotDataTests {
 
     @Test("Rho range calculation")
     func testRhoRange() {
-        let plotData = createMockPlotData(nCells: 5, nTime: 1)
+        let plotData = createMockPlotData(cellCount: 5, timeCount: 1)
 
-        let range = plotData.rhoRange
+        let range = plotData.normalizedRadiusRange
         #expect(range.lowerBound == 0.0)
         #expect(range.upperBound == 1.0)
     }
 
     // MARK: - Mock Data Helpers
 
-    private func createMockPlotData(nCells: Int, nTime: Int) -> PlotData {
-        let rho = (0..<nCells).map { Float($0) / Float(max(nCells - 1, 1)) }
-        let time = (0..<nTime).map { Float($0) * 0.01 }
+    private func createMockPlotData(cellCount: Int, timeCount: Int) -> PlotData {
+        let normalizedRadius = (0..<cellCount).map { Float($0) / Float(max(cellCount - 1, 1)) }
+        let time = (0..<timeCount).map { Float($0) * 0.01 }
 
-        let zeroProfile: [Float] = Array(repeating: 0.0 as Float, count: nCells)
-        let zeroProfiles: [[Float]] = Array(repeating: zeroProfile, count: nTime)
-        let zeroScalar: [Float] = Array(repeating: 0.0 as Float, count: nTime)
+        let zeroProfile: [Float] = Array(repeating: 0.0 as Float, count: cellCount)
+        let zeroProfiles: [[Float]] = Array(repeating: zeroProfile, count: timeCount)
+        let zeroScalar: [Float] = Array(repeating: 0.0 as Float, count: timeCount)
 
         return PlotData(
-            rho: rho,
+            normalizedRadius: normalizedRadius,
             time: time,
-            Ti: zeroProfiles,
-            Te: zeroProfiles,
-            ne: zeroProfiles,
-            q: zeroProfiles,
+            ionTemperature: zeroProfiles,
+            electronTemperature: zeroProfiles,
+            electronDensity: zeroProfiles,
+            safetyFactor: zeroProfiles,
             magneticShear: zeroProfiles,
-            psi: zeroProfiles,
-            chiTotalIon: zeroProfiles,
-            chiTotalElectron: zeroProfiles,
-            chiTurbIon: zeroProfiles,
-            chiTurbElectron: zeroProfiles,
-            dFace: zeroProfiles,
-            jTotal: zeroProfiles,
-            jOhmic: zeroProfiles,
-            jBootstrap: zeroProfiles,
-            jECRH: zeroProfiles,
+            poloidalFlux: zeroProfiles,
+            totalIonHeatConductivity: zeroProfiles,
+            totalElectronHeatConductivity: zeroProfiles,
+            turbulentIonHeatConductivity: zeroProfiles,
+            turbulentElectronHeatConductivity: zeroProfiles,
+            particleDiffusivity: zeroProfiles,
+            totalCurrentDensity: zeroProfiles,
+            ohmicCurrentDensity: zeroProfiles,
+            bootstrapCurrentDensity: zeroProfiles,
+            ecrhCurrentDensity: zeroProfiles,
             ohmicHeatSource: zeroProfiles,
             fusionHeatSource: zeroProfiles,
-            pICRHIon: zeroProfiles,
-            pICRHElectron: zeroProfiles,
-            pECRHElectron: zeroProfiles,
-            IpProfile: zeroScalar,
-            IBootstrap: zeroScalar,
-            IECRH: zeroScalar,
-            qFusion: zeroScalar,
-            pAuxiliary: zeroScalar,
-            pOhmicE: zeroScalar,
-            pAlphaTotal: zeroScalar,
-            pBremsstrahlung: zeroScalar,
-            pRadiation: zeroScalar
+            icrhIonHeatingPowerDensity: zeroProfiles,
+            icrhElectronHeatingPowerDensity: zeroProfiles,
+            ecrhElectronHeatingPowerDensity: zeroProfiles,
+            plasmaCurrent: zeroScalar,
+            bootstrapCurrent: zeroScalar,
+            ecrhCurrent: zeroScalar,
+            fusionGain: zeroScalar,
+            auxiliaryHeatingPower: zeroScalar,
+            ohmicElectronHeatingPower: zeroScalar,
+            totalAlphaPower: zeroScalar,
+            bremsstrahlungPower: zeroScalar,
+            radiationPower: zeroScalar
         )
     }
 }

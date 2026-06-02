@@ -8,10 +8,10 @@ import Foundation
 ///
 /// Solves one timestep with an explicit predictor followed by theta-method
 /// corrector sweeps:
-/// 1. Predictor: `x* = xⁿ + dt · f(xⁿ)`
-/// 2. Corrector: `x^{k+1} = xⁿ + dt · [θ·f(x^k) + (1−θ)·f(xⁿ)]` (optionally Pereverzev-damped)
+/// 1. Predictor: `x* = xⁿ + timeStep · f(xⁿ)`
+/// 2. Corrector: `x^{k+1} = xⁿ + timeStep · [θ·f(x^k) + (1−θ)·f(xⁿ)]` (optionally Pereverzev-damped)
 ///
-/// where `f(x) = F(x) / transientCoeff` is the per-cell rate of change. Unlike the
+/// where `f(x) = F(x) / transientCoefficient` is the per-cell rate of change. Unlike the
 /// Newton-Raphson solver this keeps every operation differentiable (no iterative
 /// inner solve, no line search), which is why the differentiable simulation path
 /// uses it.
@@ -29,10 +29,10 @@ public struct LinearSolver: PDESolver {
     public let solverType: SolverType = .linear
 
     /// Number of corrector steps
-    public let nCorrectorSteps: Int
+    public let correctorStepCount: Int
 
     /// Use Pereverzev corrector (improves convergence)
-    public let usePereversevCorrector: Bool
+    public let usesPereverzevCorrector: Bool
 
     /// Theta parameter for time discretization
     public let theta: Float
@@ -40,24 +40,24 @@ public struct LinearSolver: PDESolver {
     // MARK: - Initialization
 
     public init(
-        nCorrectorSteps: Int = 3,
-        usePereversevCorrector: Bool = true,
+        correctorStepCount: Int = 3,
+        usesPereverzevCorrector: Bool = true,
         theta: Float = 1.0
     ) {
-        precondition(nCorrectorSteps >= 1, "Must have at least 1 corrector step")
+        precondition(correctorStepCount >= 1, "Must have at least 1 corrector step")
         precondition(theta >= 0.0 && theta <= 1.0, "Theta must be in [0, 1]")
-        self.nCorrectorSteps = nCorrectorSteps
-        self.usePereversevCorrector = usePereversevCorrector
+        self.correctorStepCount = correctorStepCount
+        self.usesPereverzevCorrector = usesPereverzevCorrector
         self.theta = theta
     }
 
     // MARK: - PDESolver Protocol
 
     public func solve(
-        dt: Float,
-        staticParams: StaticRuntimeParams,
-        dynamicParamsT: DynamicRuntimeParams,
-        dynamicParamsTplusDt: DynamicRuntimeParams,
+        timeStep: Float,
+        staticParameters: StaticRuntimeParameters,
+        dynamicParamsT: DynamicRuntimeParameters,
+        dynamicParamsTplusDt: DynamicRuntimeParameters,
         geometryT: Geometry,
         geometryTplusDt: Geometry,
         xOld: (CellVariable, CellVariable, CellVariable, CellVariable),
@@ -65,18 +65,50 @@ public struct LinearSolver: PDESolver {
         coreProfilesTplusDt: CoreProfiles,
         coeffsCallback: @escaping CoeffsCallback
     ) -> SolverResult {
+        do {
+            try coreProfilesT.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+            try coreProfilesTplusDt.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+        } catch {
+            return SolverResult(
+                updatedProfiles: coreProfilesTplusDt,
+                iterations: 0,
+                residualNorm: Float.greatestFiniteMagnitude,
+                converged: false,
+                metadata: [
+                    "theta": theta,
+                    "dt": timeStep,
+                    "failure_type": 4.0
+                ]
+            )
+        }
+
         // Boundary conditions for the implicit step.
         let boundary = dynamicParamsTplusDt.boundaryConditions
 
         // Get coefficients at old time
         let coeffsOld = coeffsCallback(coreProfilesT, geometryT)
+        do {
+            try coeffsOld.validateNumerics()
+        } catch {
+            return SolverResult(
+                updatedProfiles: coreProfilesTplusDt,
+                iterations: 0,
+                residualNorm: Float.greatestFiniteMagnitude,
+                converged: false,
+                metadata: [
+                    "theta": theta,
+                    "dt": timeStep,
+                    "failure_type": 5.0
+                ]
+            )
+        }
 
         // Predictor step: explicit Euler from x^n
         var xNew = predictorStep(
             xOld: coreProfilesT,
             coeffsOld: coeffsOld,
-            dt: dt,
-            staticParams: staticParams,
+            timeStep: timeStep,
+            staticParameters: staticParameters,
             boundary: boundary
         )
 
@@ -84,68 +116,99 @@ public struct LinearSolver: PDESolver {
         var residualNorm: Float = 0.0
         var actualIterations = 0
 
-        for _ in 0..<nCorrectorSteps {
+        for _ in 0..<correctorStepCount {
             actualIterations += 1
             let xPrev = xNew
 
             // Coefficients at the current iterate (new time)
             let coeffsNew = coeffsCallback(xNew, geometryTplusDt)
+            do {
+                try coeffsNew.validateNumerics()
+            } catch {
+                return SolverResult(
+                    updatedProfiles: xNew,
+                    iterations: actualIterations,
+                    residualNorm: Float.greatestFiniteMagnitude,
+                    converged: false,
+                    metadata: [
+                        "theta": theta,
+                        "dt": timeStep,
+                        "failure_type": 5.0
+                    ]
+                )
+            }
 
             xNew = correctorStep(
                 xOld: coreProfilesT,
                 xPrev: xPrev,
                 coeffsOld: coeffsOld,
                 coeffsNew: coeffsNew,
-                dt: dt,
+                timeStep: timeStep,
                 theta: theta,
-                usePereversev: usePereversevCorrector,
-                staticParams: staticParams,
+                usesPereverzev: usesPereverzevCorrector,
+                staticParameters: staticParameters,
                 boundary: boundary
             )
 
             residualNorm = computeResidualNorm(xNew: xNew, xPrev: xPrev)
 
-            if residualNorm < staticParams.solverTolerance {
+            if residualNorm < staticParameters.solverTolerance {
                 break
             }
+        }
+
+        do {
+            try xNew.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
+        } catch {
+            return SolverResult(
+                updatedProfiles: xNew,
+                iterations: actualIterations,
+                residualNorm: Float.greatestFiniteMagnitude,
+                converged: false,
+                metadata: [
+                    "theta": theta,
+                    "dt": timeStep,
+                    "failure_type": 6.0
+                ]
+            )
         }
 
         return SolverResult(
             updatedProfiles: xNew,
             iterations: actualIterations,
             residualNorm: residualNorm,
-            converged: residualNorm < staticParams.solverTolerance,
+            converged: residualNorm < staticParameters.solverTolerance,
             metadata: [
                 "theta": theta,
-                "dt": dt,
-                "corrector_steps": Float(nCorrectorSteps)
+                "dt": timeStep,
+                "corrector_steps": Float(correctorStepCount)
             ]
         )
     }
 
     // MARK: - Predictor Step
 
-    /// Predictor step: explicit Euler `x* = xⁿ + dt · f(xⁿ)` (evolved variables only).
+    /// Predictor step: explicit Euler `x* = xⁿ + timeStep · f(xⁿ)` (evolved variables only).
     private func predictorStep(
         xOld: CoreProfiles,
         coeffsOld: Block1DCoeffs,
-        dt: Float,
-        staticParams: StaticRuntimeParams,
+        timeStep: Float,
+        staticParameters: StaticRuntimeParameters,
         boundary: BoundaryConditions
     ) -> CoreProfiles {
         let fOld = spatialRates(profiles: xOld, coeffs: coeffsOld, boundary: boundary)
 
-        let tiNew = staticParams.evolveIonHeat
-            ? xOld.ionTemperature.value + dt * fOld.0
+        let tiNew = staticParameters.evolveIonHeat
+            ? xOld.ionTemperature.value + timeStep * fOld.0
             : xOld.ionTemperature.value
-        let teNew = staticParams.evolveElectronHeat
-            ? xOld.electronTemperature.value + dt * fOld.1
+        let teNew = staticParameters.evolveElectronHeat
+            ? xOld.electronTemperature.value + timeStep * fOld.1
             : xOld.electronTemperature.value
-        let neNew = staticParams.evolveDensity
-            ? xOld.electronDensity.value + dt * fOld.2
+        let neNew = staticParameters.evolveElectronDensity
+            ? xOld.electronDensity.value + timeStep * fOld.2
             : xOld.electronDensity.value
-        let psiNew = staticParams.evolveCurrent
-            ? xOld.poloidalFlux.value + dt * fOld.3
+        let psiNew = staticParameters.evolvePoloidalFlux
+            ? xOld.poloidalFlux.value + timeStep * fOld.3
             : xOld.poloidalFlux.value
 
         return CoreProfiles(
@@ -158,55 +221,55 @@ public struct LinearSolver: PDESolver {
 
     // MARK: - Corrector Step
 
-    /// Corrector step: `x^{k+1} = xⁿ + dt · [θ·f(x^k) + (1−θ)·f(xⁿ)]` (evolved variables only).
+    /// Corrector step: `x^{k+1} = xⁿ + timeStep · [θ·f(x^k) + (1−θ)·f(xⁿ)]` (evolved variables only).
     private func correctorStep(
         xOld: CoreProfiles,
         xPrev: CoreProfiles,
         coeffsOld: Block1DCoeffs,
         coeffsNew: Block1DCoeffs,
-        dt: Float,
+        timeStep: Float,
         theta: Float,
-        usePereversev: Bool,
-        staticParams: StaticRuntimeParams,
+        usesPereverzev: Bool,
+        staticParameters: StaticRuntimeParameters,
         boundary: BoundaryConditions
     ) -> CoreProfiles {
         let fOld = spatialRates(profiles: xOld, coeffs: coeffsOld, boundary: boundary)
         let fNew = spatialRates(profiles: xPrev, coeffs: coeffsNew, boundary: boundary)
 
-        let dtTheta = dt * theta
-        let dtOneMinusTheta = dt * (1.0 - theta)
+        let dtTheta = timeStep * theta
+        let dtOneMinusTheta = timeStep * (1.0 - theta)
 
         var tiNew = xOld.ionTemperature.value
         var teNew = xOld.electronTemperature.value
         var neNew = xOld.electronDensity.value
         var psiNew = xOld.poloidalFlux.value
 
-        if staticParams.evolveIonHeat {
+        if staticParameters.evolveIonHeat {
             tiNew = xOld.ionTemperature.value + dtTheta * fNew.0 + dtOneMinusTheta * fOld.0
         }
-        if staticParams.evolveElectronHeat {
+        if staticParameters.evolveElectronHeat {
             teNew = xOld.electronTemperature.value + dtTheta * fNew.1 + dtOneMinusTheta * fOld.1
         }
-        if staticParams.evolveDensity {
+        if staticParameters.evolveElectronDensity {
             neNew = xOld.electronDensity.value + dtTheta * fNew.2 + dtOneMinusTheta * fOld.2
         }
-        if staticParams.evolveCurrent {
+        if staticParameters.evolvePoloidalFlux {
             psiNew = xOld.poloidalFlux.value + dtTheta * fNew.3 + dtOneMinusTheta * fOld.3
         }
 
         // Pereverzev damping (blend with previous iterate) for evolved variables.
-        if usePereversev {
+        if usesPereverzev {
             let alpha: Float = 0.5
-            if staticParams.evolveIonHeat {
+            if staticParameters.evolveIonHeat {
                 tiNew = alpha * tiNew + (1.0 - alpha) * xPrev.ionTemperature.value
             }
-            if staticParams.evolveElectronHeat {
+            if staticParameters.evolveElectronHeat {
                 teNew = alpha * teNew + (1.0 - alpha) * xPrev.electronTemperature.value
             }
-            if staticParams.evolveDensity {
+            if staticParameters.evolveElectronDensity {
                 neNew = alpha * neNew + (1.0 - alpha) * xPrev.electronDensity.value
             }
-            if staticParams.evolveCurrent {
+            if staticParameters.evolvePoloidalFlux {
                 psiNew = alpha * psiNew + (1.0 - alpha) * xPrev.poloidalFlux.value
             }
         }
@@ -221,7 +284,7 @@ public struct LinearSolver: PDESolver {
 
     // MARK: - Spatial Rates
 
-    /// Per-cell rates of change `∂x/∂t = F(x) / transientCoeff` for all four channels,
+    /// Per-cell rates of change `∂x/∂t = F(x) / transientCoefficient` for all four channels,
     /// using the shared finite-volume operator (boundary conditions + area-weighted
     /// divergence) so the discretization matches the Newton-Raphson solver exactly.
     private func spatialRates(
@@ -259,7 +322,7 @@ public struct LinearSolver: PDESolver {
         return (fTi, fTe, fNe, fPsi)
     }
 
-    /// Rate of change for a single channel: `F(x) / transientCoeff`.
+    /// Rate of change for a single channel: `F(x) / transientCoefficient`.
     ///
     /// The transient coefficient (e.g. `n_e` for the temperature equations) is floored
     /// to a physical minimum density to avoid division by zero.
@@ -278,8 +341,8 @@ public struct LinearSolver: PDESolver {
 
         // Physical density floor [m⁻³] guards the non-conservation-form division.
         let safetyFloor: Float = 1e18
-        let transientCoeff = eqCoeffs.transientCoeff.value
-        return F / maximum(transientCoeff, MLXArray(safetyFloor))
+        let transientCoefficient = eqCoeffs.transientCoefficient.value
+        return F / maximum(transientCoefficient, MLXArray(safetyFloor))
     }
 
     // MARK: - Convergence Check

@@ -28,14 +28,14 @@ public protocol GradientAwareSource: SourceModel {
 /// **Key Constraint**: NO `compile()` - compilation erases gradient tape
 ///
 /// **Use Cases**:
-/// - Forward sensitivity analysis (∂Q_fusion / ∂parameters)
-/// - Inverse problems (optimize actuators to maximize Q_fusion)
+/// - Forward sensitivity analysis (∂fusionGain / ∂parameters)
+/// - Inverse problems (optimize actuators to maximize fusionGain)
 /// - Model predictive control
 ///
 /// **Example**:
 /// ```swift
 /// let sim = DifferentiableSimulation(
-///     staticParams: staticParams,
+///     staticParameters: staticParameters,
 ///     transport: BohmGyrobohmModel(),
 ///     sources: [FusionSourceModel()],
 ///     geometry: geometry
@@ -45,14 +45,14 @@ public protocol GradientAwareSource: SourceModel {
 ///     initialProfiles: initialProfiles,
 ///     actuators: actuators,
 ///     timeHorizon: 2.0,
-///     dt: 0.01
+///     timeStep: 0.01
 /// )
 /// ```
 public struct DifferentiableSimulation {
     // MARK: - Configuration
 
     /// Static runtime parameters
-    private let staticParams: StaticRuntimeParams
+    private let staticParameters: StaticRuntimeParameters
 
     /// Transport model
     private let transport: any TransportModel
@@ -69,21 +69,21 @@ public struct DifferentiableSimulation {
     // MARK: - Initialization
 
     public init(
-        staticParams: StaticRuntimeParams,
+        staticParameters: StaticRuntimeParameters,
         transport: any TransportModel,
         sources: [any SourceModel] = [],
         geometry: Geometry
     ) {
-        self.staticParams = staticParams
+        self.staticParameters = staticParameters
         self.transport = transport
         self.sources = sources
         self.geometry = geometry
 
         // Use LinearSolver for differentiation (simpler, no iterative solve)
         self.solver = LinearSolver(
-            nCorrectorSteps: 1,  // Minimal correction
-            usePereversevCorrector: false,
-            theta: staticParams.theta
+            correctorStepCount: 1,  // Minimal correction
+            usesPereverzevCorrector: false,
+            theta: staticParameters.theta
         )
     }
 
@@ -96,44 +96,44 @@ public struct DifferentiableSimulation {
     /// - Parameters:
     ///   - initialProfiles: Initial plasma profiles
     ///   - actuators: Time series of control parameters
-    ///   - dynamicParams: Dynamic runtime parameters (boundaries, transport params, etc.)
+    ///   - dynamicParameters: Dynamic runtime parameters (boundaries, transport parameters, etc.)
     ///   - timeHorizon: Total simulation time [s]
-    ///   - dt: Fixed timestep [s] (adaptive timestep breaks gradients!)
+    ///   - timeStep: Fixed timestep [s] (adaptive timestep breaks gradients!)
     ///
     /// - Returns: Tuple of (final profiles, loss value for minimization)
     ///
     /// **Loss Function**:
-    /// Default: `-Q_fusion` (negative for maximization via minimization)
+    /// Default: `-fusionGain` (negative for maximization via minimization)
     /// Can be customized for other objectives (profile matching, energy confinement, etc.)
     public func forward(
         initialProfiles: CoreProfiles,
         actuators: ActuatorTimeSeries,
-        dynamicParams: DynamicRuntimeParams,
+        dynamicParameters: DynamicRuntimeParameters,
         timeHorizon: Float,
-        dt: Float
+        timeStep: Float
     ) -> (CoreProfiles, MLXArray) {
         var profiles = initialProfiles
-        let nSteps = Int(timeHorizon / dt)
+        let stepCount = Int(timeHorizon / timeStep)
 
         // CRITICAL FOR GRADIENTS: Extract actuator MLXArray once
         // This preserves the gradient tape connection
-        let actuatorArray = actuators.toMLXArray()  // Shape: [nSteps × 4]
+        let actuatorArray = actuators.asMLXArray()  // Shape: [stepCount × 4]
 
         // For constant actuators, use average (all timesteps have same value)
         // This maintains differentiability while avoiding asArray() in loop
-        let avgP_ECRH = MLX.mean(actuatorArray[0..<actuators.nSteps])
-        let avgP_ICRH = MLX.mean(actuatorArray[actuators.nSteps..<(2*actuators.nSteps)])
-        let avgGasPuff = MLX.mean(actuatorArray[(2*actuators.nSteps)..<(3*actuators.nSteps)])
-        let avgI_plasma = MLX.mean(actuatorArray[(3*actuators.nSteps)..<(4*actuators.nSteps)])
+        let avgP_ECRH = MLX.mean(actuatorArray[0..<actuators.stepCount])
+        let avgP_ICRH = MLX.mean(actuatorArray[actuators.stepCount..<(2*actuators.stepCount)])
+        let avgGasPuff = MLX.mean(actuatorArray[(2*actuators.stepCount)..<(3*actuators.stepCount)])
+        let avgI_plasma = MLX.mean(actuatorArray[(3*actuators.stepCount)..<(4*actuators.stepCount)])
 
-        // Update dynamic params once with MLXArray values
+        // Update dynamic parameters once with MLXArray values
         // These MLXArrays preserve gradients
         let dynamicParamsWithActuators = updateDynamicParamsMLX(
-            dynamicParams,
-            P_ECRH: avgP_ECRH,
-            P_ICRH: avgP_ICRH,
-            gas_puff: avgGasPuff,
-            I_plasma: avgI_plasma
+            dynamicParameters,
+            ecrhPower: avgP_ECRH,
+            icrhPower: avgP_ICRH,
+            gasPuffRate: avgGasPuff,
+            plasmaCurrent: avgI_plasma
         )
 
         // CRITICAL FOR GRADIENTS: Set MLXArray power on sources
@@ -142,13 +142,13 @@ public struct DifferentiableSimulation {
         setMLXPowerOnSources(P_aux_total_mlx)
 
         // Time-stepping loop (NO compile!)
-        for _ in 0..<nSteps {
+        for _ in 0..<stepCount {
             // Perform single differentiable timestep
             // Use same actuator values for all steps (constant actuators)
             profiles = stepDifferentiable(
                 profiles: profiles,
-                dynamicParams: dynamicParamsWithActuators,
-                dt: dt
+                dynamicParameters: dynamicParamsWithActuators,
+                timeStep: timeStep
             )
         }
 
@@ -160,34 +160,34 @@ public struct DifferentiableSimulation {
 
     /// Differentiable timestep (core operation)
     ///
-    /// **Critical**: All operations must be differentiable w.r.t. profiles and params
+    /// **Critical**: All operations must be differentiable w.r.t. profiles and parameters
     private func stepDifferentiable(
         profiles: CoreProfiles,
-        dynamicParams: DynamicRuntimeParams,
-        dt: Float
+        dynamicParameters: DynamicRuntimeParameters,
+        timeStep: Float
     ) -> CoreProfiles {
         // Build CoeffsCallback (for solver)
         // Note: We build coefficients inside the callback to ensure they depend on
         // the profiles being solved (needed for iterative solvers)
-        let coeffsCallback: CoeffsCallback = { [transport, sources, dynamicParams, staticParams] profs, geo in
+        let coeffsCallback: CoeffsCallback = { [transport, sources, dynamicParameters, staticParameters] profs, geo in
             let transportCoeffs = transport.computeCoefficients(
                 profiles: profs,
                 geometry: geo,
-                params: dynamicParams.transportParams
+                parameters: dynamicParameters.transportParameters
             )
 
             let sourceTerms = sources.reduce(
                 into: SourceTerms.zero(
-                    nCells: staticParams.mesh.nCells,
+                    cellCount: staticParameters.mesh.cellCount,
                     metadata: nil,
                     validateDebugUnits: false
                 )
             ) { total, model in
-                if let params = dynamicParams.sourceParams[model.name] {
+                if let parameters = dynamicParameters.sourceParameters[model.name] {
                     let contribution = model.computeTermsForSolver(
                         profiles: profs,
                         geometry: geo,
-                        params: params
+                        parameters: parameters
                     )
                     total = total.adding(contribution, validateDebugUnits: false)
                 }
@@ -197,22 +197,22 @@ public struct DifferentiableSimulation {
                 transport: transportCoeffs,
                 sources: sourceTerms,
                 geometry: geo,
-                staticParams: staticParams,
+                staticParameters: staticParameters,
                 profiles: profs
             )
         }
 
         // 5. Solve (differentiable - linear solver only!)
         let xOld = profiles.asTuple(
-            dr: staticParams.mesh.dr,
-            boundaryConditions: dynamicParams.boundaryConditions
+            radialSpacing: staticParameters.mesh.radialSpacing,
+            boundaryConditions: dynamicParameters.boundaryConditions
         )
 
         let result = solver.solve(
-            dt: dt,
-            staticParams: staticParams,
-            dynamicParamsT: dynamicParams,
-            dynamicParamsTplusDt: dynamicParams,
+            timeStep: timeStep,
+            staticParameters: staticParameters,
+            dynamicParamsT: dynamicParameters,
+            dynamicParamsTplusDt: dynamicParameters,
             geometryT: geometry,
             geometryTplusDt: geometry,
             xOld: xOld,
@@ -233,13 +233,13 @@ public struct DifferentiableSimulation {
     ///
     /// Returns `-T_avg` so minimization → maximization
     ///
-    /// **Note**: We use average temperature instead of Q_fusion because:
-    /// 1. Q_fusion requires high temperatures (10-20 keV) to be non-zero
+    /// **Note**: We use average temperature instead of fusionGain because:
+    /// 1. fusionGain requires high temperatures (10-20 keV) to be non-zero
     /// 2. Temperature directly responds to heating power
     /// 3. More sensitive for gradient-based optimization
     ///
     /// For actual scenario optimization with realistic parameters,
-    /// Q_fusion maximization can be used.
+    /// fusionGain maximization can be used.
     private func computeLoss(profiles: CoreProfiles) -> MLXArray {
         // Average ion and electron temperature
         let avgTi = MLX.mean(profiles.ionTemperature.value)
@@ -272,7 +272,7 @@ public struct DifferentiableSimulation {
 
         let totalError = Ti_error + Te_error + ne_error
 
-        return totalError / Float(staticParams.mesh.nCells)
+        return totalError / Float(staticParameters.mesh.cellCount)
     }
 
     // MARK: - Helper Functions
@@ -289,44 +289,44 @@ public struct DifferentiableSimulation {
         }
     }
 
-    /// Update dynamic params with actuator MLXArrays (gradient-preserving)
+    /// Update dynamic parameters with actuator MLXArrays (gradient-preserving)
     ///
     /// **Critical**: Uses MLXArrays directly to preserve gradient tape
     ///
     /// This version is used in forward() to maintain differentiability
     private func updateDynamicParamsMLX(
-        _ params: DynamicRuntimeParams,
-        P_ECRH: MLXArray,
-        P_ICRH: MLXArray,
-        gas_puff: MLXArray,
-        I_plasma: MLXArray
-    ) -> DynamicRuntimeParams {
-        var updated = params
+        _ parameters: DynamicRuntimeParameters,
+        ecrhPower: MLXArray,
+        icrhPower: MLXArray,
+        gasPuffRate: MLXArray,
+        plasmaCurrent: MLXArray
+    ) -> DynamicRuntimeParameters {
+        var updated = parameters
 
         // Convert MLXArrays to Float for storage (gradient still flows through computation)
-        eval(P_ECRH, P_ICRH, gas_puff, I_plasma)
-        let P_ECRH_val = P_ECRH.item(Float.self)
-        let P_ICRH_val = P_ICRH.item(Float.self)
-        let gas_puff_val = gas_puff.item(Float.self)
-        let I_plasma_val = I_plasma.item(Float.self)
+        eval(ecrhPower, icrhPower, gasPuffRate, plasmaCurrent)
+        let P_ECRH_val = ecrhPower.item(Float.self)
+        let P_ICRH_val = icrhPower.item(Float.self)
+        let gas_puff_val = gasPuffRate.item(Float.self)
+        let I_plasma_val = plasmaCurrent.item(Float.self)
 
         // Calculate total auxiliary power
         let P_aux_total = P_ECRH_val + P_ICRH_val  // [MW]
 
         // Update all heating sources
-        for (sourceName, var sourceParams) in updated.sourceParams {
+        for (sourceName, var sourceParameters) in updated.sourceParameters {
             if sourceName.contains("fusion") || sourceName.contains("heating") {
-                sourceParams.params["P_auxiliary"] = P_aux_total
-                sourceParams.params["P_ECRH"] = P_ECRH_val
-                sourceParams.params["P_ICRH"] = P_ICRH_val
-                updated.sourceParams[sourceName] = sourceParams
+                sourceParameters.parameters["P_auxiliary"] = P_aux_total
+                sourceParameters.parameters["P_ECRH"] = P_ECRH_val
+                sourceParameters.parameters["P_ICRH"] = P_ICRH_val
+                updated.sourceParameters[sourceName] = sourceParameters
             }
         }
 
         // Update ohmic heating if present
-        if var ohmicParams = updated.sourceParams["ohmic"] {
-            ohmicParams.params["I_plasma"] = I_plasma_val
-            updated.sourceParams["ohmic"] = ohmicParams
+        if var ohmicParams = updated.sourceParameters["ohmic"] {
+            ohmicParams.parameters["I_plasma"] = I_plasma_val
+            updated.sourceParameters["ohmic"] = ohmicParams
         }
 
         // Update boundary conditions (gas puff → edge density)
@@ -341,61 +341,61 @@ public struct DifferentiableSimulation {
         return updated
     }
 
-    /// Update dynamic params with actuator values
+    /// Update dynamic parameters with actuator values
     ///
     /// **Engineering mapping**:
-    /// 1. P_ECRH, P_ICRH → Heating power sources (MW → eV/m³/s)
-    /// 2. gas_puff → Density boundary condition (particles/s → m⁻³)
-    /// 3. I_plasma → Current drive (MA → A/m²)
+    /// 1. ecrhPower, icrhPower → Heating power sources (MW → eV/m³/s)
+    /// 2. gasPuffRate → Density boundary condition (particles/s → m⁻³)
+    /// 3. plasmaCurrent → Current drive (MA → A/m²)
     ///
     /// **Mathematical consistency**:
     /// - All unit conversions must be physically correct
-    /// - Power must be conserved (P_in = P_ECRH + P_ICRH + P_ohmic)
-    /// - Particle balance (gas_puff → density BC)
+    /// - Power must be conserved (P_in = ecrhPower + icrhPower + ohmicPower)
+    /// - Particle balance (gasPuffRate → density BC)
     private func updateDynamicParams(
-        _ params: DynamicRuntimeParams,
+        _ parameters: DynamicRuntimeParameters,
         with actuators: ActuatorValues
-    ) -> DynamicRuntimeParams {
-        var updated = params
+    ) -> DynamicRuntimeParameters {
+        var updated = parameters
 
         // 1. Update auxiliary heating power
-        // Map P_ECRH + P_ICRH to total auxiliary power
-        let P_aux_total = actuators.P_ECRH + actuators.P_ICRH  // [MW]
+        // Map ecrhPower + icrhPower to total auxiliary power
+        let P_aux_total = actuators.ecrhPower + actuators.icrhPower  // [MW]
 
         // Update all heating sources with auxiliary power
         // This supports both "fusion" (real simulations) and "simple_heating" (tests)
-        for (sourceName, var sourceParams) in updated.sourceParams {
+        for (sourceName, var sourceParameters) in updated.sourceParameters {
             if sourceName.contains("fusion") || sourceName.contains("heating") {
                 // Store total auxiliary power
-                sourceParams.params["P_auxiliary"] = P_aux_total
+                sourceParameters.parameters["P_auxiliary"] = P_aux_total
 
                 // Store individual powers for power partition analysis
-                sourceParams.params["P_ECRH"] = actuators.P_ECRH
-                sourceParams.params["P_ICRH"] = actuators.P_ICRH
+                sourceParameters.parameters["P_ECRH"] = actuators.ecrhPower
+                sourceParameters.parameters["P_ICRH"] = actuators.icrhPower
 
-                updated.sourceParams[sourceName] = sourceParams
+                updated.sourceParameters[sourceName] = sourceParameters
             }
         }
 
-        // Also update ohmic heating params if present
-        if var ohmicParams = updated.sourceParams["ohmic"] {
+        // Also update ohmic heating parameters if present
+        if var ohmicParams = updated.sourceParameters["ohmic"] {
             // Ohmic heating depends on plasma current
-            ohmicParams.params["I_plasma"] = actuators.I_plasma  // [MA]
-            updated.sourceParams["ohmic"] = ohmicParams
+            ohmicParams.parameters["I_plasma"] = actuators.plasmaCurrent  // [MA]
+            updated.sourceParameters["ohmic"] = ohmicParams
         }
 
         // 2. Update density boundary condition from gas puff
-        // Engineering model: gas_puff [particles/s] → edge density [m⁻³]
+        // Engineering model: gasPuffRate [particles/s] → edge density [m⁻³]
         //
-        // Simplified model: n_edge ∝ gas_puff / (particle_confinement_time × surface_area)
+        // Simplified model: n_edge ∝ gasPuffRate / (particle_confinement_time × surface_area)
         // For optimization: we use a scaling factor
         //
         // Typical values:
-        // - gas_puff: 1e20 particles/s
+        // - gasPuffRate: 1e20 particles/s
         // - edge density: 1e19 m⁻³
         // - scaling: ~0.1
         let gasPuffScaling: Float = 0.1  // Calibrated constant
-        let densityFromGasPuff = gasPuffScaling * actuators.gas_puff  // [m⁻³]
+        let densityFromGasPuff = gasPuffScaling * actuators.gasPuffRate  // [m⁻³]
 
         // Clamp to physical range
         let minEdgeDensity: Float = 1e18  // 0.1 × 10²⁰ m⁻³
@@ -408,13 +408,13 @@ public struct DifferentiableSimulation {
         updatedBC.electronDensity.right = .value(clampedDensity)
         updated.boundaryConditions = updatedBC
 
-        // 3. Plasma current (I_plasma) affects:
+        // 3. Plasma current (plasmaCurrent) affects:
         // - Ohmic heating (j² / σ)
         // - Magnetic field configuration
         // - Bootstrap current fraction
         //
         // Note: Current evolution is not enabled in our simplified model
-        // (evolution.current = false), so we use I_plasma as a parameter
+        // (evolution.poloidalFlux = false), so we use plasmaCurrent as a parameter
         // for source calculations only
 
         return updated

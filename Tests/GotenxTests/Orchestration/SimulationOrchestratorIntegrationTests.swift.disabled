@@ -17,7 +17,7 @@ struct SimulationOrchestratorIntegrationTests {
 
     private func createTestOrchestrator() async -> SimulationOrchestrator {
         let meshConfig = MeshConfig(
-            nCells: 20,
+            cellCount: 20,
             majorRadius: 6.2,
             minorRadius: 2.0,
             toroidalField: 5.3
@@ -27,12 +27,12 @@ struct SimulationOrchestratorIntegrationTests {
             mesh: meshConfig,
             evolveIonHeat: true,
             evolveElectronHeat: true,
-            evolveDensity: true,
-            evolveCurrent: false,
+            evolveElectronDensity: true,
+            evolvePoloidalFlux: false,
             solverType: .linear,
             theta: 1.0,
             solverTolerance: 1e-6,
-            solverMaxIterations: 30
+            solverMaximumIterations: 30
         )
 
         let initialProfiles = SerializableProfiles(
@@ -43,8 +43,8 @@ struct SimulationOrchestratorIntegrationTests {
         )
 
         let transport = ConstantTransportModel(
-            chiIon: 1.0,
-            chiElectron: 1.0,
+            ionHeatDiffusivity: 1.0,
+            electronHeatDiffusivity: 1.0,
             particleDiffusivity: 0.5,
             convectionVelocity: 0.0
         )
@@ -147,9 +147,12 @@ struct SimulationOrchestratorIntegrationTests {
                 electronDensity: 1e20
             ),
             sourceParams: [:],
-            transportParams: TransportParameters(
-                bohmFactor: 1.0,
-                gyrobohmFactor: 1.0
+            transportParams: try TransportParameters(
+                modelType: .bohmGyrobohm,
+                parameters: [
+                    "bohmCoefficient": 1.0,
+                    "gyroBohmCoefficient": 1.0
+                ]
             )
         )
 
@@ -203,9 +206,12 @@ struct SimulationOrchestratorIntegrationTests {
                 electronDensity: 1e20
             ),
             sourceParams: [:],
-            transportParams: TransportParameters(
-                bohmFactor: 1.0,
-                gyrobohmFactor: 1.0
+            transportParams: try TransportParameters(
+                modelType: .bohmGyrobohm,
+                parameters: [
+                    "bohmCoefficient": 1.0,
+                    "gyroBohmCoefficient": 1.0
+                ]
             )
         )
 
@@ -260,9 +266,12 @@ struct SimulationOrchestratorIntegrationTests {
                 electronDensity: 1e20
             ),
             sourceParams: [:],
-            transportParams: TransportParameters(
-                bohmFactor: 1.0,
-                gyrobohmFactor: 1.0
+            transportParams: try TransportParameters(
+                modelType: .bohmGyrobohm,
+                parameters: [
+                    "bohmCoefficient": 1.0,
+                    "gyroBohmCoefficient": 1.0
+                ]
             )
         )
 
@@ -321,9 +330,12 @@ struct SimulationOrchestratorIntegrationTests {
                 electronDensity: 1e20
             ),
             sourceParams: [:],
-            transportParams: TransportParameters(
-                bohmFactor: 1.0,
-                gyrobohmFactor: 1.0
+            transportParams: try TransportParameters(
+                modelType: .bohmGyrobohm,
+                parameters: [
+                    "bohmCoefficient": 1.0,
+                    "gyroBohmCoefficient": 1.0
+                ]
             )
         )
 

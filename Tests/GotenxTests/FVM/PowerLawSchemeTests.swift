@@ -10,14 +10,14 @@ struct PowerLawSchemeTests {
 
     @Test("Péclet number calculation")
     func pecletNumber() {
-        let vFace = MLXArray([Float(0.0), Float(1.0), Float(10.0), Float(100.0)])
-        let dFace = MLXArray([Float(1.0), Float(1.0), Float(1.0), Float(1.0)])
-        let dx = MLXArray(Float(1.0))
+        let faceConvectionVelocity = MLXArray([Float(0.0), Float(1.0), Float(10.0), Float(100.0)])
+        let faceDiffusionCoefficient = MLXArray([Float(1.0), Float(1.0), Float(1.0), Float(1.0)])
+        let cellSpacing = MLXArray(Float(1.0))
 
         let peclet = PowerLawScheme.computePecletNumber(
-            vFace: vFace,
-            dFace: dFace,
-            dx: dx
+            faceConvectionVelocity: faceConvectionVelocity,
+            faceDiffusionCoefficient: faceDiffusionCoefficient,
+            cellSpacing: cellSpacing
         )
         eval(peclet)
 
@@ -30,14 +30,14 @@ struct PowerLawSchemeTests {
 
     @Test("Péclet number with non-uniform diffusion")
     func pecletNumberNonUniformDiffusion() {
-        let vFace = MLXArray([Float(10.0), Float(10.0), Float(10.0), Float(10.0)])
-        let dFace = MLXArray([Float(1.0), Float(2.0), Float(5.0), Float(10.0)])
-        let dx = MLXArray(Float(1.0))
+        let faceConvectionVelocity = MLXArray([Float(10.0), Float(10.0), Float(10.0), Float(10.0)])
+        let faceDiffusionCoefficient = MLXArray([Float(1.0), Float(2.0), Float(5.0), Float(10.0)])
+        let cellSpacing = MLXArray(Float(1.0))
 
         let peclet = PowerLawScheme.computePecletNumber(
-            vFace: vFace,
-            dFace: dFace,
-            dx: dx
+            faceConvectionVelocity: faceConvectionVelocity,
+            faceDiffusionCoefficient: faceDiffusionCoefficient,
+            cellSpacing: cellSpacing
         )
         eval(peclet)
 

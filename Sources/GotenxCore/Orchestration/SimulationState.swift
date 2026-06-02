@@ -53,7 +53,7 @@ public struct SimulationState: Sendable {
     /// ```
     /// var time: Float = 0.0
     /// for _ in 0..<20000 {
-    ///     time += dt  // Cumulative error: 20,000 × 10⁻⁷ ≈ 2×10⁻³ (0.2%)
+    ///     time += timeStep  // Cumulative error: 20,000 × 10⁻⁷ ≈ 2×10⁻³ (0.2%)
     /// }
     /// ```
     ///
@@ -61,7 +61,7 @@ public struct SimulationState: Sendable {
     /// ```
     /// var acc: Double = 0.0
     /// for _ in 0..<20000 {
-    ///     acc += Double(dt)  // Cumulative error: ~10⁻¹² (negligible)
+    ///     acc += Double(timeStep)  // Cumulative error: ~10⁻¹² (negligible)
     /// }
     /// let time = Float(acc)
     /// ```
@@ -77,7 +77,7 @@ public struct SimulationState: Sendable {
     }
 
     /// Current timestep [s]
-    public let dt: Float
+    public let timeStep: Float
 
     /// Step number
     public let step: Int
@@ -123,7 +123,7 @@ public struct SimulationState: Sendable {
     public init(
         profiles: CoreProfiles,
         timeAccumulator: Double = 0.0,
-        dt: Float = 1e-4,
+        timeStep: Float = 1e-4,
         step: Int = 0,
         statistics: SimulationStatistics = SimulationStatistics(),
         transport: TransportCoefficients? = nil,
@@ -134,7 +134,7 @@ public struct SimulationState: Sendable {
     ) {
         self.profiles = profiles
         self.timeAccumulator = timeAccumulator
-        self.dt = dt
+        self.timeStep = timeStep
         self.step = step
         self.statistics = statistics
         self.transport = transport
@@ -150,7 +150,7 @@ public struct SimulationState: Sendable {
     public func updated(
         profiles: CoreProfiles? = nil,
         time: Float? = nil,
-        dt: Float? = nil,
+        timeStep: Float? = nil,
         step: Int? = nil,
         statistics: SimulationStatistics? = nil,
         transport: TransportCoefficients?? = nil,
@@ -162,7 +162,7 @@ public struct SimulationState: Sendable {
         SimulationState(
             profiles: profiles ?? self.profiles,
             timeAccumulator: time.map { Double($0) } ?? self.timeAccumulator,
-            dt: dt ?? self.dt,
+            timeStep: timeStep ?? self.timeStep,
             step: step ?? self.step,
             statistics: statistics ?? self.statistics,
             transport: transport ?? self.transport,
@@ -185,7 +185,7 @@ public struct SimulationState: Sendable {
     /// numerical precision over long simulations.
     ///
     /// - Parameters:
-    ///   - dt: Timestep duration [s]
+    ///   - timeStep: Timestep duration [s]
     ///   - profiles: Updated plasma profiles
     ///   - statistics: Updated statistics (optional)
     ///   - transport: Updated transport coefficients (Phase 3)
@@ -201,12 +201,12 @@ public struct SimulationState: Sendable {
     /// var state = SimulationState(profiles: initialProfiles)
     /// for _ in 0..<20000 {
     ///     let newProfiles = solver.solve(...)
-    ///     state = state.advanced(by: dt, profiles: newProfiles)
+    ///     state = state.advanced(by: timeStep, profiles: newProfiles)
     /// }
     /// print(state.time)  // Accurate to ~10⁻¹⁰ after 20,000 steps
     /// ```
     public func advanced(
-        by dt: Float,
+        by timeStep: Float,
         profiles: CoreProfiles,
         statistics: SimulationStatistics? = nil,
         transport: TransportCoefficients? = nil,
@@ -216,25 +216,25 @@ public struct SimulationState: Sendable {
         diagnostics: NumericalDiagnostics? = nil
     ) -> SimulationState {
         // Validate timestep
-        guard dt.isFinite else {
-            fatalError("SimulationState.advanced: dt must be finite (got \(dt))")
+        guard timeStep.isFinite else {
+            fatalError("SimulationState.advanced: timeStep must be finite (got \(timeStep))")
         }
-        guard dt >= 0 else {
-            fatalError("SimulationState.advanced: dt must be non-negative (got \(dt))")
+        guard timeStep >= 0 else {
+            fatalError("SimulationState.advanced: timeStep must be non-negative (got \(timeStep))")
         }
 
         // High-precision time accumulation using Double (CPU operation, but 1 per timestep)
-        let newTimeAccumulator = timeAccumulator + Double(dt)
+        let newTimeAccumulator = timeAccumulator + Double(timeStep)
 
         // Check for overflow (extremely rare: would require ~10^300 seconds)
         guard newTimeAccumulator.isFinite else {
-            fatalError("SimulationState.advanced: time accumulator overflow (accumulated time: \(timeAccumulator)s, dt: \(dt)s)")
+            fatalError("SimulationState.advanced: time accumulator overflow (accumulated time: \(timeAccumulator)s, timeStep: \(timeStep)s)")
         }
 
         return SimulationState(
             profiles: profiles,
             timeAccumulator: newTimeAccumulator,
-            dt: dt,
+            timeStep: timeStep,
             step: step + 1,
             statistics: statistics ?? self.statistics,
             transport: transport ?? self.transport,
@@ -260,7 +260,7 @@ public struct SimulationStatistics: Sendable, Codable {
     public var converged: Bool
 
     /// Maximum residual norm encountered
-    public var maxResidualNorm: Float
+    public var maximumResidualNorm: Float
 
     /// Total wall time [s]
     public var wallTime: Float
@@ -269,13 +269,13 @@ public struct SimulationStatistics: Sendable, Codable {
         totalIterations: Int = 0,
         totalSteps: Int = 0,
         converged: Bool = true,
-        maxResidualNorm: Float = 0.0,
+        maximumResidualNorm: Float = 0.0,
         wallTime: Float = 0.0
     ) {
         self.totalIterations = totalIterations
         self.totalSteps = totalSteps
         self.converged = converged
-        self.maxResidualNorm = maxResidualNorm
+        self.maximumResidualNorm = maximumResidualNorm
         self.wallTime = wallTime
     }
 }
@@ -431,7 +431,7 @@ extension SimulationState {
 public struct ProgressInfo: Sendable {
     public let currentTime: Float
     public let totalSteps: Int
-    public let lastDt: Float
+    public let lastTimeStep: Float
     public let converged: Bool
 
     /// Current profiles (optional, enabled via SamplingConfig.enableLivePlotting)
@@ -447,14 +447,14 @@ public struct ProgressInfo: Sendable {
     public init(
         currentTime: Float,
         totalSteps: Int,
-        lastDt: Float,
+        lastTimeStep: Float,
         converged: Bool,
         profiles: SerializableProfiles? = nil,
         derived: DerivedQuantities? = nil
     ) {
         self.currentTime = currentTime
         self.totalSteps = totalSteps
-        self.lastDt = lastDt
+        self.lastTimeStep = lastTimeStep
         self.converged = converged
         self.profiles = profiles
         self.derived = derived

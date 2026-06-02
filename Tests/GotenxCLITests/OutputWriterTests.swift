@@ -12,19 +12,19 @@ struct OutputWriterTests {
     @Test("NetCDF writer creates valid file with final profiles only")
     func testNetCDFWriterFinalProfiles() throws {
         // Create test data
-        let nCells = 10
+        let cellCount = 10
         let finalProfiles = SerializableProfiles(
-            ionTemperature: (0..<nCells).map { Float($0) * 100.0 },
-            electronTemperature: (0..<nCells).map { Float($0) * 90.0 },
-            electronDensity: (0..<nCells).map { Float($0) * 1e19 },
-            poloidalFlux: (0..<nCells).map { Float($0) * 0.1 }
+            ionTemperature: (0..<cellCount).map { Float($0) * 100.0 },
+            electronTemperature: (0..<cellCount).map { Float($0) * 90.0 },
+            electronDensity: (0..<cellCount).map { Float($0) * 1e19 },
+            poloidalFlux: (0..<cellCount).map { Float($0) * 0.1 }
         )
 
         let statistics = SimulationStatistics(
             totalIterations: 100,
             totalSteps: 50,
             converged: true,
-            maxResidualNorm: 1e-6,
+            maximumResidualNorm: 1e-6,
             wallTime: 12.5
         )
 
@@ -57,16 +57,16 @@ struct OutputWriterTests {
     @Test("NetCDF writer creates valid file with time series")
     func testNetCDFWriterTimeSeries() throws {
         // Create test data with time series
-        let nCells = 10
-        let nTime = 5
+        let cellCount = 10
+        let timeCount = 5
 
         var timeSeries: [TimePoint] = []
-        for t in 0..<nTime {
+        for t in 0..<timeCount {
             let profiles = SerializableProfiles(
-                ionTemperature: (0..<nCells).map { Float($0 + t) * 100.0 },
-                electronTemperature: (0..<nCells).map { Float($0 + t) * 90.0 },
-                electronDensity: (0..<nCells).map { Float($0 + t) * 1e19 },
-                poloidalFlux: (0..<nCells).map { Float($0 + t) * 0.1 }
+                ionTemperature: (0..<cellCount).map { Float($0 + t) * 100.0 },
+                electronTemperature: (0..<cellCount).map { Float($0 + t) * 90.0 },
+                electronDensity: (0..<cellCount).map { Float($0 + t) * 1e19 },
+                poloidalFlux: (0..<cellCount).map { Float($0 + t) * 0.1 }
             )
             timeSeries.append(TimePoint(time: Float(t) * 0.1, profiles: profiles))
         }
@@ -76,7 +76,7 @@ struct OutputWriterTests {
             totalIterations: 100,
             totalSteps: 50,
             converged: true,
-            maxResidualNorm: 1e-6,
+            maximumResidualNorm: 1e-6,
             wallTime: 12.5
         )
 
@@ -111,19 +111,19 @@ struct OutputWriterTests {
     @Test("JSON writer still works")
     func testJSONWriter() throws {
         // Create test data
-        let nCells = 10
+        let cellCount = 10
         let finalProfiles = SerializableProfiles(
-            ionTemperature: (0..<nCells).map { Float($0) * 100.0 },
-            electronTemperature: (0..<nCells).map { Float($0) * 90.0 },
-            electronDensity: (0..<nCells).map { Float($0) * 1e19 },
-            poloidalFlux: (0..<nCells).map { Float($0) * 0.1 }
+            ionTemperature: (0..<cellCount).map { Float($0) * 100.0 },
+            electronTemperature: (0..<cellCount).map { Float($0) * 90.0 },
+            electronDensity: (0..<cellCount).map { Float($0) * 1e19 },
+            poloidalFlux: (0..<cellCount).map { Float($0) * 0.1 }
         )
 
         let statistics = SimulationStatistics(
             totalIterations: 100,
             totalSteps: 50,
             converged: true,
-            maxResidualNorm: 1e-6,
+            maximumResidualNorm: 1e-6,
             wallTime: 12.5
         )
 
@@ -155,8 +155,8 @@ struct OutputWriterTests {
 
     @Test("NetCDF handles single cell edge case")
     func testNetCDFSingleCell() throws {
-        // Create test data with nCells = 1
-        let nCells = 1
+        // Create test data with cellCount = 1
+        let cellCount = 1
         let finalProfiles = SerializableProfiles(
             ionTemperature: [1000.0],
             electronTemperature: [900.0],
@@ -168,7 +168,7 @@ struct OutputWriterTests {
             totalIterations: 10,
             totalSteps: 5,
             converged: true,
-            maxResidualNorm: 1e-7,
+            maximumResidualNorm: 1e-7,
             wallTime: 1.0
         )
 
@@ -229,13 +229,13 @@ struct OutputWriterTests {
     func testNetCDFCompressionRatio() throws {
         // Generate highly redundant time-series data (nearly static profiles)
         // tuned to yield ~20–25× compression with current chunking policy
-        let nCells = 128
-        let nTime = 512
+        let cellCount = 128
+        let timeCount = 512
         let profileAmplitude: Float = 15_000
         let unit: Float = 1.0
         let electronBaseScale: Float = 0.95
-        let baseProfile: [Float] = (0..<nCells).map { idx in
-            let rho = Float(idx) / Float(max(1, nCells - 1))
+        let baseProfile: [Float] = (0..<cellCount).map { idx in
+            let rho = Float(idx) / Float(max(1, cellCount - 1))
             return profileAmplitude * (unit - rho * rho)
         }
 
@@ -245,7 +245,7 @@ struct OutputWriterTests {
         let wallTimeScale: Float = Float(1e-4)
 
         var timeSeries: [TimePoint] = []
-        for step in 0..<nTime {
+        for step in 0..<timeCount {
             // Minimal temporal variation to mirror equilibrium phases
             let epsilon: Float = 1e-3 * Float(step % 8)
             let ionScale: Float = unit + epsilon
@@ -254,7 +254,7 @@ struct OutputWriterTests {
 
             let ionTemp = baseProfile.map { $0 * ionScale }
             let elecTemp = baseProfile.map { $0 * elecScale }
-            let density = Array(repeating: baseDensity * densityScale, count: nCells)
+            let density = Array(repeating: baseDensity * densityScale, count: cellCount)
             let flux = baseProfile.map { $0 * fluxScale }
 
             let profiles = SerializableProfiles(
@@ -270,11 +270,11 @@ struct OutputWriterTests {
 
         let finalProfiles = timeSeries.last!.profiles
         let statistics = SimulationStatistics(
-            totalIterations: nTime,
-            totalSteps: nTime,
+            totalIterations: timeCount,
+            totalSteps: timeCount,
             converged: true,
-            maxResidualNorm: Float(1e-7),
-            wallTime: Float(nTime) * wallTimeScale
+            maximumResidualNorm: Float(1e-7),
+            wallTime: Float(timeCount) * wallTimeScale
         )
 
         let result = SimulationResult(
@@ -292,9 +292,9 @@ struct OutputWriterTests {
         let attributes = try FileManager.default.attributesOfItem(atPath: outputURL.path)
         let compressedSize = attributes[.size] as! Int
 
-        // 4 variables × nTime × nCells × sizeof(Float)
+        // 4 variables × timeCount × cellCount × sizeof(Float)
         let variableCount = 4
-        let uncompressedPayload = variableCount * nTime * nCells * MemoryLayout<Float>.size
+        let uncompressedPayload = variableCount * timeCount * cellCount * MemoryLayout<Float>.size
         let compressionRatio = Double(uncompressedPayload) / Double(compressedSize)
 
         print("✅ OutputWriter compression ratio results:")

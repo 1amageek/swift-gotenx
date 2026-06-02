@@ -1,11 +1,17 @@
 # Numerical Robustness Design
 
-**Version:** 1.1
-**Date:** 2025-10-25
-**Status:** Implementation Ready
-**Priority:** 🔥 Critical
+**Version:** 1.2
+**Date:** 2026-06-02
+**Status:** Historical design record; current enforcement lives in `docs/QUALITY_GATES.md`
+**Priority:** Current production guardrail
 
 ## Document Status
+
+**Revision 1.2 (2026-06-02)**:
+- Promoted profile validation to `ValidatedProfiles.validate(_:) throws`
+- Added shared numerical validation for profiles, source terms, transport coefficients, and block coefficients
+- Removed diagnostic source fallback-to-zero behavior; diagnostic source failures now propagate
+- Added step-boundary validation in `SimulationOrchestrator`
 
 **Revision 1.1 (2025-10-25)**:
 - Added implementation gap analysis from code review
@@ -23,16 +29,15 @@ This document addresses critical numerical robustness issues discovered during N
 
 ### Implementation Status
 
-**Current State** (as of 2025-10-25):
-- ❌ ValidatedProfiles wrapper: **Not implemented**
-- ❌ IonElectronExchange guards: **Not implemented** (crash still reproducible)
-- ❌ Initial profile validation: **Not implemented** (missing Te detection absent)
-- ❌ Newton-Raphson constraints: **Not implemented** (unconstrained line search)
-- ✅ SourceTerms output validation: **Implemented** (precondition checks exist)
+**Current State** (as of 2026-06-02):
+- `ValidatedProfiles.validate(_:) throws` validates shape, finite values, and positive evolved variables.
+- `SourceTerms.validateNumerics(...)` validates source arrays and required diagnostic metadata.
+- `TransportCoefficients.validateNumerics(...)` rejects non-finite and negative diffusivities.
+- `Block1DCoeffs.validateNumerics()` checks finite/non-negative coefficients and positive transient/geometric factors.
+- `SimulationOrchestrator` validates state at step boundaries before advancing.
+- Diagnostic `SourceModel.computeTerms(...)` is throwing; source computation failures must not be represented as zero source terms.
 
-**Implementation Gap**: All Phase 1-4 defenses are missing, leaving the original crash unresolved.
-
-**Recommended Approach**: Phased implementation (Sprint 1-3) starting with minimal ValidatedProfiles and IonElectronExchange guards.
+The older phased plan below is retained as background. Treat `docs/QUALITY_GATES.md` and the current validation APIs as the production contract.
 
 ### Key Issues Addressed
 
@@ -298,11 +303,10 @@ public struct ValidatedProfiles {
         self.poloidalFlux = poloidalFlux
     }
 
-    /// Minimal validation (Sprint 1): finite + positive temperature only
+    /// Validate shape, finite values, and positive evolved variables.
     ///
-    /// Returns nil if critical checks fail (NaN/Inf/negative T)
-    /// Does NOT check bounds or shapes (deferred to Sprint 3)
-    public static func validateMinimal(_ profiles: CoreProfiles) -> ValidatedProfiles? {
+    /// Throws if critical checks fail.
+    public static func validate(_ profiles: CoreProfiles) throws -> ValidatedProfiles {
         let Ti = profiles.ionTemperature.value
         let Te = profiles.electronTemperature.value
         let ne = profiles.electronDensity.value
@@ -352,12 +356,8 @@ public struct ValidatedProfiles {
 
 **Usage Pattern** (Sprint 1):
 ```swift
-public func applyToSources(..., profiles: CoreProfiles, ...) -> SourceTerms {
-    // Fail-safe: return unchanged sources if validation fails
-    guard let validated = ValidatedProfiles.validateMinimal(profiles) else {
-        print("[WARNING-PhysicsModel] Invalid profiles, returning unchanged sources")
-        return currentSources
-    }
+public func applyToSources(..., profiles: CoreProfiles, ...) throws -> SourceTerms {
+    let validated = try ValidatedProfiles.validate(profiles)
 
     // Proceed with validated inputs
     let Ti = validated.ionTemperature.value
@@ -485,10 +485,10 @@ public struct ValidatedProfiles {
         }
 
         // Check 3: Consistent shapes
-        let nCells = Ti.shape[0]
-        guard Te.shape[0] == nCells,
-              ne.shape[0] == nCells,
-              psi.shape[0] == nCells else {
+        let cellCount = Ti.shape[0]
+        guard Te.shape[0] == cellCount,
+              ne.shape[0] == cellCount,
+              psi.shape[0] == cellCount else {
             throw ValidationError.inconsistentShapes(
                 Ti: Ti.shape,
                 Te: Te.shape,
@@ -568,7 +568,10 @@ public func applyToSources(
     geometry: Geometry
 ) -> SourceTerms {
     // Validate at entry point
-    guard let validatedProfiles = try? ValidatedProfiles.validate(profiles) else {
+    let validatedProfiles: ValidatedProfiles
+    do {
+        validatedProfiles = try ValidatedProfiles.validate(profiles)
+    } catch {
         print("[WARNING-IonElectronExchange] Invalid profiles, returning zero exchange")
         return currentSources  // Fail-safe: no modification
     }
@@ -590,8 +593,8 @@ public func applyToSources(
 - ❌ Crash on NaN: `SourceTerms` precondition fails if Q_ie contains NaN
 
 **Changes** (Sprint 1):
-1. Input validation with ValidatedProfiles.validateMinimal()
-2. Fail-safe return of currentSources on validation failure
+1. Input validation with `ValidatedProfiles.validate(_:) throws`
+2. Error propagation on validation failure
 3. Output validation before return (NaN/Inf check)
 4. Preserve accumulated metadata in fail-safe path
 
@@ -611,7 +614,10 @@ public func applyToSources(
     geometry: Geometry
 ) -> SourceTerms {
     // Step 1: Validate inputs
-    guard let validatedProfiles = try? ValidatedProfiles.validate(profiles) else {
+    let validatedProfiles: ValidatedProfiles
+    do {
+        validatedProfiles = try ValidatedProfiles.validate(profiles)
+    } catch {
         print("[WARNING-IonElectronExchange] Invalid input profiles")
         print("  Ti: min=\(profiles.ionTemperature.value.min().item()), max=\(profiles.ionTemperature.value.max().item())")
         print("  Te: min=\(profiles.electronTemperature.value.min().item()), max=\(profiles.electronTemperature.value.max().item())")
@@ -838,7 +844,7 @@ private func lineSearch(
     x: MLXArray,
     delta: MLXArray,
     residual: MLXArray,
-    nCells: Int,
+    cellCount: Int,
     maxAlpha: Float = 1.0
 ) -> Float {
     let norm0 = linalg.norm(residual).item()
@@ -852,7 +858,7 @@ private func lineSearch(
         let xTrialRaw = x + alpha * delta
 
         // Project onto physically feasible region
-        guard let xTrial = projectOntoFeasibleRegion(xTrialRaw, nCells: nCells) else {
+        guard let xTrial = projectOntoFeasibleRegion(xTrialRaw, cellCount: cellCount) else {
             print("[DEBUG-NR-LS] α=\(alpha): projection failed (extreme violation)")
             continue
         }
@@ -896,12 +902,12 @@ private func lineSearch(
 /// - ψ ∈ [0, 1]
 ///
 /// Returns nil if constraints are severely violated (e.g., all negative values)
-private func projectOntoFeasibleRegion(_ x: MLXArray, nCells: Int) -> MLXArray? {
+private func projectOntoFeasibleRegion(_ x: MLXArray, cellCount: Int) -> MLXArray? {
     // Extract components
-    let Ti = x[0..<nCells]
-    let Te = x[nCells..<(2*nCells)]
-    let ne = x[(2*nCells)..<(3*nCells)]
-    let psi = x[(3*nCells)..<(4*nCells)]
+    let Ti = x[0..<cellCount]
+    let Te = x[cellCount..<(2*cellCount)]
+    let ne = x[(2*cellCount)..<(3*cellCount)]
+    let psi = x[(3*cellCount)..<(4*cellCount)]
 
     // Physical bounds
     let T_min: Float = 1.0       // 1 eV
@@ -914,8 +920,8 @@ private func projectOntoFeasibleRegion(_ x: MLXArray, nCells: Int) -> MLXArray? 
     // Check for severe violations (more than 50% of values out of range)
     let Ti_violations = Float(sum(Ti .< (0.1 * T_min)).item())
     let Te_violations = Float(sum(Te .< (0.1 * T_min)).item())
-    if (Ti_violations + Te_violations) / Float(2 * nCells) > 0.5 {
-        print("[WARNING-projection] Severe constraint violations: Ti=\(Ti_violations)/\(nCells), Te=\(Te_violations)/\(nCells)")
+    if (Ti_violations + Te_violations) / Float(2 * cellCount) > 0.5 {
+        print("[WARNING-projection] Severe constraint violations: Ti=\(Ti_violations)/\(cellCount), Te=\(Te_violations)/\(cellCount)")
         return nil
     }
 
@@ -1014,8 +1020,9 @@ extension CoreProfiles {
 private func createInitialProfiles(...) -> CoreProfiles {
     // ... generate profiles
 
-    // ✅ Validate before returning
-    guard let _ = ValidatedProfiles.validateMinimal(profiles) else {
+    // Validate before returning
+    _ = try ValidatedProfiles.validate(profiles)
+    /*
         fatalError("""
         ERROR: Initial profiles validation failed
           Ti: [\(profiles.ionTemperature.value.min().item()), \
@@ -1028,7 +1035,7 @@ private func createInitialProfiles(...) -> CoreProfiles {
         Check configuration file or profile initialization code.
         This is a fatal error during startup - profiles must be valid.
         """)
-    }
+    */
 
     return profiles
 }
@@ -1094,11 +1101,11 @@ private static func validateInitialConditions(_ config: SimulationConfiguration)
 ```swift
 @Test("ValidatedProfiles rejects NaN")
 func testValidatedProfilesRejectsNaN() {
-    let nCells = 100
-    let Ti = MLXArray.full([nCells], values: MLXArray(1000.0))
-    let Te = MLXArray.full([nCells], values: MLXArray(Float.nan))  // ❌ NaN
-    let ne = MLXArray.full([nCells], values: MLXArray(2e19))
-    let psi = MLXArray.linspace(0.0, 1.0, count: nCells)
+    let cellCount = 100
+    let Ti = MLXArray.full([cellCount], values: MLXArray(1000.0))
+    let Te = MLXArray.full([cellCount], values: MLXArray(Float.nan))  // ❌ NaN
+    let ne = MLXArray.full([cellCount], values: MLXArray(2e19))
+    let psi = MLXArray.linspace(0.0, 1.0, count: cellCount)
 
     let profiles = CoreProfiles(
         ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -1114,11 +1121,11 @@ func testValidatedProfilesRejectsNaN() {
 
 @Test("ValidatedProfiles rejects out-of-range temperature")
 func testValidatedProfilesRejectsOutOfRange() {
-    let nCells = 100
-    let Ti = MLXArray.full([nCells], values: MLXArray(0.1))  // ❌ < 1 eV
-    let Te = MLXArray.full([nCells], values: MLXArray(1000.0))
-    let ne = MLXArray.full([nCells], values: MLXArray(2e19))
-    let psi = MLXArray.linspace(0.0, 1.0, count: nCells)
+    let cellCount = 100
+    let Ti = MLXArray.full([cellCount], values: MLXArray(0.1))  // ❌ < 1 eV
+    let Te = MLXArray.full([cellCount], values: MLXArray(1000.0))
+    let ne = MLXArray.full([cellCount], values: MLXArray(2e19))
+    let psi = MLXArray.linspace(0.0, 1.0, count: cellCount)
 
     let profiles = CoreProfiles(
         ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -1137,11 +1144,11 @@ func testValidatedProfilesRejectsOutOfRange() {
 ```swift
 @Test("IonElectronExchange handles Ti ≈ Te")
 func testIonElectronExchangeSmallDeltaT() throws {
-    let nCells = 10
-    let Ti = MLXArray.full([nCells], values: MLXArray(1000.0))
-    let Te = MLXArray.full([nCells], values: MLXArray(1000.1))  // ΔT = 0.1 eV
-    let ne = MLXArray.full([nCells], values: MLXArray(2e19))
-    let psi = MLXArray.linspace(0.0, 1.0, count: nCells)
+    let cellCount = 10
+    let Ti = MLXArray.full([cellCount], values: MLXArray(1000.0))
+    let Te = MLXArray.full([cellCount], values: MLXArray(1000.1))  // ΔT = 0.1 eV
+    let ne = MLXArray.full([cellCount], values: MLXArray(2e19))
+    let psi = MLXArray.linspace(0.0, 1.0, count: cellCount)
 
     let profiles = CoreProfiles(
         ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -1150,14 +1157,14 @@ func testIonElectronExchangeSmallDeltaT() throws {
         poloidalFlux: EvaluatedArray(evaluating: psi)
     )
 
-    let geometry = try createTestGeometry(nCells: nCells)
+    let geometry = try createTestGeometry(cellCount: cellCount)
     let exchange = IonElectronExchange()
 
     let emptySource = SourceTerms(
-        ionHeating: MLXArray.zeros([nCells]),
-        electronHeating: MLXArray.zeros([nCells]),
-        particleSource: MLXArray.zeros([nCells]),
-        currentSource: MLXArray.zeros([nCells]),
+        ionHeating: MLXArray.zeros([cellCount]),
+        electronHeating: MLXArray.zeros([cellCount]),
+        particleSource: MLXArray.zeros([cellCount]),
+        currentSource: MLXArray.zeros([cellCount]),
         metadata: [:]
     )
 
@@ -1171,11 +1178,11 @@ func testIonElectronExchangeSmallDeltaT() throws {
 
 @Test("IonElectronExchange with invalid profiles returns fallback")
 func testIonElectronExchangeInvalidInput() throws {
-    let nCells = 10
-    let Ti = MLXArray.full([nCells], values: MLXArray(Float.nan))  // ❌ Invalid
-    let Te = MLXArray.full([nCells], values: MLXArray(1000.0))
-    let ne = MLXArray.full([nCells], values: MLXArray(2e19))
-    let psi = MLXArray.linspace(0.0, 1.0, count: nCells)
+    let cellCount = 10
+    let Ti = MLXArray.full([cellCount], values: MLXArray(Float.nan))  // ❌ Invalid
+    let Te = MLXArray.full([cellCount], values: MLXArray(1000.0))
+    let ne = MLXArray.full([cellCount], values: MLXArray(2e19))
+    let psi = MLXArray.linspace(0.0, 1.0, count: cellCount)
 
     let profiles = CoreProfiles(
         ionTemperature: EvaluatedArray(evaluating: Ti),
@@ -1184,14 +1191,14 @@ func testIonElectronExchangeInvalidInput() throws {
         poloidalFlux: EvaluatedArray(evaluating: psi)
     )
 
-    let geometry = try createTestGeometry(nCells: nCells)
+    let geometry = try createTestGeometry(cellCount: cellCount)
     let exchange = IonElectronExchange()
 
     let emptySource = SourceTerms(
-        ionHeating: MLXArray.zeros([nCells]),
-        electronHeating: MLXArray.zeros([nCells]),
-        particleSource: MLXArray.zeros([nCells]),
-        currentSource: MLXArray.zeros([nCells]),
+        ionHeating: MLXArray.zeros([cellCount]),
+        electronHeating: MLXArray.zeros([cellCount]),
+        particleSource: MLXArray.zeros([cellCount]),
+        currentSource: MLXArray.zeros([cellCount]),
         metadata: [:]
     )
 
@@ -1207,21 +1214,21 @@ func testIonElectronExchangeInvalidInput() throws {
 ```swift
 @Test("Line search projects negative temperatures")
 func testLineSearchProjection() {
-    let nCells = 10
+    let cellCount = 10
     let solver = NewtonRaphsonSolver()
 
     // Create state with valid values
-    let Ti = MLXArray.full([nCells], values: MLXArray(1000.0))
-    let Te = MLXArray.full([nCells], values: MLXArray(1000.0))
-    let ne = MLXArray.full([nCells], values: MLXArray(2e19))
-    let psi = MLXArray.linspace(0.0, 1.0, count: nCells)
+    let Ti = MLXArray.full([cellCount], values: MLXArray(1000.0))
+    let Te = MLXArray.full([cellCount], values: MLXArray(1000.0))
+    let ne = MLXArray.full([cellCount], values: MLXArray(2e19))
+    let psi = MLXArray.linspace(0.0, 1.0, count: cellCount)
     let x = concatenate([Ti, Te, ne, psi], axis: 0)
 
     // Create delta that would produce negative temperatures
-    let delta_Ti = MLXArray.full([nCells], values: MLXArray(-2000.0))  // Would give Ti = -1000
-    let delta_Te = MLXArray.full([nCells], values: MLXArray(-500.0))
-    let delta_ne = MLXArray.zeros([nCells])
-    let delta_psi = MLXArray.zeros([nCells])
+    let delta_Ti = MLXArray.full([cellCount], values: MLXArray(-2000.0))  // Would give Ti = -1000
+    let delta_Te = MLXArray.full([cellCount], values: MLXArray(-500.0))
+    let delta_ne = MLXArray.zeros([cellCount])
+    let delta_psi = MLXArray.zeros([cellCount])
     let delta = concatenate([delta_Ti, delta_Te, delta_ne, delta_psi], axis: 0)
 
     // Mock residual function (returns norm of x)
@@ -1236,15 +1243,15 @@ func testLineSearchProjection() {
         x: x,
         delta: delta,
         residual: residual,
-        nCells: nCells
+        cellCount: cellCount
     )
 
     let xTrial = x + alpha * delta
-    let xTrialProjected = solver.projectOntoFeasibleRegion(xTrial, nCells: nCells)
+    let xTrialProjected = solver.projectOntoFeasibleRegion(xTrial, cellCount: cellCount)
 
     // Check projection enforced minimum temperature
-    let Ti_trial = xTrialProjected![0..<nCells]
-    let Te_trial = xTrialProjected![(nCells)..<(2*nCells)]
+    let Ti_trial = xTrialProjected![0..<cellCount]
+    let Te_trial = xTrialProjected![(cellCount)..<(2*cellCount)]
 
     #expect(Ti_trial.min().item() >= 1.0)  // T_min = 1 eV
     #expect(Te_trial.min().item() >= 1.0)
@@ -1297,7 +1304,7 @@ func testSimulationWithValidInitialConditions() async throws {
         time: TimeConfiguration(
             start: 0.0,
             end: 0.01,  // Short simulation
-            initialDt: 1e-4
+            initialTimeStep: 1e-4
         ),
         output: ...
     )
@@ -1347,8 +1354,8 @@ Sprint 3 (Optimization) ← Optional
 ```swift
 // Checks only: isfinite() && T > 0
 public struct ValidatedProfiles {
-    public static func validateMinimal(_ profiles: CoreProfiles) -> ValidatedProfiles? {
-        // Critical checks only (no bounds, no shapes)
+    public static func validate(_ profiles: CoreProfiles) throws -> ValidatedProfiles {
+        // Critical shape, finite, and positivity checks.
         guard isfinite(Ti).all().item(), Ti.min().item() > 0,
               isfinite(Te).all().item(), Te.min().item() > 0 else {
             return nil
@@ -1365,7 +1372,7 @@ public struct ValidatedProfiles {
 | Task | File | Effort | Priority | Blocker |
 |------|------|--------|----------|---------|
 | Add Te fallback (Te = Ti if missing) | `Sources/GotenxCore/Orchestration/SimulationRunner.swift:225-281` | 1h | P1 | Phase 0 |
-| Add validateMinimal() check | Same | 1h | P1 | Phase 0 |
+| Add `ValidatedProfiles.validate(_:)` check | Same | 1h | P1 | Phase 0 |
 | Integration test (missing Te) | `Tests/GotenxTests/Integration/` | 1h | P1 | Phase 1a |
 
 **Critical Decision**: Auto-fallback Te = Ti (physically sound) instead of throwing error.

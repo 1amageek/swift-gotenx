@@ -114,7 +114,7 @@ public struct ConservationDiagnostics {
     ///
     /// - Parameter results: Conservation results
     /// - Returns: Maximum relative drift
-    public static func maxDrift(results: [ConservationResult]) -> Float {
+    public static func maximumDrift(results: [ConservationResult]) -> Float {
         return results.map { $0.relativeDrift }.max() ?? 0.0
     }
 

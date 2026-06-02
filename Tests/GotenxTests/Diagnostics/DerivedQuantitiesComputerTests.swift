@@ -15,33 +15,79 @@ struct DerivedQuantitiesComputerTests {
     ///
     /// Uses the production `createGeometry(from:)` helper to ensure consistency
     /// with the implementation. This guarantees:
-    /// - g0/g1/g2/g3: [nCells + 1] elements (face-centered)
-    /// - radii, safetyFactor: [nCells] elements (cell-centered)
+    /// - fluxSurfaceMetric/majorRadiusMetric/shapeMetric/minorRadiusMetric: [cellCount + 1] elements (face-centered)
+    /// - radii, safetyFactor: [cellCount] elements (cell-centered)
     private func createTestGeometry() -> Geometry {
         let mesh = MeshConfig(
-            nCells: 10,
+            cellCount: 10,
             majorRadius: 6.2,   // [m]
             minorRadius: 2.0,   // [m]
             toroidalField: 5.3, // [T]
             geometryType: .circular
         )
 
-        return createGeometry(from: mesh, q0: 1.0, qEdge: 3.5)
+        return createGeometry(from: mesh, axisSafetyFactor: 1.0, edgeSafetyFactor: 3.5)
     }
 
     /// Create simple test profiles (flat profiles for easy validation)
-    private func createFlatProfiles(nCells: Int, Ti: Float, Te: Float, ne: Float) -> CoreProfiles {
-        let Ti_array = [Float](repeating: Ti, count: nCells)
-        let Te_array = [Float](repeating: Te, count: nCells)
-        let ne_array = [Float](repeating: ne, count: nCells)
-        let psi_array = [Float](repeating: 0.0, count: nCells)
+    private func createFlatProfiles(cellCount: Int, ionTemperature: Float, electronTemperature: Float, electronDensity: Float) -> CoreProfiles {
+        let ionTemperatureArray = [Float](repeating: ionTemperature, count: cellCount)
+        let electronTemperatureArray = [Float](repeating: electronTemperature, count: cellCount)
+        let electronDensityArray = [Float](repeating: electronDensity, count: cellCount)
+        let poloidalFluxArray = [Float](repeating: 0.0, count: cellCount)
 
         return CoreProfiles(
-            ionTemperature: EvaluatedArray(evaluating: MLXArray(Ti_array)),
-            electronTemperature: EvaluatedArray(evaluating: MLXArray(Te_array)),
-            electronDensity: EvaluatedArray(evaluating: MLXArray(ne_array)),
-            poloidalFlux: EvaluatedArray(evaluating: MLXArray(psi_array))
+            ionTemperature: EvaluatedArray(evaluating: MLXArray(ionTemperatureArray)),
+            electronTemperature: EvaluatedArray(evaluating: MLXArray(electronTemperatureArray)),
+            electronDensity: EvaluatedArray(evaluating: MLXArray(electronDensityArray)),
+            poloidalFlux: EvaluatedArray(evaluating: MLXArray(poloidalFluxArray))
         )
+    }
+
+    private func createSourceTerms(
+        cellCount: Int,
+        ionHeating: Float = 1.0,
+        electronHeating: Float = 1.0,
+        metadata: SourceMetadataCollection
+    ) -> SourceTerms {
+        SourceTerms(
+            ionHeating: EvaluatedArray(evaluating: MLXArray([Float](repeating: ionHeating, count: cellCount))),
+            electronHeating: EvaluatedArray(evaluating: MLXArray([Float](repeating: electronHeating, count: cellCount))),
+            particleSource: EvaluatedArray(evaluating: MLXArray([Float](repeating: 0, count: cellCount))),
+            currentSource: EvaluatedArray(evaluating: MLXArray([Float](repeating: 0, count: cellCount))),
+            metadata: metadata
+        )
+    }
+
+    private func createPowerAccountingMetadata() -> SourceMetadataCollection {
+        SourceMetadataCollection(entries: [
+            SourceMetadata(
+                modelName: "accounting_fusion",
+                category: .fusion,
+                ionPower: 3e6,
+                electronPower: 7e6,
+                alphaPower: 2e6
+            ),
+            SourceMetadata(
+                modelName: "accounting_auxiliary",
+                category: .auxiliary,
+                ionPower: 5e6,
+                electronPower: 15e6
+            ),
+            SourceMetadata(
+                modelName: "accounting_ohmic",
+                category: .ohmic,
+                ionPower: 1e6,
+                electronPower: 2e6
+            ),
+            SourceMetadata(
+                modelName: "accounting_radiation",
+                category: .radiation,
+                ionPower: 0,
+                electronPower: -4e6,
+                radiationPower: -4e6
+            )
+        ])
     }
 
     // MARK: - Central Values Tests
@@ -51,11 +97,11 @@ struct DerivedQuantitiesComputerTests {
         let geometry = createTestGeometry()
 
         // Create profiles with known central values
-        let Ti_core: Float = 10000  // 10 keV = 10,000 eV
-        let Te_core: Float = 8000   // 8 keV = 8,000 eV
-        let ne_core: Float = 1e20   // 10^20 m^-3
+        let coreIonTemperature: Float = 10000  // 10 keV = 10,000 eV
+        let coreElectronTemperature: Float = 8000   // 8 keV = 8,000 eV
+        let coreElectronDensity: Float = 1e20   // 10^20 m^-3
 
-        let profiles = createFlatProfiles(nCells: 10, Ti: Ti_core, Te: Te_core, ne: ne_core)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: coreIonTemperature, electronTemperature: coreElectronTemperature, electronDensity: coreElectronDensity)
 
         // Compute derived quantities
         let derived = DerivedQuantitiesComputer.compute(
@@ -64,9 +110,9 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // Check central values
-        #expect(abs(derived.Ti_core - Ti_core) < 1e-3)
-        #expect(abs(derived.Te_core - Te_core) < 1e-3)
-        #expect(abs(derived.ne_core - ne_core) / ne_core < 1e-6)
+        #expect(abs(derived.coreIonTemperature - coreIonTemperature) < 1e-3)
+        #expect(abs(derived.coreElectronTemperature - coreElectronTemperature) < 1e-3)
+        #expect(abs(derived.coreElectronDensity - coreElectronDensity) / coreElectronDensity < 1e-6)
     }
 
     // MARK: - Volume Averages Tests
@@ -76,11 +122,11 @@ struct DerivedQuantitiesComputerTests {
         let geometry = createTestGeometry()
 
         // Flat profiles → averages should equal central values
-        let Ti: Float = 5000
-        let Te: Float = 4000
-        let ne: Float = 5e19
+        let ionTemperature: Float = 5000
+        let electronTemperature: Float = 4000
+        let electronDensity: Float = 5e19
 
-        let profiles = createFlatProfiles(nCells: 10, Ti: Ti, Te: Te, ne: ne)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: ionTemperature, electronTemperature: electronTemperature, electronDensity: electronDensity)
 
         let derived = DerivedQuantitiesComputer.compute(
             profiles: profiles,
@@ -88,9 +134,9 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // For flat profiles, average = central = constant
-        #expect(abs(derived.Ti_avg - Ti) < 1e-3)
-        #expect(abs(derived.Te_avg - Te) < 1e-3)
-        #expect(abs(derived.ne_avg - ne) / ne < 1e-6)
+        #expect(abs(derived.averageIonTemperature - ionTemperature) < 1e-3)
+        #expect(abs(derived.averageElectronTemperature - electronTemperature) < 1e-3)
+        #expect(abs(derived.averageElectronDensity - electronDensity) / electronDensity < 1e-6)
     }
 
     // MARK: - Total Energy Tests
@@ -100,11 +146,11 @@ struct DerivedQuantitiesComputerTests {
         let geometry = createTestGeometry()
 
         // Simple case: flat profiles
-        let Ti: Float = 10000  // 10 keV
-        let Te: Float = 10000  // 10 keV
-        let ne: Float = 1e20   // 10^20 m^-3
+        let ionTemperature: Float = 10000  // 10 keV
+        let electronTemperature: Float = 10000  // 10 keV
+        let electronDensity: Float = 1e20   // 10^20 m^-3
 
-        let profiles = createFlatProfiles(nCells: 10, Ti: Ti, Te: Te, ne: ne)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: ionTemperature, electronTemperature: electronTemperature, electronDensity: electronDensity)
 
         let derived = DerivedQuantitiesComputer.compute(
             profiles: profiles,
@@ -112,16 +158,16 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // Check that energies are non-zero and physical
-        #expect(derived.W_thermal > 0)
-        #expect(derived.W_ion > 0)
-        #expect(derived.W_electron > 0)
+        #expect(derived.thermalEnergy > 0)
+        #expect(derived.ionThermalEnergy > 0)
+        #expect(derived.electronThermalEnergy > 0)
 
-        // For Ti = Te, W_ion ≈ W_electron
-        let relative_diff = abs(derived.W_ion - derived.W_electron) / derived.W_ion
+        // For Ti = Te, ionThermalEnergy ≈ electronThermalEnergy
+        let relative_diff = abs(derived.ionThermalEnergy - derived.electronThermalEnergy) / derived.ionThermalEnergy
         #expect(relative_diff < 0.01)  // Within 1%
 
-        // W_thermal = W_ion + W_electron
-        let sum_diff = abs(derived.W_thermal - (derived.W_ion + derived.W_electron))
+        // thermalEnergy = ionThermalEnergy + electronThermalEnergy
+        let sum_diff = abs(derived.thermalEnergy - (derived.ionThermalEnergy + derived.electronThermalEnergy))
         #expect(sum_diff < 1e-6)  // Numerical precision
     }
 
@@ -130,11 +176,11 @@ struct DerivedQuantitiesComputerTests {
     @Test("Advanced metrics computation with source terms")
     func testAdvancedMetricsWithSources() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
 
         // Create mock source terms with heating power and metadata
-        let nCells = 10
-        let heatingProfile = [Float](repeating: 1.0, count: nCells)  // 1 MW/m³
+        let cellCount = 10
+        let heatingProfile = [Float](repeating: 1.0, count: cellCount)  // 1 MW/m³
 
         // Phase 4a: Create metadata for accurate power balance
         let auxiliaryMetadata = SourceMetadata(
@@ -148,8 +194,8 @@ struct DerivedQuantitiesComputerTests {
         let sources = SourceTerms(
             ionHeating: EvaluatedArray(evaluating: MLXArray(heatingProfile)),
             electronHeating: EvaluatedArray(evaluating: MLXArray(heatingProfile)),
-            particleSource: EvaluatedArray(evaluating: MLXArray([Float](repeating: 0, count: nCells))),
-            currentSource: EvaluatedArray(evaluating: MLXArray([Float](repeating: 0, count: nCells))),
+            particleSource: EvaluatedArray(evaluating: MLXArray([Float](repeating: 0, count: cellCount))),
+            currentSource: EvaluatedArray(evaluating: MLXArray([Float](repeating: 0, count: cellCount))),
             metadata: metadata
         )
 
@@ -161,19 +207,19 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // Phase 3: Advanced metrics should be non-zero when sources are provided
-        #expect(derived.P_fusion >= 0)      // Can be zero if no fusion sources
-        #expect(derived.P_auxiliary >= 0)   // Auxiliary heating
-        #expect(derived.P_ohmic >= 0)       // Ohmic heating
-        #expect(derived.tau_E > 0)          // Energy confinement time
-        #expect(derived.H_factor >= 0)      // H-factor (can be zero if P_loss is small)
-        #expect(derived.beta_N > 0)         // Normalized beta
-        #expect(derived.I_plasma > 0)       // Plasma current (estimated)
+        #expect(derived.fusionPower >= 0)      // Can be zero if no fusion sources
+        #expect(derived.auxiliaryPower >= 0)   // Auxiliary heating
+        #expect(derived.ohmicPower >= 0)       // Ohmic heating
+        #expect(derived.energyConfinementTime > 0)          // Energy confinement time
+        #expect(derived.confinementHFactor >= 0)      // H-factor (can be zero if P_loss is small)
+        #expect(derived.normalizedBeta > 0)         // Normalized beta
+        #expect(derived.plasmaCurrent > 0)       // Plasma current (estimated)
     }
 
     @Test("Energy confinement time calculation")
     func testEnergyConfinementTime() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
 
         // High heating power → lower τE
         let highHeating = [Float](repeating: 5.0, count: 10)  // 5 MW/m³
@@ -224,7 +270,7 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // τE = W / P_loss, so higher heating → lower τE
-        #expect(derivedLow.tau_E > derivedHigh.tau_E)
+        #expect(derivedLow.energyConfinementTime > derivedHigh.energyConfinementTime)
     }
 
     @Test("Normalized beta calculation")
@@ -232,37 +278,37 @@ struct DerivedQuantitiesComputerTests {
         let geometry = createTestGeometry()
 
         // High pressure (high Ti, Te, ne) → higher βN
-        let highPressure = createFlatProfiles(nCells: 10, Ti: 20000, Te: 20000, ne: 2e20)
+        let highPressure = createFlatProfiles(cellCount: 10, ionTemperature: 20000, electronTemperature: 20000, electronDensity: 2e20)
         let derivedHigh = DerivedQuantitiesComputer.compute(
             profiles: highPressure,
             geometry: geometry
         )
 
         // Low pressure → lower βN
-        let lowPressure = createFlatProfiles(nCells: 10, Ti: 5000, Te: 5000, ne: 5e19)
+        let lowPressure = createFlatProfiles(cellCount: 10, ionTemperature: 5000, electronTemperature: 5000, electronDensity: 5e19)
         let derivedLow = DerivedQuantitiesComputer.compute(
             profiles: lowPressure,
             geometry: geometry
         )
 
         // Higher pressure → higher βN
-        #expect(derivedHigh.beta_N > derivedLow.beta_N)
+        #expect(derivedHigh.normalizedBeta > derivedLow.normalizedBeta)
 
         // βN should be positive
-        #expect(derivedHigh.beta_N > 0)
-        #expect(derivedLow.beta_N > 0)
+        #expect(derivedHigh.normalizedBeta > 0)
+        #expect(derivedLow.normalizedBeta > 0)
 
         // βN should be below Troyon limit for stable plasma (typically < 2.8)
         // For test case with high pressure (Ti=Te=20 keV, ne=2e20) and small tokamak,
         // βN can be very high (>100) - this is physically correct but MHD-unstable
         // Relaxed limit for test: βN < 300
-        #expect(derivedHigh.beta_N < 300.0)
+        #expect(derivedHigh.normalizedBeta < 300.0)
     }
 
     @Test("Triple product calculation")
     func testTripleProduct() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
 
         let metadata = SourceMetadataCollection(entries: [
             SourceMetadata(
@@ -287,7 +333,7 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // Triple product n⟨T⟩τE should be positive
-        #expect(derived.n_T_tau > 0)
+        #expect(derived.tripleProduct > 0)
 
         // For fusion-relevant parameters:
         // n ~ 10^20 m^-3, T ~ 10 keV = 10^4 eV, τE ~ 0.1-1 s
@@ -297,14 +343,14 @@ struct DerivedQuantitiesComputerTests {
         // (Lawson criterion for D-T: ~3×10^21 keV s m^-3 = 3×10^24 eV s m^-3)
 
         // Expect reasonable order of magnitude (10^23 - 10^25 eV s m^-3)
-        #expect(derived.n_T_tau > 1e23)
-        #expect(derived.n_T_tau < 1e25)
+        #expect(derived.tripleProduct > 1e23)
+        #expect(derived.tripleProduct < 1e25)
     }
 
     @Test("Power balance consistency")
     func testPowerBalance() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
 
         let metadata = SourceMetadataCollection(entries: [
             SourceMetadata(
@@ -342,30 +388,146 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // Total heating should equal sum of components
-        let totalPower = derived.P_fusion + derived.P_auxiliary + derived.P_ohmic
+        let totalPower = derived.fusionPower + derived.auxiliaryPower + derived.ohmicPower
 
         // All power components should be non-negative
-        #expect(derived.P_fusion >= 0)
-        #expect(derived.P_alpha >= 0)
-        #expect(derived.P_auxiliary >= 0)
-        #expect(derived.P_ohmic >= 0)
+        #expect(derived.fusionPower >= 0)
+        #expect(derived.alphaPower >= 0)
+        #expect(derived.auxiliaryPower >= 0)
+        #expect(derived.ohmicPower >= 0)
 
         // Alpha power should be fraction of fusion power
-        if derived.P_fusion > 0 {
-            #expect(derived.P_alpha <= derived.P_fusion)
+        if derived.fusionPower > 0 {
+            #expect(derived.alphaPower <= derived.fusionPower)
         }
 
         // Total power should be positive
         #expect(totalPower > 0)
     }
 
+    @Test("Power balance preserves metadata units and signs")
+    func testPowerBalancePreservesMetadataUnitsAndSigns() throws {
+        let geometry = createTestGeometry()
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let metadata = createPowerAccountingMetadata()
+        let sources = createSourceTerms(cellCount: 10, metadata: metadata)
+
+        let balance = try PowerBalanceComputer.compute(
+            sources: sources,
+            profiles: profiles,
+            geometry: geometry
+        )
+
+        #expect(abs(balance.fusionPower - 10e6) < 1)
+        #expect(abs(balance.alphaPower - 2e6) < 1)
+        #expect(abs(balance.auxiliaryPower - 20e6) < 1)
+        #expect(abs(balance.ohmicPower - 3e6) < 1)
+        #expect(abs(balance.radiationPower + 4e6) < 1)
+        #expect(abs(balance.totalHeating - 33e6) < 1)
+        #expect(abs(balance.netPower - 29e6) < 1)
+    }
+
+    @Test("Power balance rejects missing source metadata")
+    func testPowerBalanceRejectsMissingSourceMetadata() {
+        let geometry = createTestGeometry()
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let sources = SourceTerms(
+            ionHeating: .zeros([10]),
+            electronHeating: .zeros([10]),
+            particleSource: .zeros([10]),
+            currentSource: .zeros([10]),
+            metadata: nil
+        )
+
+        #expect(throws: PowerBalanceError.self) {
+            _ = try PowerBalanceComputer.compute(
+                sources: sources,
+                profiles: profiles,
+                geometry: geometry
+            )
+        }
+    }
+
+    @Test("Power balance rejects non-finite source metadata")
+    func testPowerBalanceRejectsNonFiniteSourceMetadata() {
+        let geometry = createTestGeometry()
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let metadata = SourceMetadataCollection(entries: [
+            SourceMetadata(
+                modelName: "invalid_auxiliary",
+                category: .auxiliary,
+                ionPower: .nan,
+                electronPower: 1e6
+            )
+        ])
+        let sources = createSourceTerms(cellCount: 10, metadata: metadata)
+
+        #expect(throws: SourceMetadataValidationError.self) {
+            _ = try PowerBalanceComputer.compute(
+                sources: sources,
+                profiles: profiles,
+                geometry: geometry
+            )
+        }
+    }
+
+    @Test("Power balance rejects positive radiation metadata")
+    func testPowerBalanceRejectsPositiveRadiationMetadata() {
+        let geometry = createTestGeometry()
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let metadata = SourceMetadataCollection(entries: [
+            SourceMetadata(
+                modelName: "invalid_radiation",
+                category: .radiation,
+                ionPower: 0,
+                electronPower: 1e6
+            )
+        ])
+        let sources = createSourceTerms(cellCount: 10, metadata: metadata)
+
+        #expect(throws: SourceMetadataValidationError.self) {
+            _ = try PowerBalanceComputer.compute(
+                sources: sources,
+                profiles: profiles,
+                geometry: geometry
+            )
+        }
+    }
+
+    @Test("Derived energy diagnostics preserve MW and confinement-time accounting")
+    func testDerivedEnergyDiagnosticsPreservePowerUnitsAndTauEAccounting() {
+        let geometry = createTestGeometry()
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let metadata = createPowerAccountingMetadata()
+        let sources = createSourceTerms(cellCount: 10, metadata: metadata)
+
+        let derived = DerivedQuantitiesComputer.compute(
+            profiles: profiles,
+            geometry: geometry,
+            sources: sources
+        )
+
+        #expect(abs(derived.fusionPower - 10) < 1e-5)
+        #expect(abs(derived.alphaPower - 2) < 1e-5)
+        #expect(abs(derived.auxiliaryPower - 20) < 1e-5)
+        #expect(abs(derived.ohmicPower - 3) < 1e-5)
+
+        let heatingPowerMW: Float = 20 + 3 + 2
+        let expectedEnergyConfinementTime = derived.thermalEnergy / heatingPowerMW
+        let relativeTauError = abs(derived.energyConfinementTime - expectedEnergyConfinementTime) / expectedEnergyConfinementTime
+        #expect(relativeTauError < 1e-6)
+
+        let expectedFusionGain: Float = 10 / (20 + 3)
+        #expect(abs(derived.fusionGain - expectedFusionGain) < 1e-6)
+    }
+
     @Test("Fusion gain Q calculation")
     func testFusionGain() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 15000, Te: 15000, ne: 1.5e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 15000, electronTemperature: 15000, electronDensity: 1.5e20)
 
         // Create sources with significant fusion power
-        // Simulate ITER-like scenario: Q = 10 (P_fusion = 500 MW, P_input = 50 MW)
+        // Simulate ITER-like scenario: Q = 10 (fusionPower = 500 MW, P_input = 50 MW)
         let metadata = SourceMetadataCollection(entries: [
             SourceMetadata(
                 modelName: "test_fusion",
@@ -405,23 +567,23 @@ struct DerivedQuantitiesComputerTests {
         )
 
         // Expected values:
-        // P_fusion = 500 MW (200 + 300)
-        // P_auxiliary = 40 MW (20 + 20)
-        // P_ohmic = 10 MW (5 + 5)
+        // fusionPower = 500 MW (200 + 300)
+        // auxiliaryPower = 40 MW (20 + 20)
+        // ohmicPower = 10 MW (5 + 5)
         // Q = 500 / (40 + 10) = 10.0 (ITER target!)
 
-        #expect(abs(derived.P_fusion - 500.0) < 0.1)
-        #expect(abs(derived.P_auxiliary - 40.0) < 0.1)
-        #expect(abs(derived.P_ohmic - 10.0) < 0.1)
-        #expect(abs(derived.P_alpha - 100.0) < 0.1)
+        #expect(abs(derived.fusionPower - 500.0) < 0.1)
+        #expect(abs(derived.auxiliaryPower - 40.0) < 0.1)
+        #expect(abs(derived.ohmicPower - 10.0) < 0.1)
+        #expect(abs(derived.alphaPower - 100.0) < 0.1)
 
-        // Q_fusion should be exactly 10.0
+        // fusionGain should be exactly 10.0
         let expectedQ: Float = 500.0 / 50.0  // = 10.0
-        #expect(abs(derived.Q_fusion - expectedQ) < 0.01)
+        #expect(abs(derived.fusionGain - expectedQ) < 0.01)
 
         // Verify Q is in ITER target range
-        #expect(derived.Q_fusion >= 9.0)
-        #expect(derived.Q_fusion <= 11.0)
+        #expect(derived.fusionGain >= 9.0)
+        #expect(derived.fusionGain <= 11.0)
     }
 
     @Test("Fusion gain edge cases")
@@ -429,16 +591,16 @@ struct DerivedQuantitiesComputerTests {
         let geometry = createTestGeometry()
 
         // Case 1: No sources → Q = 0
-        let profilesNoHeating = createFlatProfiles(nCells: 10, Ti: 1000, Te: 1000, ne: 1e19)
+        let profilesNoHeating = createFlatProfiles(cellCount: 10, ionTemperature: 1000, electronTemperature: 1000, electronDensity: 1e19)
         let derivedNoHeating = DerivedQuantitiesComputer.compute(
             profiles: profilesNoHeating,
             geometry: geometry,
             sources: nil
         )
-        #expect(derivedNoHeating.Q_fusion == 0)
+        #expect(derivedNoHeating.fusionGain == 0)
 
         // Case 2: Very low heating with metadata
-        let profilesLowHeating = createFlatProfiles(nCells: 10, Ti: 5000, Te: 5000, ne: 5e19)
+        let profilesLowHeating = createFlatProfiles(cellCount: 10, ionTemperature: 5000, electronTemperature: 5000, electronDensity: 5e19)
         let metadataLow = SourceMetadataCollection(entries: [
             SourceMetadata(
                 modelName: "test_low_power",
@@ -461,7 +623,7 @@ struct DerivedQuantitiesComputerTests {
             sources: sourcesLow
         )
         // No fusion power → Q = 0
-        #expect(derivedLow.Q_fusion == 0)
+        #expect(derivedLow.fusionGain == 0)
 
         // Case 3: Only fusion power, no external heating → Q → ∞ (clamped to 100)
         let metadataFusionOnly = SourceMetadataCollection(entries: [
@@ -486,7 +648,7 @@ struct DerivedQuantitiesComputerTests {
             sources: sourcesFusionOnly
         )
         // No external heating → Q = 0 (by definition)
-        #expect(derivedFusionOnly.Q_fusion == 0)
+        #expect(derivedFusionOnly.fusionGain == 0)
     }
 
     // MARK: - Metadata Validation Tests (CRITICAL)
@@ -494,7 +656,7 @@ struct DerivedQuantitiesComputerTests {
     @Test("Power balance requires metadata - should fail gracefully with nil metadata")
     func testPowerBalanceRequiresMetadata() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
         
         // Create sources WITHOUT metadata (nil)
         let sourcesNoMetadata = SourceTerms(
@@ -517,7 +679,7 @@ struct DerivedQuantitiesComputerTests {
     @Test("Power balance with valid metadata succeeds")
     func testPowerBalanceWithValidMetadata() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
         
         // Create sources WITH valid metadata
         let metadata = SourceMetadataCollection(entries: [
@@ -552,14 +714,14 @@ struct DerivedQuantitiesComputerTests {
         
         // Verify power balance computation used metadata
         // Note: DerivedQuantities returns power in MW, metadata is in W
-        #expect(derived.P_ohmic == 10.0, "Ohmic power should be 10 MW")
-        #expect(derived.P_fusion == 10.0, "Fusion power should be 10 MW (5+5)")
+        #expect(derived.ohmicPower == 10.0, "Ohmic power should be 10 MW")
+        #expect(derived.fusionPower == 10.0, "Fusion power should be 10 MW (5+5)")
     }
     
     @Test("Empty metadata collection is valid")
     func testEmptyMetadataCollectionIsValid() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
         
         // Create sources with EMPTY metadata (not nil)
         let sourcesEmptyMetadata = SourceTerms(
@@ -578,16 +740,16 @@ struct DerivedQuantitiesComputerTests {
         )
         
         // All powers should be zero
-        #expect(derived.P_ohmic == 0)
-        #expect(derived.P_fusion == 0)
-        #expect(derived.P_auxiliary == 0)
+        #expect(derived.ohmicPower == 0)
+        #expect(derived.fusionPower == 0)
+        #expect(derived.auxiliaryPower == 0)
         // P_radiation is not currently implemented in DerivedQuantities
     }
     
     @Test("Metadata categories are correctly summed")
     func testMetadataCategoriesCorrectlySummed() {
         let geometry = createTestGeometry()
-        let profiles = createFlatProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createFlatProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
         
         // Create metadata with multiple sources in same category
         let metadata = SourceMetadataCollection(entries: [
@@ -613,7 +775,7 @@ struct DerivedQuantitiesComputerTests {
         
         // Auxiliary: ECRH (20) + ICRH (20) = 40 MW
         // Note: DerivedQuantities returns power in MW, metadata is in W
-        #expect(derived.P_auxiliary == 40.0, "Auxiliary power should be 40 MW")
+        #expect(derived.auxiliaryPower == 40.0, "Auxiliary power should be 40 MW")
 
         // Radiation: Brems (-3) + Line (-2) = -5 MW (loss)
         // P_radiation is not currently implemented in DerivedQuantities

@@ -13,10 +13,10 @@ public struct BohmGyroBohmTransportModel: TransportModel {
     public let name = "bohm-gyrobohm"
 
     /// Bohm coefficient
-    public let bohmCoeff: Float
+    public let bohmCoefficient: Float
 
     /// GyroBohm coefficient
-    public let gyroBhohmCoeff: Float
+    public let gyroBohmCoefficient: Float
 
     /// Ion mass number (1=H, 2=D, 3=T)
     ///
@@ -25,16 +25,17 @@ public struct BohmGyroBohmTransportModel: TransportModel {
 
     // MARK: - Initialization
 
-    public init(bohmCoeff: Float = 1.0, gyroBhohmCoeff: Float = 1.0, ionMassNumber: Float = 2.0) {
-        self.bohmCoeff = bohmCoeff
-        self.gyroBhohmCoeff = gyroBhohmCoeff
+    public init(bohmCoefficient: Float = 1.0, gyroBohmCoefficient: Float = 1.0, ionMassNumber: Float = 2.0) {
+        self.bohmCoefficient = bohmCoefficient
+        self.gyroBohmCoefficient = gyroBohmCoefficient
         self.ionMassNumber = ionMassNumber
     }
 
-    public init(params: TransportParameters) {
-        self.bohmCoeff = params.params["bohm_coeff"] ?? 1.0
-        self.gyroBhohmCoeff = params.params["gyrobohm_coeff"] ?? 1.0
-        self.ionMassNumber = params.params["ion_mass_number"] ?? 2.0
+    public init(parameters: TransportParameters) throws {
+        try parameters.validateParameterKeys(for: .bohmGyrobohm)
+        self.bohmCoefficient = parameters.parameters["bohmCoefficient"] ?? 1.0
+        self.gyroBohmCoefficient = parameters.parameters["gyroBohmCoefficient"] ?? 1.0
+        self.ionMassNumber = parameters.parameters["ionMassNumber"] ?? 2.0
     }
 
     // MARK: - TransportModel Protocol
@@ -42,9 +43,9 @@ public struct BohmGyroBohmTransportModel: TransportModel {
     public func computeCoefficients(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: TransportParameters
+        parameters: TransportParameters
     ) -> TransportCoefficients {
-        let nCells = profiles.ionTemperature.shape[0]
+        let cellCount = profiles.ionTemperature.shape[0]
 
         // Extract temperature profiles
         let te = profiles.electronTemperature.value
@@ -89,18 +90,22 @@ public struct BohmGyroBohmTransportModel: TransportModel {
         let chiGyroBohm_safe = clip(chiGyroBohm, min: MLXArray(Float(1e-6)), max: MLXArray(Float(100.0)))
 
         // Combined diffusivity
-        let chiElectron = MLXArray(Float(bohmCoeff)) * chiBohmElectron_safe + MLXArray(Float(gyroBhohmCoeff)) * chiGyroBohm_safe
+        let electronHeatDiffusivity = MLXArray(Float(bohmCoefficient)) * chiBohmElectron_safe + MLXArray(Float(gyroBohmCoefficient)) * chiGyroBohm_safe
 
         // Final safety clip
-        let chiElectron_safe = clip(chiElectron, min: MLXArray(Float(1e-6)), max: MLXArray(Float(100.0)))
+        let clampedElectronHeatDiffusivity = clip(
+            electronHeatDiffusivity,
+            min: MLXArray(Float(1e-6)),
+            max: MLXArray(Float(100.0))
+        )
 
-        let chiIon = chiElectron_safe  // Assume same for ions
+        let ionHeatDiffusivity = clampedElectronHeatDiffusivity  // Assume same for ions
 
         return TransportCoefficients(
-            evaluatingChiIon: chiIon,
-            chiElectron: chiElectron_safe,
-            particleDiffusivity: chiElectron_safe * MLXArray(Float(0.5)),  // D = 0.5 * χ
-            convectionVelocity: MLXArray.zeros([nCells])
+            ionHeatDiffusivity: ionHeatDiffusivity,
+            electronHeatDiffusivity: clampedElectronHeatDiffusivity,
+            particleDiffusivity: clampedElectronHeatDiffusivity * MLXArray(Float(0.5)),  // D = 0.5 * χ
+            convectionVelocity: MLXArray.zeros([cellCount])
         )
     }
 }

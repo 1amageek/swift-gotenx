@@ -26,15 +26,15 @@ public struct SourceModelFactory {
         if config.fusionPower {
             if let fusionConfig = config.fusionConfig {
                 // Create with specific fuel parameters
-                let params = SourceParameters(
+                let parameters = SourceParameters(
                     modelType: "fusion",
-                    params: [
+                    parameters: [
                         "deuteriumFraction": fusionConfig.deuteriumFraction,
                         "tritiumFraction": fusionConfig.tritiumFraction,
                         "dilution": fusionConfig.dilution
                     ]
                 )
-                sources["fusion"] = FusionPowerSource(params: params)
+                sources["fusion"] = try FusionPowerSource(parameters: parameters)
             } else {
                 // Use defaults
                 sources["fusion"] = FusionPowerSource()
@@ -53,30 +53,30 @@ public struct SourceModelFactory {
 
         // Add ECRH if enabled
         if let ecrhConfig = config.ecrh {
-            let params = SourceParameters(
+            let parameters = SourceParameters(
                 modelType: "ecrh",
-                params: [
+                parameters: [
                     "total_power": ecrhConfig.totalPower,
-                    "deposition_rho": ecrhConfig.depositionRho,
+                    "deposition_rho": ecrhConfig.normalizedDepositionRadius,
                     "deposition_width": ecrhConfig.depositionWidth,
                     "launch_angle": ecrhConfig.launchAngle ?? 0.0,
                     "frequency": ecrhConfig.frequency ?? 0.0,
                     "current_drive": ecrhConfig.currentDriveEnabled ? 1.0 : 0.0
                 ]
             )
-            sources["ecrh"] = try ECRHSource(params: params)
+            sources["ecrh"] = try ECRHSource(parameters: parameters)
         }
 
         // Add Gas Puff if enabled
         if let gasPuffConfig = config.gasPuff {
-            let params = SourceParameters(
+            let parameters = SourceParameters(
                 modelType: "gasPuff",
-                params: [
+                parameters: [
                     "puff_rate": gasPuffConfig.puffRate,
                     "penetration_depth": gasPuffConfig.penetrationDepth
                 ]
             )
-            sources["gasPuff"] = try GasPuffSource(params: params)
+            sources["gasPuff"] = try GasPuffSource(parameters: parameters)
         }
 
         // Add Impurity Radiation if enabled
@@ -91,14 +91,14 @@ public struct SourceModelFactory {
             default: atomicNumber = 18
             }
 
-            let params = SourceParameters(
+            let parameters = SourceParameters(
                 modelType: "impurityRadiation",
-                params: [
+                parameters: [
                     "impurity_fraction": impurityConfig.impurityFraction,
                     "atomic_number": atomicNumber
                 ]
             )
-            sources["impurityRadiation"] = try ImpurityRadiationSource(params: params)
+            sources["impurityRadiation"] = try ImpurityRadiationSource(parameters: parameters)
         }
 
         // Return composite model combining all sources
@@ -107,39 +107,39 @@ public struct SourceModelFactory {
 
     /// Create source models from a dictionary of source parameters
     ///
-    /// - Parameter sourceParams: Dictionary of source parameters by name
+    /// - Parameter sourceParameters: Dictionary of source parameters by name
     /// - Returns: Composite source model
     /// - Throws: ConfigurationError if source type is unknown
-    public static func create(from sourceParams: [String: SourceParameters]) throws -> any SourceModel {
+    public static func create(from sourceParameters: [String: SourceParameters]) throws -> any SourceModel {
         var sources: [String: any SourceModel] = [:]
 
-        for (name, params) in sourceParams {
-            switch params.modelType {
+        for (name, parameters) in sourceParameters {
+            switch parameters.modelType {
             case "ohmic":
                 sources[name] = OhmicHeatingSource()
 
             case "fusion":
-                sources[name] = FusionPowerSource(params: params)
+                sources[name] = try FusionPowerSource(parameters: parameters)
 
             case "ionElectronExchange":
-                sources[name] = IonElectronExchangeSource(params: params)
+                sources[name] = IonElectronExchangeSource(parameters: parameters)
 
             case "bremsstrahlung":
-                sources[name] = BremsstrahlungSource(params: params)
+                sources[name] = BremsstrahlungSource(parameters: parameters)
 
             case "ecrh":
-                sources[name] = try ECRHSource(params: params)
+                sources[name] = try ECRHSource(parameters: parameters)
 
             case "gasPuff":
-                sources[name] = try GasPuffSource(params: params)
+                sources[name] = try GasPuffSource(parameters: parameters)
 
             case "impurityRadiation":
-                sources[name] = try ImpurityRadiationSource(params: params)
+                sources[name] = try ImpurityRadiationSource(parameters: parameters)
 
             default:
                 throw ConfigurationError.invalidValue(
                     key: "source.modelType",
-                    value: params.modelType,
+                    value: parameters.modelType,
                     reason: "Unknown source model type. Valid types: ohmic, fusion, ionElectronExchange, bremsstrahlung, ecrh, gasPuff, impurityRadiation"
                 )
             }
@@ -152,17 +152,17 @@ public struct SourceModelFactory {
     ///
     /// - Parameters:
     ///   - name: Source model name
-    ///   - params: Optional source parameters
+    ///   - parameters: Optional source parameters
     /// - Returns: Source model instance
     /// - Throws: ConfigurationError if source name is unknown
-    public static func createSingle(name: String, params: SourceParameters? = nil) throws -> any SourceModel {
+    public static func createSingle(name: String, parameters: SourceParameters? = nil) throws -> any SourceModel {
         switch name {
         case "ohmic":
             return OhmicHeatingSource()
 
         case "fusion":
-            if let params = params {
-                return FusionPowerSource(params: params)
+            if let parameters = parameters {
+                return try FusionPowerSource(parameters: parameters)
             } else {
                 return FusionPowerSource()
             }
@@ -174,49 +174,49 @@ public struct SourceModelFactory {
             return BremsstrahlungSource()
 
         case "ecrh":
-            if let params = params {
-                return try ECRHSource(params: params)
+            if let parameters = parameters {
+                return try ECRHSource(parameters: parameters)
             } else {
                 // Use default ECRH configuration
                 let defaultParams = SourceParameters(
                     modelType: "ecrh",
-                    params: [
+                    parameters: [
                         "total_power": 20e6,
                         "deposition_rho": 0.5,
                         "deposition_width": 0.1
                     ]
                 )
-                return try ECRHSource(params: defaultParams)
+                return try ECRHSource(parameters: defaultParams)
             }
 
         case "gasPuff":
-            if let params = params {
-                return try GasPuffSource(params: params)
+            if let parameters = parameters {
+                return try GasPuffSource(parameters: parameters)
             } else {
                 // Use default Gas Puff configuration
                 let defaultParams = SourceParameters(
                     modelType: "gasPuff",
-                    params: [
+                    parameters: [
                         "puff_rate": 1e21,
                         "penetration_depth": 0.1
                     ]
                 )
-                return try GasPuffSource(params: defaultParams)
+                return try GasPuffSource(parameters: defaultParams)
             }
 
         case "impurityRadiation":
-            if let params = params {
-                return try ImpurityRadiationSource(params: params)
+            if let parameters = parameters {
+                return try ImpurityRadiationSource(parameters: parameters)
             } else {
                 // Use default Impurity Radiation configuration
                 let defaultParams = SourceParameters(
                     modelType: "impurityRadiation",
-                    params: [
+                    parameters: [
                         "impurity_fraction": 0.001,
                         "atomic_number": 18  // Argon
                     ]
                 )
-                return try ImpurityRadiationSource(params: defaultParams)
+                return try ImpurityRadiationSource(parameters: defaultParams)
             }
 
         default:

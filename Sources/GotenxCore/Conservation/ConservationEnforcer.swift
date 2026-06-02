@@ -50,8 +50,8 @@ import Foundation
 ///
 /// ## Performance
 ///
-/// - Particle conservation: O(nCells) → ~0.01% overhead
-/// - Energy conservation: O(nCells) → ~0.01% overhead
+/// - Particle conservation: O(cellCount) → ~0.01% overhead
+/// - Energy conservation: O(cellCount) → ~0.01% overhead
 /// - Runs every 1000 steps → total overhead < 0.1%
 public struct ConservationEnforcer: Sendable {
     /// Conservation laws to enforce

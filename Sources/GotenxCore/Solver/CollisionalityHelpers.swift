@@ -32,17 +32,17 @@ public struct CollisionalityHelpers {
     ///    ≈ 2.0e-4 s = 0.2 ms ✓ (correct order of magnitude)
     ///
     /// - Parameters:
-    ///   - Te: Electron temperature [eV], shape [nCells]
-    ///   - ne: Electron density [m⁻³], shape [nCells]
+    ///   - electronTemperature: Electron temperature [eV], shape [cellCount]
+    ///   - electronDensity: Electron density [m⁻³], shape [cellCount]
     ///   - coulombLog: Coulomb logarithm (default: 17.0)
-    /// - Returns: Collision time [s], shape [nCells]
+    /// - Returns: Collision time [s], shape [cellCount]
     public static func computeCollisionTime(
-        Te: MLXArray,
-        ne: MLXArray,
+        electronTemperature: MLXArray,
+        electronDensity: MLXArray,
         coulombLog: Float = 17.0
     ) -> MLXArray {
-        // Correct coefficient for Te[eV], ne[m⁻³] → τₑ[s]
-        return 3.44e11 * pow(Te, 1.5) / (ne * coulombLog)
+        // Correct coefficient for T_e[eV], n_e[m⁻³] → τₑ[s]
+        return 3.44e11 * pow(electronTemperature, 1.5) / (electronDensity * coulombLog)
     }
 
     /// Compute normalized collisionality ν*
@@ -55,27 +55,32 @@ public struct CollisionalityHelpers {
     /// - vₜₕ = √(2Tₑ/mₑ): thermal velocity
     ///
     /// - Parameters:
-    ///   - Te: Electron temperature [eV], shape [nCells]
-    ///   - ne: Electron density [m⁻³], shape [nCells]
+    ///   - electronTemperature: Electron temperature [eV], shape [cellCount]
+    ///   - electronDensity: Electron density [m⁻³], shape [cellCount]
     ///   - geometry: Tokamak geometry
-    /// - Returns: Normalized collisionality ν* [dimensionless], shape [nCells]
+    /// - Returns: Normalized collisionality ν* [dimensionless], shape [cellCount]
     public static func computeNormalizedCollisionality(
-        Te: MLXArray,
-        ne: MLXArray,
+        electronTemperature: MLXArray,
+        electronDensity: MLXArray,
         geometry: Geometry
     ) -> MLXArray {
-        let tau_e = computeCollisionTime(Te: Te, ne: ne)
+        let collisionTime = computeCollisionTime(
+            electronTemperature: electronTemperature,
+            electronDensity: electronDensity
+        )
 
         let epsilon = geometry.radii.value / geometry.majorRadius
         let q = approximateSafetyFactor(geometry: geometry)
 
         // Thermal velocity: vₜₕ = √(2Tₑ/mₑ)
         // With Tₑ in eV: vₜₕ = √(3.514e11 * Tₑ)  [m/s]
-        let vth = sqrt(3.514e11 * Te)
+        let thermalVelocity = sqrt(3.514e11 * electronTemperature)
 
-        let nu_star = (geometry.majorRadius * q) / (pow(epsilon, 1.5) * vth * tau_e)
+        let normalizedCollisionality = (geometry.majorRadius * q) / (
+            pow(epsilon, 1.5) * thermalVelocity * collisionTime
+        )
 
-        return nu_star
+        return normalizedCollisionality
     }
 
     /// Approximate safety factor q from geometry
@@ -83,7 +88,7 @@ public struct CollisionalityHelpers {
     /// Parabolic approximation: q ≈ 1 + (r/a)²
     ///
     /// - Parameter geometry: Tokamak geometry
-    /// - Returns: Safety factor [dimensionless], shape [nCells]
+    /// - Returns: Safety factor [dimensionless], shape [cellCount]
     private static func approximateSafetyFactor(geometry: Geometry) -> MLXArray {
         let r_norm = geometry.radii.value / geometry.minorRadius
         return 1.0 + r_norm * r_norm

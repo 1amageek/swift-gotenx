@@ -9,12 +9,12 @@ swift-Gotenx uses **swift-configuration** for hierarchical, type-safe configurat
 Configuration values are resolved in the following priority order (highest to lowest):
 
 1. **CLI Arguments** (highest priority)
-   - Passed via command-line flags like `--mesh-ncells 200`
-   - Mapped to hierarchical keys: `runtime.static.mesh.nCells`
+   - Passed via command-line flags like `--mesh-cell-count 200`
+   - Mapped to hierarchical keys: `runtime.static.mesh.cellCount`
 
 2. **Environment Variables**
-   - Prefixed with `GOTENX_` (e.g., `GOTENX_MESH_NCELLS=150`)
-   - Automatically converted by `EnvironmentVariablesProvider`
+   - Prefixed with `GOTENX_` and the full configuration path (e.g., `GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT=150`)
+   - Converted by `EnvironmentVariablesProvider().prefixKeys(with: "gotenx")`
 
 3. **JSON Configuration File**
    - Loaded via `JSONProvider` with `FilePath` type
@@ -57,6 +57,7 @@ public actor GotenxConfigReader {
         // Priority 2: Environment variables
         providers.append(
             EnvironmentVariablesProvider()
+                .prefixKeys(with: "gotenx")
         )
 
         // Priority 3 (lowest): JSON file
@@ -126,8 +127,8 @@ private func loadConfiguration(from path: String) async throws -> SimulationConf
     // Build CLI overrides map
     var cliOverrides: [String: String] = [:]
 
-    if let value = meshNcells {
-        cliOverrides["runtime.static.mesh.nCells"] = String(value)
+    if let value = meshCellCount {
+        cliOverrides["runtime.static.mesh.cellCount"] = String(value)
     }
     if let value = timeEnd {
         cliOverrides["time.end"] = String(value)
@@ -171,11 +172,11 @@ let reloadingProvider = try await ReloadingJSONProvider(
 
 | CLI Flag | Hierarchical Key | Type |
 |----------|------------------|------|
-| `--mesh-ncells` | `runtime.static.mesh.nCells` | Int |
+| `--mesh-cell-count` | `runtime.static.mesh.cellCount` | Int |
 | `--mesh-major-radius` | `runtime.static.mesh.majorRadius` | Double |
 | `--mesh-minor-radius` | `runtime.static.mesh.minorRadius` | Double |
 | `--time-end` | `time.end` | Double |
-| `--initial-dt` | `time.initialDt` | Double |
+| `--initial-time-step` | `time.initialTimeStep` | Double |
 | `--output-dir` | `output.directory` | String |
 | `--output-format` | `output.format` | Enum |
 
@@ -185,8 +186,8 @@ swift-configuration handles type conversion automatically:
 
 ```swift
 // String → Int
-let nCells = try await configReader.fetchInt(
-    forKey: "runtime.static.mesh.nCells",
+let cellCount = try await configReader.fetchInt(
+    forKey: "runtime.static.mesh.cellCount",
     default: 100
 )
 
@@ -216,7 +217,7 @@ let geometryType = try await configReader.fetchString(
   "runtime": {
     "static": {
       "mesh": {
-        "nCells": 100,
+        "cellCount": 100,
         "majorRadius": 6.2,
         "minorRadius": 2.0,
         "toroidalField": 5.3,
@@ -247,12 +248,12 @@ let geometryType = try await configReader.fetchString(
   "time": {
     "start": 0.0,
     "end": 2.0,
-    "initialDt": 0.001,
+    "initialTimeStep": 0.001,
     "adaptive": {
       "enabled": true,
       "safetyFactor": 0.9,
-      "minDt": 1e-6,
-      "maxDt": 0.1
+      "minimumTimeStep": 1e-6,
+      "maximumTimeStep": 0.1
     }
   },
   "output": {
@@ -267,16 +268,16 @@ let geometryType = try await configReader.fetchString(
 
 ```bash
 # Mesh configuration
-export GOTENX_MESH_NCELLS=150
-export GOTENX_MESH_MAJOR_RADIUS=6.5
-export GOTENX_MESH_MINOR_RADIUS=2.1
+export GOTENX_RUNTIME_STATIC_MESH_CELL_COUNT=150
+export GOTENX_RUNTIME_STATIC_MESH_MAJOR_RADIUS=6.5
+export GOTENX_RUNTIME_STATIC_MESH_MINOR_RADIUS=2.1
 
 # Time configuration
 export GOTENX_TIME_END=3.0
-export GOTENX_TIME_INITIAL_DT=0.0005
+export GOTENX_TIME_INITIAL_TIME_STEP=0.0005
 
 # Output configuration
-export GOTENX_OUTPUT_DIR=/scratch/gotenx_output
+export GOTENX_OUTPUT_DIRECTORY=/scratch/gotenx_output
 export GOTENX_OUTPUT_FORMAT=netcdf
 
 # Run with environment overrides
@@ -307,18 +308,18 @@ public func fetchConfiguration() async throws -> SimulationConfiguration {
 ```
 
 **Validation Rules**:
-- `nCells > 0`: Mesh must have positive cells
+- `cellCount > 0`: Mesh must have positive cells
 - `majorRadius > minorRadius`: Tokamak geometry constraint
 - `time.end > time.start`: Valid time range
-- `initialDt > 0`: Positive timestep
+- `initialTimeStep > 0`: Positive timestep
 - Aspect ratio: `1.0 < majorRadius/minorRadius < 10.0`
 
 ## Best Practices
 
 1. **Use Hierarchical Keys**: Always use dotted notation for nested config
    ```swift
-   "runtime.static.mesh.nCells"  // ✅ Correct
-   "mesh_ncells"                  // ❌ Wrong
+   "runtime.static.mesh.cellCount"
+   "mesh_cell_count"
    ```
 
 2. **Type Safety**: Let swift-configuration handle type conversion
@@ -329,8 +330,8 @@ public func fetchConfiguration() async throws -> SimulationConfiguration {
 
 3. **Defaults**: Always provide sensible defaults
    ```swift
-   try await configReader.fetchInt(forKey: "nCells", default: 100)  // ✅
-   try await configReader.fetchInt(forKey: "nCells")                 // ❌ Can throw
+   try await configReader.fetchInt(forKey: "cellCount", default: 100)
+   try await configReader.fetchInt(forKey: "cellCount")
    ```
 
 4. **Validation**: Validate after fetching, not during
@@ -351,7 +352,7 @@ public func fetchConfiguration() async throws -> SimulationConfiguration {
 ❌ **DON'T**: Add providers in reverse priority order (lowest first)
 ```swift
 providers.append(JSONProvider(...))          // JSON (lowest)
-providers.append(EnvironmentVariablesProvider())  // Env
+providers.append(EnvironmentVariablesProvider().prefixKeys(with: "gotenx"))  // Env
 providers.append(InMemoryProvider(...))      // CLI (highest)
 // ❌ WRONG - ConfigReader uses FIRST-MATCH priority!
 ```
@@ -359,7 +360,7 @@ providers.append(InMemoryProvider(...))      // CLI (highest)
 ✅ **DO**: Add providers in priority order (highest first)
 ```swift
 providers.append(InMemoryProvider(...))      // CLI (highest)
-providers.append(EnvironmentVariablesProvider())  // Env
+providers.append(EnvironmentVariablesProvider().prefixKeys(with: "gotenx"))  // Env
 providers.append(JSONProvider(...))          // JSON (lowest)
 // ✅ CORRECT - First provider has highest priority
 ```

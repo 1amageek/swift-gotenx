@@ -254,9 +254,9 @@ public struct ProfileComparator {
         // Note: Correlation can be NaN due to Float32 precision limits with large values (e.g., 1e20)
         // In this case, rely on L2 and MAPE which are more robust for numerical validation
         // This is acceptable as L2 (shape) and MAPE (point-wise accuracy) provide complementary validation
-        let correlationPass = r.isNaN ? true : (r >= thresholds.minCorrelation)
-        let passed = l2 <= thresholds.maxL2Error &&
-                     mape <= thresholds.maxMAPE &&
+        let correlationPass = r.isNaN ? true : (r >= thresholds.minimumCorrelation)
+        let passed = l2 <= thresholds.maximumL2Error &&
+                     mape <= thresholds.maximumMAPE &&
                      correlationPass
 
         return ComparisonResult(

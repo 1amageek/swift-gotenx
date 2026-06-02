@@ -12,66 +12,66 @@ import GotenxCore
 public struct PlotData: Sendable {
     // MARK: - Coordinates
 
-    /// Normalized radius ρ ∈ [0, 1] [nCells]
-    public let rho: [Float]
+    /// Normalized radius ρ ∈ [0, 1] [cellCount]
+    public let normalizedRadius: [Float]
 
-    /// Time [s] [nTime]
+    /// Time [s] [timeCount]
     public let time: [Float]
 
-    // MARK: - Temperature & Density Profiles [nTime, nCells]
+    // MARK: - Temperature & Density Profiles [timeCount, cellCount]
 
     /// Ion temperature [keV]
-    public let Ti: [[Float]]
+    public let ionTemperature: [[Float]]
 
     /// Electron temperature [keV]
-    public let Te: [[Float]]
+    public let electronTemperature: [[Float]]
 
     /// Electron density [10^20 m^-3]
-    public let ne: [[Float]]
+    public let electronDensity: [[Float]]
 
-    // MARK: - Magnetic Field Profiles [nTime, nCells]
+    // MARK: - Magnetic Field Profiles [timeCount, cellCount]
 
     /// Safety factor (dimensionless)
-    public let q: [[Float]]
+    public let safetyFactor: [[Float]]
 
     /// Magnetic shear (dimensionless)
     public let magneticShear: [[Float]]
 
     /// Poloidal flux [Wb]
-    public let psi: [[Float]]
+    public let poloidalFlux: [[Float]]
 
-    // MARK: - Transport Coefficients [nTime, nCells] [m^2/s]
+    // MARK: - Transport Coefficients [timeCount, cellCount] [m^2/s]
 
     /// Total ion heat conductivity
-    public let chiTotalIon: [[Float]]
+    public let totalIonHeatConductivity: [[Float]]
 
     /// Total electron heat conductivity
-    public let chiTotalElectron: [[Float]]
+    public let totalElectronHeatConductivity: [[Float]]
 
     /// Turbulent ion heat conductivity
-    public let chiTurbIon: [[Float]]
+    public let turbulentIonHeatConductivity: [[Float]]
 
     /// Turbulent electron heat conductivity
-    public let chiTurbElectron: [[Float]]
+    public let turbulentElectronHeatConductivity: [[Float]]
 
     /// Particle diffusivity
-    public let dFace: [[Float]]
+    public let particleDiffusivity: [[Float]]
 
-    // MARK: - Current Density Profiles [nTime, nCells] [MA/m^2]
+    // MARK: - Current Density Profiles [timeCount, cellCount] [MA/m^2]
 
     /// Total toroidal current density
-    public let jTotal: [[Float]]
+    public let totalCurrentDensity: [[Float]]
 
     /// Ohmic current density
-    public let jOhmic: [[Float]]
+    public let ohmicCurrentDensity: [[Float]]
 
     /// Bootstrap current density
-    public let jBootstrap: [[Float]]
+    public let bootstrapCurrentDensity: [[Float]]
 
     /// ECRH-driven current density
-    public let jECRH: [[Float]]
+    public let ecrhCurrentDensity: [[Float]]
 
-    // MARK: - Source Terms [nTime, nCells] [MW/m^3]
+    // MARK: - Source Terms [timeCount, cellCount] [MW/m^3]
 
     /// Ohmic heating source
     public let ohmicHeatSource: [[Float]]
@@ -80,123 +80,123 @@ public struct PlotData: Sendable {
     public let fusionHeatSource: [[Float]]
 
     /// ICRH ion heating density
-    public let pICRHIon: [[Float]]
+    public let icrhIonHeatingPowerDensity: [[Float]]
 
     /// ICRH electron heating density
-    public let pICRHElectron: [[Float]]
+    public let icrhElectronHeatingPowerDensity: [[Float]]
 
     /// ECRH electron heating density
-    public let pECRHElectron: [[Float]]
+    public let ecrhElectronHeatingPowerDensity: [[Float]]
 
-    // MARK: - Time Series Scalars [nTime]
+    // MARK: - Time Series Scalars [timeCount]
 
     /// Plasma current [MA]
-    public let IpProfile: [Float]
+    public let plasmaCurrent: [Float]
 
     /// Bootstrap current [MA]
-    public let IBootstrap: [Float]
+    public let bootstrapCurrent: [Float]
 
     /// ECRH-driven current [MA]
-    public let IECRH: [Float]
+    public let ecrhCurrent: [Float]
 
     /// Fusion gain (dimensionless)
-    public let qFusion: [Float]
+    public let fusionGain: [Float]
 
     /// Auxiliary heating power [MW]
-    public let pAuxiliary: [Float]
+    public let auxiliaryHeatingPower: [Float]
 
     /// Ohmic heating power (electron) [MW]
-    public let pOhmicE: [Float]
+    public let ohmicElectronHeatingPower: [Float]
 
     /// Alpha particle heating power [MW]
-    public let pAlphaTotal: [Float]
+    public let totalAlphaPower: [Float]
 
     /// Bremsstrahlung radiation loss [MW]
-    public let pBremsstrahlung: [Float]
+    public let bremsstrahlungPower: [Float]
 
     /// Total radiation loss [MW]
-    public let pRadiation: [Float]
+    public let radiationPower: [Float]
 
     // MARK: - Utilities
 
     /// Number of time points
-    public var nTime: Int { time.count }
+    public var timeCount: Int { time.count }
 
     /// Number of radial cells
-    public var nCells: Int { rho.count }
+    public var cellCount: Int { normalizedRadius.count }
 
     /// Time range
     public var timeRange: ClosedRange<Float> { time.first!...time.last! }
 
-    /// Rho range
-    public var rhoRange: ClosedRange<Float> { 0.0...1.0 }
+    /// Normalized radius range
+    public var normalizedRadiusRange: ClosedRange<Float> { 0.0...1.0 }
 
     // MARK: - Initialization
 
     public init(
-        rho: [Float],
+        normalizedRadius: [Float],
         time: [Float],
-        Ti: [[Float]],
-        Te: [[Float]],
-        ne: [[Float]],
-        q: [[Float]],
+        ionTemperature: [[Float]],
+        electronTemperature: [[Float]],
+        electronDensity: [[Float]],
+        safetyFactor: [[Float]],
         magneticShear: [[Float]],
-        psi: [[Float]],
-        chiTotalIon: [[Float]],
-        chiTotalElectron: [[Float]],
-        chiTurbIon: [[Float]],
-        chiTurbElectron: [[Float]],
-        dFace: [[Float]],
-        jTotal: [[Float]],
-        jOhmic: [[Float]],
-        jBootstrap: [[Float]],
-        jECRH: [[Float]],
+        poloidalFlux: [[Float]],
+        totalIonHeatConductivity: [[Float]],
+        totalElectronHeatConductivity: [[Float]],
+        turbulentIonHeatConductivity: [[Float]],
+        turbulentElectronHeatConductivity: [[Float]],
+        particleDiffusivity: [[Float]],
+        totalCurrentDensity: [[Float]],
+        ohmicCurrentDensity: [[Float]],
+        bootstrapCurrentDensity: [[Float]],
+        ecrhCurrentDensity: [[Float]],
         ohmicHeatSource: [[Float]],
         fusionHeatSource: [[Float]],
-        pICRHIon: [[Float]],
-        pICRHElectron: [[Float]],
-        pECRHElectron: [[Float]],
-        IpProfile: [Float],
-        IBootstrap: [Float],
-        IECRH: [Float],
-        qFusion: [Float],
-        pAuxiliary: [Float],
-        pOhmicE: [Float],
-        pAlphaTotal: [Float],
-        pBremsstrahlung: [Float],
-        pRadiation: [Float]
+        icrhIonHeatingPowerDensity: [[Float]],
+        icrhElectronHeatingPowerDensity: [[Float]],
+        ecrhElectronHeatingPowerDensity: [[Float]],
+        plasmaCurrent: [Float],
+        bootstrapCurrent: [Float],
+        ecrhCurrent: [Float],
+        fusionGain: [Float],
+        auxiliaryHeatingPower: [Float],
+        ohmicElectronHeatingPower: [Float],
+        totalAlphaPower: [Float],
+        bremsstrahlungPower: [Float],
+        radiationPower: [Float]
     ) {
-        self.rho = rho
+        self.normalizedRadius = normalizedRadius
         self.time = time
-        self.Ti = Ti
-        self.Te = Te
-        self.ne = ne
-        self.q = q
+        self.ionTemperature = ionTemperature
+        self.electronTemperature = electronTemperature
+        self.electronDensity = electronDensity
+        self.safetyFactor = safetyFactor
         self.magneticShear = magneticShear
-        self.psi = psi
-        self.chiTotalIon = chiTotalIon
-        self.chiTotalElectron = chiTotalElectron
-        self.chiTurbIon = chiTurbIon
-        self.chiTurbElectron = chiTurbElectron
-        self.dFace = dFace
-        self.jTotal = jTotal
-        self.jOhmic = jOhmic
-        self.jBootstrap = jBootstrap
-        self.jECRH = jECRH
+        self.poloidalFlux = poloidalFlux
+        self.totalIonHeatConductivity = totalIonHeatConductivity
+        self.totalElectronHeatConductivity = totalElectronHeatConductivity
+        self.turbulentIonHeatConductivity = turbulentIonHeatConductivity
+        self.turbulentElectronHeatConductivity = turbulentElectronHeatConductivity
+        self.particleDiffusivity = particleDiffusivity
+        self.totalCurrentDensity = totalCurrentDensity
+        self.ohmicCurrentDensity = ohmicCurrentDensity
+        self.bootstrapCurrentDensity = bootstrapCurrentDensity
+        self.ecrhCurrentDensity = ecrhCurrentDensity
         self.ohmicHeatSource = ohmicHeatSource
         self.fusionHeatSource = fusionHeatSource
-        self.pICRHIon = pICRHIon
-        self.pICRHElectron = pICRHElectron
-        self.pECRHElectron = pECRHElectron
-        self.IpProfile = IpProfile
-        self.IBootstrap = IBootstrap
-        self.IECRH = IECRH
-        self.qFusion = qFusion
-        self.pAuxiliary = pAuxiliary
-        self.pOhmicE = pOhmicE
-        self.pAlphaTotal = pAlphaTotal
-        self.pBremsstrahlung = pBremsstrahlung
-        self.pRadiation = pRadiation
+        self.icrhIonHeatingPowerDensity = icrhIonHeatingPowerDensity
+        self.icrhElectronHeatingPowerDensity = icrhElectronHeatingPowerDensity
+        self.ecrhElectronHeatingPowerDensity = ecrhElectronHeatingPowerDensity
+        self.plasmaCurrent = plasmaCurrent
+        self.bootstrapCurrent = bootstrapCurrent
+        self.ecrhCurrent = ecrhCurrent
+        self.fusionGain = fusionGain
+        self.auxiliaryHeatingPower = auxiliaryHeatingPower
+        self.ohmicElectronHeatingPower = ohmicElectronHeatingPower
+        self.totalAlphaPower = totalAlphaPower
+        self.bremsstrahlungPower = bremsstrahlungPower
+        self.radiationPower = radiationPower
     }
 }
 
@@ -217,53 +217,53 @@ extension PlotData {
             throw PlotDataError.missingTimeSeries
         }
 
-        let nTime = timeSeries.count
-        let nCells = timeSeries[0].profiles.ionTemperature.count
+        let timeCount = timeSeries.count
+        let cellCount = timeSeries[0].profiles.ionTemperature.count
 
-        // Generate rho coordinate
-        self.rho = (0..<nCells).map { Float($0) / Float(max(nCells - 1, 1)) }
+        // Generate normalizedRadius coordinate
+        self.normalizedRadius = (0..<cellCount).map { Float($0) / Float(max(cellCount - 1, 1)) }
 
         // Extract time
         self.time = timeSeries.map { $0.time }
 
         // Convert temperature profiles: eV → keV
-        self.Ti = timeSeries.map { timePoint in
+        self.ionTemperature = timeSeries.map { timePoint in
             timePoint.profiles.ionTemperature.map { $0 / 1000.0 }
         }
-        self.Te = timeSeries.map { timePoint in
+        self.electronTemperature = timeSeries.map { timePoint in
             timePoint.profiles.electronTemperature.map { $0 / 1000.0 }
         }
 
         // Convert density profiles: m^-3 → 10^20 m^-3
-        self.ne = timeSeries.map { timePoint in
+        self.electronDensity = timeSeries.map { timePoint in
             timePoint.profiles.electronDensity.map { $0 / 1e20 }
         }
 
         // Poloidal flux (no conversion)
-        self.psi = timeSeries.map { timePoint in
+        self.poloidalFlux = timeSeries.map { timePoint in
             timePoint.profiles.poloidalFlux
         }
 
         // Placeholder for unimplemented fields (filled with zeros)
-        let zeroProfile = Array(repeating: Float(0.0), count: nCells)
-        let zeroProfiles = Array(repeating: zeroProfile, count: nTime)
+        let zeroProfile = Array(repeating: Float(0.0), count: cellCount)
+        let zeroProfiles = Array(repeating: zeroProfile, count: timeCount)
 
-        self.q = zeroProfiles
+        self.safetyFactor = zeroProfiles
         self.magneticShear = zeroProfiles
-        self.chiTotalIon = zeroProfiles
-        self.chiTotalElectron = zeroProfiles
-        self.chiTurbIon = zeroProfiles
-        self.chiTurbElectron = zeroProfiles
-        self.dFace = zeroProfiles
-        self.jTotal = zeroProfiles
-        self.jOhmic = zeroProfiles
-        self.jBootstrap = zeroProfiles
-        self.jECRH = zeroProfiles
+        self.totalIonHeatConductivity = zeroProfiles
+        self.totalElectronHeatConductivity = zeroProfiles
+        self.turbulentIonHeatConductivity = zeroProfiles
+        self.turbulentElectronHeatConductivity = zeroProfiles
+        self.particleDiffusivity = zeroProfiles
+        self.totalCurrentDensity = zeroProfiles
+        self.ohmicCurrentDensity = zeroProfiles
+        self.bootstrapCurrentDensity = zeroProfiles
+        self.ecrhCurrentDensity = zeroProfiles
         self.ohmicHeatSource = zeroProfiles
         self.fusionHeatSource = zeroProfiles
-        self.pICRHIon = zeroProfiles
-        self.pICRHElectron = zeroProfiles
-        self.pECRHElectron = zeroProfiles
+        self.icrhIonHeatingPowerDensity = zeroProfiles
+        self.icrhElectronHeatingPowerDensity = zeroProfiles
+        self.ecrhElectronHeatingPowerDensity = zeroProfiles
 
         // Time series scalars
         // Phase 1: Attempt to extract from derived quantities if available
@@ -274,35 +274,35 @@ extension PlotData {
 
         if hasDerived {
             // Extract from derived quantities with fallback to zero
-            self.IpProfile = timeSeries.map { $0.derived?.I_plasma ?? 0.0 }
-            self.IBootstrap = timeSeries.map { $0.derived?.I_bootstrap ?? 0.0 }
-            self.IECRH = Array(repeating: Float(0.0), count: nTime)  // Not in DerivedQuantities yet
+            self.plasmaCurrent = timeSeries.map { $0.derived?.plasmaCurrent ?? 0.0 }
+            self.bootstrapCurrent = timeSeries.map { $0.derived?.bootstrapCurrent ?? 0.0 }
+            self.ecrhCurrent = Array(repeating: Float(0.0), count: timeCount)  // Not in DerivedQuantities yet
 
             // Fusion performance metrics
-            self.qFusion = timeSeries.map { timePoint in
-                // Q = P_fusion / (P_auxiliary + P_ohmic)
+            self.fusionGain = timeSeries.map { timePoint in
+                // Q = fusionPower / (auxiliaryPower + ohmicPower)
                 guard let derived = timePoint.derived else { return 0.0 }
-                let P_input = derived.P_auxiliary + derived.P_ohmic + 1e-10  // Avoid division by zero
-                return derived.P_fusion / P_input
+                let inputPower = derived.auxiliaryPower + derived.ohmicPower + 1e-10
+                return derived.fusionPower / inputPower
             }
 
-            self.pAuxiliary = timeSeries.map { $0.derived?.P_auxiliary ?? 0.0 }
-            self.pOhmicE = timeSeries.map { $0.derived?.P_ohmic ?? 0.0 }
-            self.pAlphaTotal = timeSeries.map { $0.derived?.P_alpha ?? 0.0 }
-            self.pBremsstrahlung = Array(repeating: Float(0.0), count: nTime)  // Not in DerivedQuantities
-            self.pRadiation = Array(repeating: Float(0.0), count: nTime)  // Not in DerivedQuantities
+            self.auxiliaryHeatingPower = timeSeries.map { $0.derived?.auxiliaryPower ?? 0.0 }
+            self.ohmicElectronHeatingPower = timeSeries.map { $0.derived?.ohmicPower ?? 0.0 }
+            self.totalAlphaPower = timeSeries.map { $0.derived?.alphaPower ?? 0.0 }
+            self.bremsstrahlungPower = Array(repeating: Float(0.0), count: timeCount)  // Not in DerivedQuantities
+            self.radiationPower = Array(repeating: Float(0.0), count: timeCount)  // Not in DerivedQuantities
         } else {
             // Phase 1: No derived quantities available, use zeros
-            let zeroScalar = Array(repeating: Float(0.0), count: nTime)
-            self.IpProfile = zeroScalar
-            self.IBootstrap = zeroScalar
-            self.IECRH = zeroScalar
-            self.qFusion = zeroScalar
-            self.pAuxiliary = zeroScalar
-            self.pOhmicE = zeroScalar
-            self.pAlphaTotal = zeroScalar
-            self.pBremsstrahlung = zeroScalar
-            self.pRadiation = zeroScalar
+            let zeroScalar = Array(repeating: Float(0.0), count: timeCount)
+            self.plasmaCurrent = zeroScalar
+            self.bootstrapCurrent = zeroScalar
+            self.ecrhCurrent = zeroScalar
+            self.fusionGain = zeroScalar
+            self.auxiliaryHeatingPower = zeroScalar
+            self.ohmicElectronHeatingPower = zeroScalar
+            self.totalAlphaPower = zeroScalar
+            self.bremsstrahlungPower = zeroScalar
+            self.radiationPower = zeroScalar
         }
     }
 }

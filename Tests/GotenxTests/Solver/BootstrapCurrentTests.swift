@@ -15,8 +15,8 @@ struct BootstrapCurrentTests {
         let ne = MLXArray([Float(1e20)])
 
         let tau_e = CollisionalityHelpers.computeCollisionTime(
-            Te: Te,
-            ne: ne,
+            electronTemperature: Te,
+            electronDensity: ne,
             coulombLog: 17.0
         )
         eval(tau_e)
@@ -41,12 +41,12 @@ struct BootstrapCurrentTests {
     @Test("Normalized collisionality calculation")
     func normalizedCollisionality() throws {
         // Create simple cylindrical geometry
-        let nCells = 10
+        let cellCount = 10
         let minorRadius: Float = 1.0
         let majorRadius: Float = 3.0
 
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: majorRadius,
             minorRadius: minorRadius,
             toroidalField: 5.0
@@ -54,12 +54,12 @@ struct BootstrapCurrentTests {
         let geometry = Geometry(config: meshConfig)
 
         // ITER-like plasma: Te = 10 keV at core
-        let Te = MLXArray.full([nCells], values: MLXArray(Float(10000.0)))
-        let ne = MLXArray.full([nCells], values: MLXArray(Float(1e20)))
+        let Te = MLXArray.full([cellCount], values: MLXArray(Float(10000.0)))
+        let ne = MLXArray.full([cellCount], values: MLXArray(Float(1e20)))
 
         let nu_star = CollisionalityHelpers.computeNormalizedCollisionality(
-            Te: Te,
-            ne: ne,
+            electronTemperature: Te,
+            electronDensity: ne,
             geometry: geometry
         )
         eval(nu_star)
@@ -118,9 +118,9 @@ struct BootstrapCurrentTests {
         // This is physically correct at the plasma edge where pressure gradient reverses
 
         // Create geometry
-        let nCells = 20
+        let cellCount = 20
         let meshConfig = MeshConfig(
-            nCells: nCells,
+            cellCount: cellCount,
             majorRadius: 3.0,
             minorRadius: 1.0,
             toroidalField: 5.0
@@ -136,7 +136,7 @@ struct BootstrapCurrentTests {
         let Ti = MLXArray(Ti_values)
         let Te = MLXArray(Te_values)
         let ne = MLXArray(ne_values)
-        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: nCells)
+        let psi = MLXArray.linspace(Float(0.0), Float(1.0), count: cellCount)
 
         // Create profiles
         let profiles = CoreProfiles(

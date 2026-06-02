@@ -2,7 +2,7 @@
   "runtime": {
     "static": {
       "mesh": {
-        "nCells": 100,
+        "cellCount": 100,
         "majorRadius": 6.2,
         "minorRadius": 2.0,
         "toroidalField": 5.3,
@@ -11,13 +11,13 @@
       "evolution": {
         "ionTemperature": true,
         "electronTemperature": true,
-        "density": true,
-        "current": false
+        "electronDensity": true,
+        "poloidalFlux": false
       },
       "solver": {
         "type": "newton",
         "tolerance": 1e-6,
-        "maxIterations": 30
+        "maximumIterations": 30
       },
       "scheme": {
         "theta": 0.5,
@@ -28,13 +28,13 @@
       "boundaries": {
         "ionTemperature": 100.0,
         "electronTemperature": 100.0,
-        "density": 1e19
+        "electronDensity": 1e19
       },
       "transport": {
         "modelType": "qlknn",
         "parameters": {
-          "Zeff": 1.5,
-          "min_chi": 0.01
+          "effectiveCharge": 1.5,
+          "minimumHeatDiffusivity": 0.01
         }
       },
       "sources": {
@@ -53,13 +53,13 @@
   "time": {
     "start": 0.0,
     "end": 2.0,
-    "initialDt": 1e-5,
+    "initialTimeStep": 1e-5,
     "adaptive": {
       "enabled": true,
       "targetError": 1e-4,
       "safetyFactor": 0.8,
-      "minDt": 1e-7,
-      "maxDt": 1e-3
+      "minimumTimeStep": 1e-7,
+      "maximumTimeStep": 1e-3
     }
   },
   "output": {

@@ -38,11 +38,11 @@ public protocol PedestalModel: PhysicsComponent {
     /// - Parameters:
     ///   - profiles: Current core profiles
     ///   - geometry: Tokamak geometry
-    ///   - params: Pedestal model parameters
+    ///   - parameters: Pedestal model parameters
     /// - Returns: Pedestal output (boundary conditions)
     func computePedestal(
         profiles: CoreProfiles,
         geometry: Geometry,
-        params: [String: Float]
+        parameters: [String: Float]
     ) -> PedestalOutput
 }

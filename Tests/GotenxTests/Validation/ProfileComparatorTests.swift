@@ -158,15 +158,15 @@ struct ProfileComparatorTests {
         let rho = stride(from: 0.0, through: 1.0, by: 1.0/Float(nPoints-1)).map { Float($0) }
 
         let Ti_pred = rho.map { r in
-            let Ti_core: Float = 15000.0
+            let coreIonTemperature: Float = 15000.0
             let Ti_edge: Float = 100.0
-            return Ti_edge + (Ti_core - Ti_edge) * pow(1.0 - r*r, 2.0)
+            return Ti_edge + (coreIonTemperature - Ti_edge) * pow(1.0 - r*r, 2.0)
         }
 
         let Ti_ref = rho.map { r in
-            let Ti_core: Float = 15200.0  // Slightly higher core
+            let coreIonTemperature: Float = 15200.0  // Slightly higher core
             let Ti_edge: Float = 105.0    // Slightly higher edge
-            return Ti_edge + (Ti_core - Ti_edge) * pow(1.0 - r*r, 2.0)
+            return Ti_edge + (coreIonTemperature - Ti_edge) * pow(1.0 - r*r, 2.0)
         }
 
         let result = ProfileComparator.compare(
@@ -190,15 +190,15 @@ struct ProfileComparatorTests {
         let rho = stride(from: 0.0, through: 1.0, by: 1.0/Float(nPoints-1)).map { Float($0) }
 
         let ne_pred = rho.map { r in
-            let ne_core: Float = 1.0e20
+            let coreElectronDensity: Float = 1.0e20
             let ne_edge: Float = 0.2e20
-            return ne_edge + (ne_core - ne_edge) * (1.0 - r)
+            return ne_edge + (coreElectronDensity - ne_edge) * (1.0 - r)
         }
 
         let ne_ref = rho.map { r in
-            let ne_core: Float = 1.05e20  // 5% higher
+            let coreElectronDensity: Float = 1.05e20  // 5% higher
             let ne_edge: Float = 0.21e20
-            return ne_edge + (ne_core - ne_edge) * (1.0 - r)
+            return ne_edge + (coreElectronDensity - ne_edge) * (1.0 - r)
         }
 
         let result = ProfileComparator.compare(

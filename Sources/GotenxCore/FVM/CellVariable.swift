@@ -33,23 +33,23 @@ private func diff(_ array: MLXArray, axis: Int = 0) -> MLXArray {
 public struct CellVariable: Sendable {
     // MARK: - Properties
 
-    /// Values at cell centers (shape: [nCells])
+    /// Values at cell centers (shape: [cellCount])
     public let value: EvaluatedArray
 
     /// Distance between cell centers
-    public let dr: Float
+    public let radialSpacing: Float
 
     /// Optional value constraint for the leftmost face
     public let leftFaceConstraint: Float?
 
     /// Optional gradient constraint for the leftmost face
-    public let leftFaceGradConstraint: Float?
+    public let leftFaceGradientConstraint: Float?
 
     /// Optional value constraint for the rightmost face
     public let rightFaceConstraint: Float?
 
     /// Optional gradient constraint for the rightmost face
-    public let rightFaceGradConstraint: Float?
+    public let rightFaceGradientConstraint: Float?
 
     // MARK: - Initialization
 
@@ -57,59 +57,59 @@ public struct CellVariable: Sendable {
     ///
     /// - Parameters:
     ///   - value: Values at cell centers (will be evaluated)
-    ///   - dr: Distance between cell centers
+    ///   - radialSpacing: Distance between cell centers
     ///   - leftFaceConstraint: Optional value constraint for left boundary
-    ///   - leftFaceGradConstraint: Optional gradient constraint for left boundary
+    ///   - leftFaceGradientConstraint: Optional gradient constraint for left boundary
     ///   - rightFaceConstraint: Optional value constraint for right boundary
-    ///   - rightFaceGradConstraint: Optional gradient constraint for right boundary
+    ///   - rightFaceGradientConstraint: Optional gradient constraint for right boundary
     ///
-    /// - Note: Exactly one of (leftFaceConstraint, leftFaceGradConstraint) must be non-nil,
-    ///         and exactly one of (rightFaceConstraint, rightFaceGradConstraint) must be non-nil
+    /// - Note: Exactly one of (leftFaceConstraint, leftFaceGradientConstraint) must be non-nil,
+    ///         and exactly one of (rightFaceConstraint, rightFaceGradientConstraint) must be non-nil
     public init(
         value: MLXArray,
-        dr: Float,
+        radialSpacing: Float,
         leftFaceConstraint: Float? = nil,
-        leftFaceGradConstraint: Float? = nil,
+        leftFaceGradientConstraint: Float? = nil,
         rightFaceConstraint: Float? = nil,
-        rightFaceGradConstraint: Float? = nil
+        rightFaceGradientConstraint: Float? = nil
     ) {
         precondition(value.ndim == 1, "CellVariable value must be 1D array")
-        precondition(dr > 0, "dr must be positive")
+        precondition(radialSpacing > 0, "radialSpacing must be positive")
 
         // Validate left boundary condition
         let hasLeftValue = leftFaceConstraint != nil
-        let hasLeftGrad = leftFaceGradConstraint != nil
+        let hasLeftGrad = leftFaceGradientConstraint != nil
         precondition(
             hasLeftValue != hasLeftGrad,
-            "Exactly one of leftFaceConstraint or leftFaceGradConstraint must be set"
+            "Exactly one of leftFaceConstraint or leftFaceGradientConstraint must be set"
         )
 
         // Validate right boundary condition
         let hasRightValue = rightFaceConstraint != nil
-        let hasRightGrad = rightFaceGradConstraint != nil
+        let hasRightGrad = rightFaceGradientConstraint != nil
         precondition(
             hasRightValue != hasRightGrad,
-            "Exactly one of rightFaceConstraint or rightFaceGradConstraint must be set"
+            "Exactly one of rightFaceConstraint or rightFaceGradientConstraint must be set"
         )
 
         self.value = EvaluatedArray(evaluating: value)
-        self.dr = dr
+        self.radialSpacing = radialSpacing
         self.leftFaceConstraint = leftFaceConstraint
-        self.leftFaceGradConstraint = leftFaceGradConstraint
+        self.leftFaceGradientConstraint = leftFaceGradientConstraint
         self.rightFaceConstraint = rightFaceConstraint
-        self.rightFaceGradConstraint = rightFaceGradConstraint
+        self.rightFaceGradientConstraint = rightFaceGradientConstraint
     }
 
     // MARK: - Computed Properties
 
     /// Number of cells
-    public var nCells: Int {
+    public var cellCount: Int {
         value.shape[0]
     }
 
-    /// Number of faces (nCells + 1)
-    public var nFaces: Int {
-        nCells + 1
+    /// Number of faces (cellCount + 1)
+    public var faceCount: Int {
+        cellCount + 1
     }
 
     // MARK: - Face Value Calculation
@@ -119,8 +119,8 @@ public struct CellVariable: Sendable {
     /// Inner faces are calculated as the average of neighboring cell values.
     /// Boundary faces use the specified constraints.
     ///
-    /// - Returns: Array of face values (shape: [nFaces])
-    public func faceValue() -> MLXArray {
+    /// - Returns: Array of face values (shape: [faceCount])
+    public func faceValues() -> MLXArray {
         // Extract underlying MLXArray for computation
         let cellValues = value.value
 
@@ -128,27 +128,27 @@ public struct CellVariable: Sendable {
         let leftValue: MLXArray
         if let constraint = leftFaceConstraint {
             leftValue = MLXArray([constraint])
-        } else if let gradConstraint = leftFaceGradConstraint {
-            // Linear extrapolation: x_face = x_cell0 - (dr/2) * gradient
+        } else if let gradConstraint = leftFaceGradientConstraint {
+            // Linear extrapolation: x_face = x_cell0 - (radialSpacing/2) * gradient
             let firstCell = cellValues[0..<1]
-            leftValue = firstCell - MLXArray(gradConstraint * dr / 2.0)
+            leftValue = firstCell - MLXArray(gradConstraint * radialSpacing / 2.0)
         } else {
             fatalError("Left boundary condition not properly set")
         }
 
         // Inner face values (average of neighbors)
-        let leftCells = cellValues[0..<(nCells - 1)]
-        let rightCells = cellValues[1..<nCells]
+        let leftCells = cellValues[0..<(cellCount - 1)]
+        let rightCells = cellValues[1..<cellCount]
         let innerValues = (leftCells + rightCells) / 2.0
 
         // Right face value (reshape to [1] for concatenation)
         let rightValue: MLXArray
         if let constraint = rightFaceConstraint {
             rightValue = MLXArray([constraint])
-        } else if let gradConstraint = rightFaceGradConstraint {
-            // Calculate from gradient constraint: value[end] + grad * dr/2
-            let lastCell = cellValues[(nCells - 1)..<nCells]
-            rightValue = lastCell + MLXArray(gradConstraint * dr / 2.0)
+        } else if let gradConstraint = rightFaceGradientConstraint {
+            // Calculate from gradient constraint: value[end] + grad * radialSpacing/2
+            let lastCell = cellValues[(cellCount - 1)..<cellCount]
+            rightValue = lastCell + MLXArray(gradConstraint * radialSpacing / 2.0)
         } else {
             fatalError("Right boundary condition not properly set")
         }
@@ -165,36 +165,36 @@ public struct CellVariable: Sendable {
     /// with boundary gradients determined by the specified constraints.
     ///
     /// - Parameter x: Optional coordinate array for non-uniform grids
-    /// - Returns: Array of face gradients (shape: [nFaces])
-    public func faceGrad(x: MLXArray? = nil) -> MLXArray {
+    /// - Returns: Array of face gradients (shape: [faceCount])
+    public func faceGradients(x: MLXArray? = nil) -> MLXArray {
         // Extract underlying MLXArray for computation
         let cellValues = value.value
 
         // Forward difference for inner faces
         let difference = diff(cellValues, axis: 0)
-        let dx = x != nil ? diff(x!, axis: 0) : MLXArray(dr)
+        let dx = x != nil ? diff(x!, axis: 0) : MLXArray(radialSpacing)
         let forwardDiff = difference / dx
 
         // Left gradient (reshape to [1] for concatenation)
         let leftGrad: MLXArray
-        if let gradConstraint = leftFaceGradConstraint {
+        if let gradConstraint = leftFaceGradientConstraint {
             leftGrad = MLXArray([gradConstraint])
         } else if let valueConstraint = leftFaceConstraint {
-            // Calculate from value constraint: (value[0] - constraint) / (dr/2)
+            // Calculate from value constraint: (value[0] - constraint) / (radialSpacing/2)
             let firstCell = cellValues[0..<1]
-            leftGrad = (firstCell - MLXArray(valueConstraint)) / MLXArray(dr / 2.0)
+            leftGrad = (firstCell - MLXArray(valueConstraint)) / MLXArray(radialSpacing / 2.0)
         } else {
             fatalError("Left boundary condition not properly set")
         }
 
         // Right gradient (reshape to [1] for concatenation)
         let rightGrad: MLXArray
-        if let gradConstraint = rightFaceGradConstraint {
+        if let gradConstraint = rightFaceGradientConstraint {
             rightGrad = MLXArray([gradConstraint])
         } else if let valueConstraint = rightFaceConstraint {
-            // Calculate from value constraint: (constraint - value[end]) / (dr/2)
-            let lastCell = cellValues[(nCells - 1)..<nCells]
-            rightGrad = (MLXArray(valueConstraint) - lastCell) / MLXArray(dr / 2.0)
+            // Calculate from value constraint: (constraint - value[end]) / (radialSpacing/2)
+            let lastCell = cellValues[(cellCount - 1)..<cellCount]
+            rightGrad = (MLXArray(valueConstraint) - lastCell) / MLXArray(radialSpacing / 2.0)
         } else {
             fatalError("Right boundary condition not properly set")
         }
@@ -207,13 +207,13 @@ public struct CellVariable: Sendable {
 
     /// Calculate gradients at cell centers
     ///
-    /// This is computed as the difference of face values divided by dr.
+    /// This is computed as the difference of face values divided by radialSpacing.
     ///
-    /// - Returns: Array of cell gradients (shape: [nCells])
-    public func grad() -> MLXArray {
-        let faceVals = faceValue()
+    /// - Returns: Array of cell gradients (shape: [cellCount])
+    public func gradients() -> MLXArray {
+        let faceVals = faceValues()
         let difference = diff(faceVals, axis: 0)
-        return difference / MLXArray(dr)
+        return difference / MLXArray(radialSpacing)
     }
 }
 
@@ -222,11 +222,11 @@ public struct CellVariable: Sendable {
 extension CellVariable: Equatable {
     public static func == (lhs: CellVariable, rhs: CellVariable) -> Bool {
         // Compare all properties
-        guard lhs.dr == rhs.dr,
+        guard lhs.radialSpacing == rhs.radialSpacing,
               lhs.leftFaceConstraint == rhs.leftFaceConstraint,
-              lhs.leftFaceGradConstraint == rhs.leftFaceGradConstraint,
+              lhs.leftFaceGradientConstraint == rhs.leftFaceGradientConstraint,
               lhs.rightFaceConstraint == rhs.rightFaceConstraint,
-              lhs.rightFaceGradConstraint == rhs.rightFaceGradConstraint else {
+              lhs.rightFaceGradientConstraint == rhs.rightFaceGradientConstraint else {
             return false
         }
 

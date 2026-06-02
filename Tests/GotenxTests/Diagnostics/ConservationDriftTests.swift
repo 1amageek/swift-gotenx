@@ -17,32 +17,32 @@ struct ConservationDriftTests {
     ///
     /// Uses the production `createGeometry(from:)` helper to ensure consistency
     /// with the implementation. This guarantees:
-    /// - g0/g1/g2/g3: [nCells + 1] elements (face-centered)
-    /// - radii, safetyFactor: [nCells] elements (cell-centered)
+    /// - fluxSurfaceMetric/majorRadiusMetric/shapeMetric/minorRadiusMetric: [cellCount + 1] elements (face-centered)
+    /// - radii, safetyFactor: [cellCount] elements (cell-centered)
     private func createTestGeometry() -> Geometry {
         let mesh = MeshConfig(
-            nCells: 10,
+            cellCount: 10,
             majorRadius: 6.2,   // [m]
             minorRadius: 2.0,   // [m]
             toroidalField: 5.3, // [T]
             geometryType: .circular
         )
 
-        return createGeometry(from: mesh, q0: 1.0, qEdge: 3.5)
+        return createGeometry(from: mesh, axisSafetyFactor: 1.0, edgeSafetyFactor: 3.5)
     }
 
     /// Create test profiles
-    private func createProfiles(nCells: Int, Ti: Float, Te: Float, ne: Float, psi: Float = 0.0) -> CoreProfiles {
-        let Ti_array = [Float](repeating: Ti, count: nCells)
-        let Te_array = [Float](repeating: Te, count: nCells)
-        let ne_array = [Float](repeating: ne, count: nCells)
-        let psi_array = [Float](repeating: psi, count: nCells)
+    private func createProfiles(cellCount: Int, ionTemperature: Float, electronTemperature: Float, electronDensity: Float, poloidalFlux: Float = 0.0) -> CoreProfiles {
+        let ionTemperatureArray = [Float](repeating: ionTemperature, count: cellCount)
+        let electronTemperatureArray = [Float](repeating: electronTemperature, count: cellCount)
+        let electronDensityArray = [Float](repeating: electronDensity, count: cellCount)
+        let poloidalFluxArray = [Float](repeating: poloidalFlux, count: cellCount)
 
         return CoreProfiles(
-            ionTemperature: EvaluatedArray(evaluating: MLXArray(Ti_array)),
-            electronTemperature: EvaluatedArray(evaluating: MLXArray(Te_array)),
-            electronDensity: EvaluatedArray(evaluating: MLXArray(ne_array)),
-            poloidalFlux: EvaluatedArray(evaluating: MLXArray(psi_array))
+            ionTemperature: EvaluatedArray(evaluating: MLXArray(ionTemperatureArray)),
+            electronTemperature: EvaluatedArray(evaluating: MLXArray(electronTemperatureArray)),
+            electronDensity: EvaluatedArray(evaluating: MLXArray(electronDensityArray)),
+            poloidalFlux: EvaluatedArray(evaluating: MLXArray(poloidalFluxArray))
         )
     }
 
@@ -51,7 +51,7 @@ struct ConservationDriftTests {
     @Test("Zero drift for identical profiles")
     func testZeroDriftIdenticalProfiles() {
         let geometry = createTestGeometry()
-        let profiles = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
 
         // Compute conservation drifts (same initial and current)
         let drifts = NumericalDiagnosticsCollector.computeConservationDrifts(
@@ -71,8 +71,8 @@ struct ConservationDriftTests {
     @Test("Particle drift detection: 10% increase")
     func testParticleDriftIncrease() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
-        let current = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1.1e20)  // 10% increase
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let current = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1.1e20)  // 10% increase
 
         let drifts = NumericalDiagnosticsCollector.computeConservationDrifts(
             current: current,
@@ -87,8 +87,8 @@ struct ConservationDriftTests {
     @Test("Particle drift detection: 5% decrease")
     func testParticleDriftDecrease() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
-        let current = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 0.95e20)  // 5% decrease
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let current = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 0.95e20)  // 5% decrease
 
         let drifts = NumericalDiagnosticsCollector.computeConservationDrifts(
             current: current,
@@ -105,8 +105,8 @@ struct ConservationDriftTests {
     @Test("Energy drift detection: Temperature change")
     func testEnergyDriftTemperatureChange() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
-        let current = createProfiles(nCells: 10, Ti: 12000, Te: 12000, ne: 1e20)  // 20% temperature increase
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let current = createProfiles(cellCount: 10, ionTemperature: 12000, electronTemperature: 12000, electronDensity: 1e20)  // 20% temperature increase
 
         let drifts = NumericalDiagnosticsCollector.computeConservationDrifts(
             current: current,
@@ -121,9 +121,9 @@ struct ConservationDriftTests {
     @Test("Energy drift detection: Combined changes")
     func testEnergyDriftCombined() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
         // Both density and temperature increase by 10% → energy increases by ~21%
-        let current = createProfiles(nCells: 10, Ti: 11000, Te: 11000, ne: 1.1e20)
+        let current = createProfiles(cellCount: 10, ionTemperature: 11000, electronTemperature: 11000, electronDensity: 1.1e20)
 
         let drifts = NumericalDiagnosticsCollector.computeConservationDrifts(
             current: current,
@@ -140,8 +140,8 @@ struct ConservationDriftTests {
     @Test("Current drift detection: Flux change")
     func testCurrentDriftFluxChange() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20, psi: 1.0)
-        let current = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20, psi: 1.2)  // 20% increase
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20, poloidalFlux: 1.0)
+        let current = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20, poloidalFlux: 1.2)  // 20% increase
 
         let drifts = NumericalDiagnosticsCollector.computeConservationDrifts(
             current: current,
@@ -159,7 +159,7 @@ struct ConservationDriftTests {
     func testDiagnosticsWithoutConservation() {
         // Create mock solver result
         let solverResult = SolverResult(
-            updatedProfiles: createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20),
+            updatedProfiles: createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20),
             iterations: 5,
             residualNorm: 1e-7,
             converged: true,
@@ -169,26 +169,26 @@ struct ConservationDriftTests {
         // Collect diagnostics without conservation monitoring
         let diagnostics = NumericalDiagnosticsCollector.collect(
             from: solverResult,
-            dt: 1e-4,
+            timeStep: 1e-4,
             wallTime: 0.01
         )
 
         // Expect zero conservation drifts (not computed)
-        #expect(diagnostics.particle_drift == 0)
-        #expect(diagnostics.energy_drift == 0)
-        #expect(diagnostics.current_drift == 0)
+        #expect(diagnostics.particleDrift == 0)
+        #expect(diagnostics.energyDrift == 0)
+        #expect(diagnostics.currentDrift == 0)
 
         // But solver metrics should be populated
-        #expect(diagnostics.newton_iterations == 5)
+        #expect(diagnostics.newtonIterations == 5)
         #expect(diagnostics.converged == true)
-        #expect(diagnostics.residual_norm == 1e-7)
+        #expect(diagnostics.residualNorm == 1e-7)
     }
 
     @Test("Diagnostics collection with conservation")
     func testDiagnosticsWithConservation() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
-        let current = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1.05e20)  // 5% drift
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let current = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1.05e20)  // 5% drift
 
         let solverResult = SolverResult(
             updatedProfiles: current,
@@ -201,7 +201,7 @@ struct ConservationDriftTests {
         // Collect diagnostics with conservation monitoring
         let diagnostics = NumericalDiagnosticsCollector.collectWithConservation(
             from: solverResult,
-            dt: 1e-4,
+            timeStep: 1e-4,
             wallTime: 0.01,
             currentProfiles: current,
             initialProfiles: initial,
@@ -209,13 +209,13 @@ struct ConservationDriftTests {
         )
 
         // Expect non-zero particle drift
-        #expect(abs(diagnostics.particle_drift - 0.05) < 0.01)
+        #expect(abs(diagnostics.particleDrift - 0.05) < 0.01)
 
         // Energy drift should also be present (T unchanged, n increased 5%)
-        #expect(abs(diagnostics.energy_drift - 0.05) < 0.01)
+        #expect(abs(diagnostics.energyDrift - 0.05) < 0.01)
 
         // Solver metrics should still be populated
-        #expect(diagnostics.newton_iterations == 5)
+        #expect(diagnostics.newtonIterations == 5)
         #expect(diagnostics.converged == true)
     }
 
@@ -224,7 +224,7 @@ struct ConservationDriftTests {
     @Test("Health check: Healthy simulation")
     func testHealthCheckHealthy() {
         let geometry = createTestGeometry()
-        let profiles = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
 
         let solverResult = SolverResult(
             updatedProfiles: profiles,
@@ -236,7 +236,7 @@ struct ConservationDriftTests {
 
         let diagnostics = NumericalDiagnosticsCollector.collectWithConservation(
             from: solverResult,
-            dt: 1e-4,
+            timeStep: 1e-4,
             currentProfiles: profiles,
             initialProfiles: profiles,
             geometry: geometry
@@ -250,8 +250,8 @@ struct ConservationDriftTests {
     @Test("Health check: Minor drift warning")
     func testHealthCheckMinorDrift() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
-        let current = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1.02e20)  // 2% drift
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let current = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1.02e20)  // 2% drift
 
         let solverResult = SolverResult(
             updatedProfiles: current,
@@ -263,7 +263,7 @@ struct ConservationDriftTests {
 
         let diagnostics = NumericalDiagnosticsCollector.collectWithConservation(
             from: solverResult,
-            dt: 1e-4,
+            timeStep: 1e-4,
             currentProfiles: current,
             initialProfiles: initial,
             geometry: geometry
@@ -277,8 +277,8 @@ struct ConservationDriftTests {
     @Test("Health check: Critical drift")
     func testHealthCheckCriticalDrift() {
         let geometry = createTestGeometry()
-        let initial = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
-        let current = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1.08e20)  // 8% drift
+        let initial = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
+        let current = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1.08e20)  // 8% drift
 
         let solverResult = SolverResult(
             updatedProfiles: current,
@@ -290,7 +290,7 @@ struct ConservationDriftTests {
 
         let diagnostics = NumericalDiagnosticsCollector.collectWithConservation(
             from: solverResult,
-            dt: 1e-4,
+            timeStep: 1e-4,
             currentProfiles: current,
             initialProfiles: initial,
             geometry: geometry
@@ -304,7 +304,7 @@ struct ConservationDriftTests {
     @Test("Health check: Non-convergence")
     func testHealthCheckNonConvergence() {
         let geometry = createTestGeometry()
-        let profiles = createProfiles(nCells: 10, Ti: 10000, Te: 10000, ne: 1e20)
+        let profiles = createProfiles(cellCount: 10, ionTemperature: 10000, electronTemperature: 10000, electronDensity: 1e20)
 
         let solverResult = SolverResult(
             updatedProfiles: profiles,
@@ -316,7 +316,7 @@ struct ConservationDriftTests {
 
         let diagnostics = NumericalDiagnosticsCollector.collectWithConservation(
             from: solverResult,
-            dt: 1e-4,
+            timeStep: 1e-4,
             currentProfiles: profiles,
             initialProfiles: profiles,
             geometry: geometry

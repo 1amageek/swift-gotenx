@@ -13,7 +13,7 @@ import Foundation
 ///   consistently with the cell volumes (`∇·F = (1/√g)·∂(√g·F)/∂ψ`).
 ///
 /// The result is the spatial rate term `F` in physical units; it is NOT divided by
-/// the transient coefficient — callers that need `∂u/∂t = F / transientCoeff`
+/// the transient coefficient — callers that need `∂u/∂t = F / transientCoefficient`
 /// (e.g. an explicit update) perform that normalization themselves, while the
 /// theta-method residual keeps `F` as-is.
 ///
@@ -27,14 +27,14 @@ func applySpatialOperator1D(
     geometry: GeometricFactors,
     boundaryCondition: BoundaryCondition
 ) -> MLXArray {
-    let nCells = u.shape[0]
+    let cellCount = u.shape[0]
 
-    // 1. Gradient at interior faces: ∇u = (u[i+1] - u[i]) / dx
-    let u_right = u[1..<nCells]
-    let u_left = u[0..<(nCells - 1)]
-    let dx = geometry.cellDistances.value  // [nCells-1]
+    // 1. Gradient at interior faces: ∇u = (u[i+1] - u[i]) / cellSpacing
+    let u_right = u[1..<cellCount]
+    let u_left = u[0..<(cellCount - 1)]
+    let cellSpacing = geometry.cellDistances.value  // [cellCount-1]
 
-    let gradFace_interior = (u_right - u_left) / (dx + 1e-10)
+    let gradFace_interior = (u_right - u_left) / (cellSpacing + 1e-10)
 
     // Boundary-face gradients from the boundary conditions.
     let gradFace_left: MLXArray
@@ -42,7 +42,7 @@ func applySpatialOperator1D(
     case .value(let val):
         // Dirichlet: gradient from the prescribed edge value.
         let u_boundary = MLXArray(val)
-        let dx_left = dx[0..<1]
+        let dx_left = cellSpacing[0..<1]
         gradFace_left = (u[0..<1] - u_boundary) / (dx_left + 1e-10)
     case .gradient(let grad):
         // Neumann: use the prescribed gradient directly.
@@ -53,8 +53,8 @@ func applySpatialOperator1D(
     switch boundaryCondition.right {
     case .value(let val):
         let u_boundary = MLXArray(val)
-        let dx_right = dx[(nCells - 2)..<(nCells - 1)]
-        gradFace_right = (u_boundary - u[(nCells - 1)..<nCells]) / (dx_right + 1e-10)
+        let dx_right = cellSpacing[(cellCount - 2)..<(cellCount - 1)]
+        gradFace_right = (u_boundary - u[(cellCount - 1)..<cellCount]) / (dx_right + 1e-10)
     case .gradient(let grad):
         gradFace_right = MLXArray([grad])
     }
@@ -62,33 +62,33 @@ func applySpatialOperator1D(
     let gradFace = concatenated([gradFace_left, gradFace_interior, gradFace_right], axis: 0)
 
     // 2. Diffusive flux: F_diff = -D·∇u
-    let dFace = coeffs.dFace.value
-    let diffusiveFlux = -dFace * gradFace
+    let faceDiffusionCoefficient = coeffs.faceDiffusionCoefficient.value
+    let diffusiveFlux = -faceDiffusionCoefficient * gradFace
 
-    // 3. Convective flux: F_conv = v·u_face (power-law interpolation for stability)
-    let vFace = coeffs.vFace.value
-    let u_face = interpolateToFacesPowerLaw(u, vFace: vFace, dFace: dFace, dx: dx)
-    let convectiveFlux = vFace * u_face
+    // 3. Convective flux: F_conv = v·faceValues (power-law interpolation for stability)
+    let faceConvectionVelocity = coeffs.faceConvectionVelocity.value
+    let faceValues = interpolateToFacesPowerLaw(u, faceConvectionVelocity: faceConvectionVelocity, faceDiffusionCoefficient: faceDiffusionCoefficient, cellSpacing: cellSpacing)
+    let convectiveFlux = faceConvectionVelocity * faceValues
 
     // 4. Total flux at faces
     let totalFlux = diffusiveFlux + convectiveFlux
 
     // 5. Metric-Jacobian weighted flux divergence: ∇·F = (1/√g)·∂(√g·F)/∂ψ
     let jacobianCells = geometry.jacobian.value
-    let jacobianFaces_interior = 0.5 * (jacobianCells[0..<(nCells - 1)] + jacobianCells[1..<nCells])
+    let jacobianFaces_interior = 0.5 * (jacobianCells[0..<(cellCount - 1)] + jacobianCells[1..<cellCount])
     let jacobianFaces = concatenated([
         jacobianCells[0..<1],
         jacobianFaces_interior,
-        jacobianCells[(nCells - 1)..<nCells]
+        jacobianCells[(cellCount - 1)..<cellCount]
     ], axis: 0)
 
     let weightedFlux = jacobianFaces * totalFlux
 
-    let flux_right = weightedFlux[1..<(nCells + 1)]
-    let flux_left = weightedFlux[0..<nCells]
+    let flux_right = weightedFlux[1..<(cellCount + 1)]
+    let flux_left = weightedFlux[0..<cellCount]
     let cellDistances = geometry.cellDistances.value
 
-    // Per-cell characteristic length (map [nCells-1] face distances to [nCells]).
+    // Per-cell characteristic length (map [cellCount-1] face distances to [cellCount]).
     let dx_padded = concatenated([
         cellDistances,
         cellDistances[(cellDistances.shape[0] - 1)..<cellDistances.shape[0]]
@@ -97,8 +97,8 @@ func applySpatialOperator1D(
     let fluxDivergence = (flux_right - flux_left) / ((jacobianCells * dx_padded) + 1e-10)
 
     // 6. Source terms
-    let source = coeffs.sourceCell.value
-    let sourceMatrix = coeffs.sourceMatCell.value
+    let source = coeffs.cellSource.value
+    let sourceMatrix = coeffs.cellSourceMatrixCoefficient.value
 
     // 7. Total spatial operator
     return fluxDivergence + source + sourceMatrix * u
@@ -110,10 +110,10 @@ func applySpatialOperator1D(
 /// central differencing at low Pe, first-order upwinding at high Pe.
 func interpolateToFacesPowerLaw(
     _ u: MLXArray,
-    vFace: MLXArray,
-    dFace: MLXArray,
-    dx: MLXArray
+    faceConvectionVelocity: MLXArray,
+    faceDiffusionCoefficient: MLXArray,
+    cellSpacing: MLXArray
 ) -> MLXArray {
-    let peclet = PowerLawScheme.computePecletNumber(vFace: vFace, dFace: dFace, dx: dx)
+    let peclet = PowerLawScheme.computePecletNumber(faceConvectionVelocity: faceConvectionVelocity, faceDiffusionCoefficient: faceDiffusionCoefficient, cellSpacing: cellSpacing)
     return PowerLawScheme.interpolateToFaces(cellValues: u, peclet: peclet)
 }

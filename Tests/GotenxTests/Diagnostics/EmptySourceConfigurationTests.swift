@@ -8,12 +8,11 @@ import MLX
 
 /// Empty Source Configuration Tests
 ///
-/// Verifies that the metadata pipeline handles configurations with:
-/// - Zero active sources
-/// - All sources disabled
-/// - Error in all source computations
-///
-/// Without crashing in DEBUG builds.
+    /// Verifies that the metadata pipeline handles configurations with:
+    /// - Zero active sources
+    /// - All sources disabled
+    ///
+    /// Without crashing in DEBUG builds.
 @Suite("Empty Source Configuration Tests")
 struct EmptySourceConfigurationTests {
 
@@ -21,20 +20,20 @@ struct EmptySourceConfigurationTests {
 
     private func createTestGeometry() -> Geometry {
         let mesh = MeshConfig(
-            nCells: 10,
+            cellCount: 10,
             majorRadius: 6.2,
             minorRadius: 2.0,
             toroidalField: 5.3,
             geometryType: .circular
         )
-        return createGeometry(from: mesh, q0: 1.0, qEdge: 3.5)
+        return createGeometry(from: mesh, axisSafetyFactor: 1.0, edgeSafetyFactor: 3.5)
     }
 
-    private func createTestProfiles(nCells: Int) -> CoreProfiles {
-        let Ti = [Float](repeating: 10000, count: nCells)
-        let Te = [Float](repeating: 10000, count: nCells)
-        let ne = [Float](repeating: 1e20, count: nCells)
-        let psi = [Float](repeating: 0.0, count: nCells)
+    private func createTestProfiles(cellCount: Int) -> CoreProfiles {
+        let Ti = [Float](repeating: 10000, count: cellCount)
+        let Te = [Float](repeating: 10000, count: cellCount)
+        let ne = [Float](repeating: 1e20, count: cellCount)
+        let psi = [Float](repeating: 0.0, count: cellCount)
 
         return CoreProfiles(
             ionTemperature: EvaluatedArray(evaluating: MLXArray(Ti)),
@@ -47,18 +46,18 @@ struct EmptySourceConfigurationTests {
     // MARK: - Empty Source Configuration Tests
 
     @Test("Composite source with zero sources")
-    func testCompositeWithZeroSources() {
+    func testCompositeWithZeroSources() throws {
         let geometry = createTestGeometry()
-        let profiles = createTestProfiles(nCells: 10)
+        let profiles = createTestProfiles(cellCount: 10)
 
         // Create composite with empty source dict
         let composite = CompositeSourceModel(sources: [:])
 
-        let params = SourceParameters(modelType: "composite", params: [:])
-        let terms = composite.computeTerms(
+        let parameters = SourceParameters(modelType: "composite", parameters: [:])
+        let terms = try composite.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
         // Verify metadata is not nil (should be .empty)
@@ -85,11 +84,11 @@ struct EmptySourceConfigurationTests {
     @Test("DerivedQuantities with empty source metadata")
     func testDerivedQuantitiesWithEmptyMetadata() {
         let geometry = createTestGeometry()
-        let profiles = createTestProfiles(nCells: 10)
+        let profiles = createTestProfiles(cellCount: 10)
 
         // Create source terms with empty metadata
-        let nCells = 10
-        let zeros = EvaluatedArray.zeros([nCells])
+        let cellCount = 10
+        let zeros = EvaluatedArray.zeros([cellCount])
         let sources = SourceTerms(
             ionHeating: zeros,
             electronHeating: zeros,
@@ -107,39 +106,34 @@ struct EmptySourceConfigurationTests {
         )
 
         // Verify power values are zero
-        #expect(derived.P_fusion == 0, "Fusion power should be 0 with empty metadata")
-        #expect(derived.P_ohmic == 0, "Ohmic power should be 0 with empty metadata")
-        #expect(derived.P_auxiliary == 0, "Auxiliary power should be 0 with empty metadata")
-        #expect(derived.P_alpha == 0, "Alpha power should be 0 with empty metadata")
+        #expect(derived.fusionPower == 0, "Fusion power should be 0 with empty metadata")
+        #expect(derived.ohmicPower == 0, "Ohmic power should be 0 with empty metadata")
+        #expect(derived.auxiliaryPower == 0, "Auxiliary power should be 0 with empty metadata")
+        #expect(derived.alphaPower == 0, "Alpha power should be 0 with empty metadata")
 
-        // Verify Q_fusion is 0 (no heating)
-        #expect(derived.Q_fusion == 0, "Q_fusion should be 0 with no sources")
+        // Verify fusionGain is 0 (no heating)
+        #expect(derived.fusionGain == 0, "Q_fusion should be 0 with no sources")
 
         print("✅ DerivedQuantities with empty metadata test passed")
     }
 
-    @Test("Adapter error recovery with metadata")
-    func testAdapterErrorRecovery() {
-        // This test verifies that when a source model throws an error,
-        // the adapter returns emptySourceTerms with SourceMetadataCollection.empty,
-        // not nil metadata
-
-        let nCells = 10
+    @Test("Source adapter returns valid metadata")
+    func testSourceAdapterReturnsValidMetadata() throws {
+        let cellCount = 10
         let geometry = createTestGeometry()
-        let profiles = createTestProfiles(nCells: nCells)
+        let profiles = createTestProfiles(cellCount: cellCount)
 
         // Test with OhmicHeatingSource (which can throw errors)
         let ohmicSource = OhmicHeatingSource()
-        let params = SourceParameters(modelType: "ohmic", params: [:])
+        let parameters = SourceParameters(modelType: "ohmic", parameters: [:])
 
-        let terms = ohmicSource.computeTerms(
+        let terms = try ohmicSource.computeTerms(
             profiles: profiles,
             geometry: geometry,
-            params: params
+            parameters: parameters
         )
 
-        // Even if an error occurs, metadata should not be nil
-        #expect(terms.metadata != nil, "Metadata should not be nil even on error")
+        #expect(terms.metadata != nil, "Metadata should not be nil")
 
         // This ensures DerivedQuantitiesComputer will not crash
         let derived = DerivedQuantitiesComputer.compute(
@@ -148,16 +142,13 @@ struct EmptySourceConfigurationTests {
             sources: terms
         )
 
-        // Powers should be >= 0 (either actual values or zero on error)
-        #expect(derived.P_ohmic >= 0)
-
-        print("✅ Adapter error recovery test passed")
+        #expect(derived.ohmicPower >= 0)
     }
 
     @Test("Source-free simulation configuration")
     func testSourceFreeSimulation() {
         let geometry = createTestGeometry()
-        let profiles = createTestProfiles(nCells: 10)
+        let profiles = createTestProfiles(cellCount: 10)
 
         // Simulate a source-free run (only transport, no sources)
         // This is a valid configuration for testing transport models
@@ -170,16 +161,16 @@ struct EmptySourceConfigurationTests {
         )
 
         // All power values should be zero
-        #expect(derived.P_fusion == 0)
-        #expect(derived.P_ohmic == 0)
-        #expect(derived.P_auxiliary == 0)
-        #expect(derived.P_alpha == 0)
+        #expect(derived.fusionPower == 0)
+        #expect(derived.ohmicPower == 0)
+        #expect(derived.auxiliaryPower == 0)
+        #expect(derived.alphaPower == 0)
 
-        // Q_fusion should be 0
-        #expect(derived.Q_fusion == 0)
+        // fusionGain should be 0
+        #expect(derived.fusionGain == 0)
 
         // Thermal energy should still be > 0 (from profiles)
-        #expect(derived.W_thermal > 0)
+        #expect(derived.thermalEnergy > 0)
 
         print("✅ Source-free simulation test passed")
     }
@@ -187,7 +178,7 @@ struct EmptySourceConfigurationTests {
     @Test("Power balance with empty metadata")
     func testPowerBalanceWithEmptyMetadata() {
         let geometry = createTestGeometry()
-        let profiles = createTestProfiles(nCells: 10)
+        let profiles = createTestProfiles(cellCount: 10)
 
         // Create sources with empty metadata
         let sources = SourceTerms(
@@ -206,15 +197,15 @@ struct EmptySourceConfigurationTests {
         )
 
         // Verify all computed powers are zero
-        let totalPower = derived.P_fusion + derived.P_auxiliary + derived.P_ohmic
+        let totalPower = derived.fusionPower + derived.auxiliaryPower + derived.ohmicPower
 
         #expect(totalPower == 0, "Total power should be 0 with empty metadata")
-        #expect(derived.Q_fusion == 0, "Q should be 0 with no sources")
+        #expect(derived.fusionGain == 0, "Q should be 0 with no sources")
 
         print("✅ Power balance with empty metadata test passed")
-        print("   P_fusion: \(derived.P_fusion) MW")
-        print("   P_auxiliary: \(derived.P_auxiliary) MW")
-        print("   P_ohmic: \(derived.P_ohmic) MW")
-        print("   Q_fusion: \(derived.Q_fusion)")
+        print("   fusionPower: \(derived.fusionPower) MW")
+        print("   auxiliaryPower: \(derived.auxiliaryPower) MW")
+        print("   ohmicPower: \(derived.ohmicPower) MW")
+        print("   fusionGain: \(derived.fusionGain)")
     }
 }

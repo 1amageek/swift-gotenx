@@ -29,8 +29,8 @@ See `iter_like_qlknn.json` for a complete ITER-like simulation using QLKNN trans
       "transport": {
         "modelType": "qlknn",
         "parameters": {
-          "Zeff": 1.5,
-          "min_chi": 0.01
+          "effectiveCharge": 1.5,
+          "minimumHeatDiffusivity": 0.01
         }
       }
     }
@@ -42,15 +42,15 @@ See `iter_like_qlknn.json` for a complete ITER-like simulation using QLKNN trans
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `Zeff` | Float | 1.0 | Effective charge for collisionality calculation |
-| `min_chi` | Float | 0.01 | Minimum transport coefficient floor [m²/s] |
+| `effectiveCharge` | Float | 1.0 | Effective charge for collisionality calculation |
+| `minimumHeatDiffusivity` | Float | 0.01 | Minimum transport coefficient floor [m²/s] |
 
-**Zeff values**:
+**effectiveCharge values**:
 - 1.0: Pure deuterium plasma
 - 1.5: Typical D-T mixture with impurities
 - 2.0-3.0: Higher impurity content
 
-**min_chi**: Prevents numerical issues when QLKNN predicts very low transport (e.g., in ITB regions).
+**minimumHeatDiffusivity**: Prevents numerical issues when QLKNN predicts very low transport (e.g., in ITB regions).
 
 ## Running a Simulation
 
@@ -138,10 +138,10 @@ swift build
 
 **Cause**: QLKNN may predict very low transport in stable regions (e.g., ITB).
 
-**Solution**: Adjust `min_chi` parameter:
+**Solution**: Adjust `minimumHeatDiffusivity` parameter:
 ```json
 "parameters": {
-  "min_chi": 0.1  // Increase floor to 0.1 m²/s
+  "minimumHeatDiffusivity": 0.1
 }
 ```
 

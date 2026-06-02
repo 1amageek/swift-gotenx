@@ -6,6 +6,23 @@
 
 import MLX
 
+public enum SourceMetadataValidationError: Error, Equatable, CustomStringConvertible {
+    case nonFinitePower(modelName: String, field: String, value: Float)
+    case negativeAlphaPower(modelName: String, value: Float)
+    case positiveRadiationPower(modelName: String, value: Float)
+
+    public var description: String {
+        switch self {
+        case let .nonFinitePower(modelName, field, value):
+            return "Source metadata for \(modelName) has non-finite \(field): \(value)"
+        case let .negativeAlphaPower(modelName, value):
+            return "Source metadata for \(modelName) has negative alphaPower: \(value)"
+        case let .positiveRadiationPower(modelName, value):
+            return "Source metadata for \(modelName) has positive radiation power: \(value)"
+        }
+    }
+}
+
 /// Source category classification
 ///
 /// Categories align with standard tokamak physics nomenclature:
@@ -85,18 +102,6 @@ public struct SourceMetadata: Sendable, Codable {
         ionPower + electronPower
     }
 
-    /// Create default metadata for backward compatibility
-    ///
-    /// Phase 3 models without metadata support return this default.
-    /// Powers are set to zero, indicating "not tracked".
-    public static func `default`(modelName: String) -> SourceMetadata {
-        SourceMetadata(
-            modelName: modelName,
-            category: .other,
-            ionPower: 0,
-            electronPower: 0
-        )
-    }
 }
 
 /// Collection of source metadata for all active sources
@@ -119,6 +124,41 @@ public struct SourceMetadataCollection: Sendable {
 
     public init(entries: [SourceMetadata]) {
         self.entries = entries
+    }
+
+    public func validatePowerAccounting() throws {
+        for entry in entries {
+            try Self.validateFinite(entry.ionPower, field: "ionPower", modelName: entry.modelName)
+            try Self.validateFinite(entry.electronPower, field: "electronPower", modelName: entry.modelName)
+            try Self.validateFinite(entry.totalPower, field: "totalPower", modelName: entry.modelName)
+
+            if let alphaPower = entry.alphaPower {
+                try Self.validateFinite(alphaPower, field: "alphaPower", modelName: entry.modelName)
+                if alphaPower < 0 {
+                    throw SourceMetadataValidationError.negativeAlphaPower(
+                        modelName: entry.modelName,
+                        value: alphaPower
+                    )
+                }
+            }
+
+            if let radiationPower = entry.radiationPower {
+                try Self.validateFinite(radiationPower, field: "radiationPower", modelName: entry.modelName)
+                if radiationPower > 0 {
+                    throw SourceMetadataValidationError.positiveRadiationPower(
+                        modelName: entry.modelName,
+                        value: radiationPower
+                    )
+                }
+            }
+
+            if entry.category == .radiation, entry.totalPower > 0 {
+                throw SourceMetadataValidationError.positiveRadiationPower(
+                    modelName: entry.modelName,
+                    value: entry.totalPower
+                )
+            }
+        }
     }
 
     /// Compute total power by category
@@ -166,8 +206,18 @@ public struct SourceMetadataCollection: Sendable {
         entries.map { $0.electronPower }.reduce(0, +)
     }
 
-    /// Empty collection for backward compatibility
+    /// Empty collection for simulations with no active sources
     public static var empty: SourceMetadataCollection {
         SourceMetadataCollection(entries: [])
+    }
+
+    private static func validateFinite(_ value: Float, field: String, modelName: String) throws {
+        guard value.isFinite else {
+            throw SourceMetadataValidationError.nonFinitePower(
+                modelName: modelName,
+                field: field,
+                value: value
+            )
+        }
     }
 }

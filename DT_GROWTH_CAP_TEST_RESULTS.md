@@ -125,18 +125,18 @@ if nextDt < timeStepCalculator.minimumTimestep {
 **Calculation:**
 - Current dt: 1.8e-4
 - Halved dt: 9.0e-5
-- Minimum dt: **1.0e-4** (default: maxDt * minDtFraction = 1e-1 * 0.001)
+- Minimum dt: **1.0e-4** (default: maximumTimeStep * minimumTimeStepFraction = 1e-1 * 0.001)
 - **9e-5 < 1e-4** → Immediate error, no retry!
 
-**Why minDt = 1e-4?**
+**Why minimumTimeStep = 1e-4?**
 
 From TimeConfiguration.swift:
 ```swift
 public var effectiveMinDt: Float {
-    if let minDt = minDt {
-        return minDt  // Explicit value
-    } else if let fraction = minDtFraction {
-        return maxDt * fraction  // Default: 1e-1 * 0.001 = 1e-4
+    if let minimumTimeStep = minimumTimeStep {
+        return minimumTimeStep  // Explicit value
+    } else if let fraction = minimumTimeStepFraction {
+        return maximumTimeStep * fraction  // Default: 1e-1 * 0.001 = 1e-4
     }
     // ...
 }
@@ -188,10 +188,10 @@ The dt increase from 1.5e-4 to 1.8e-4 (only 1.2×) caused:
 {
   "time": {
     "adaptive": {
-      "minDt": 1e-5,  // Was implicitly 1e-4, now 10× smaller
-      "maxDt": 1e-3,  // Or reduce this to prevent large dt jumps
-      "minDtFraction": null,  // Ignored if minDt is set
-      "maxTimestepGrowth": 1.2
+      "minimumTimeStep": 1e-5,  // Was implicitly 1e-4, now 10× smaller
+      "maximumTimeStep": 1e-3,  // Or reduce this to prevent large dt jumps
+      "minimumTimeStepFraction": null,  // Ignored if minimumTimeStep is set
+      "maximumTimeStepGrowth": 1.2
     }
   }
 }
@@ -199,7 +199,7 @@ The dt increase from 1.5e-4 to 1.8e-4 (only 1.2×) caused:
 
 **Expected behavior:**
 - Step 1 fails at dt=1.8e-4 (as before)
-- Retry 1: dt=9.0e-5 (now ABOVE minDt=1e-5) ✅
+- Retry 1: dt=9.0e-5 (now ABOVE minimumTimeStep=1e-5) ✅
 - Retry 2: dt=4.5e-5 (if needed)
 - ... up to 5 retries
 
@@ -221,9 +221,9 @@ The dt increase from 1.5e-4 to 1.8e-4 (only 1.2×) caused:
 {
   "time": {
     "adaptive": {
-      "minDt": 1e-5,  // Lower minimum
-      "maxDt": 1e-3,  // Lower maximum
-      "maxTimestepGrowth": 1.1  // 10% growth (was 1.2 = 20%)
+      "minimumTimeStep": 1e-5,  // Lower minimum
+      "maximumTimeStep": 1e-3,  // Lower maximum
+      "maximumTimeStepGrowth": 1.1  // 10% growth (was 1.2 = 20%)
     }
   }
 }
@@ -252,11 +252,11 @@ The dt increase from 1.5e-4 to 1.8e-4 (only 1.2×) caused:
 ```json
 {
   "time": {
-    "initialDt": 1.0e-4,  // Start smaller
+    "initialTimeStep": 1.0e-4,  // Start smaller
     "adaptive": {
-      "minDt": 1e-6,  // Very low minimum
-      "maxDt": 5e-4,  // Lower maximum (was 1e-3 or 1e-1)
-      "maxTimestepGrowth": 1.05  // 5% growth (very conservative)
+      "minimumTimeStep": 1e-6,  // Very low minimum
+      "maximumTimeStep": 5e-4,  // Lower maximum (was 1e-3 or 1e-1)
+      "maximumTimeStepGrowth": 1.05  // 5% growth (very conservative)
     }
   }
 }
@@ -281,17 +281,17 @@ The dt increase from 1.5e-4 to 1.8e-4 (only 1.2×) caused:
 
 ## Testing Recommendations
 
-### Test 1: Verify Option 1 (Lower minDt)
+### Test 1: Verify Option 1 (Lower minimumTimeStep)
 
 **Config:**
 ```json
 {
   "time": {
-    "initialDt": 1.5e-4,
+    "initialTimeStep": 1.5e-4,
     "adaptive": {
-      "minDt": 1e-5,
-      "maxDt": 1e-3,
-      "maxTimestepGrowth": 1.2
+      "minimumTimeStep": 1e-5,
+      "maximumTimeStep": 1e-3,
+      "maximumTimeStepGrowth": 1.2
     }
   }
 }
@@ -311,11 +311,11 @@ The dt increase from 1.5e-4 to 1.8e-4 (only 1.2×) caused:
 ```json
 {
   "time": {
-    "initialDt": 1.5e-4,
+    "initialTimeStep": 1.5e-4,
     "adaptive": {
-      "minDt": 1e-5,
-      "maxDt": 1e-3,
-      "maxTimestepGrowth": 1.1
+      "minimumTimeStep": 1e-5,
+      "maximumTimeStep": 1e-3,
+      "maximumTimeStepGrowth": 1.1
     }
   }
 }
@@ -402,7 +402,7 @@ Solver error: convergenceFailure(iterations: N, residualNorm: X)
 | Te residual | N/A | 1.94e+01 | ❌ Not conv |
 | ne residual | N/A | 4.18e-02 | ✅ OK |
 | Iterations | N/A | 1 (aborted) | ❌ Failed |
-| Retry attempted | N/A | 9e-5 | ❌ Below minDt |
+| Retry attempted | N/A | 9e-5 | ❌ Below minimumTimeStep |
 
 ---
 
@@ -420,15 +420,15 @@ The problem is not with the implementation, but with configuration:
 - `minimumTimestep = 1e-4` is too high for this problem
 - Even 1.2× dt growth causes severe Jacobian ill-conditioning
 - Need to either:
-  - Lower `minDt` to 1e-5 or lower (allow more retries)
-  - Reduce `maxTimestepGrowth` to 1.1 or 1.05 (gentler growth)
+  - Lower `minimumTimeStep` to 1e-5 or lower (allow more retries)
+  - Reduce `maximumTimeStepGrowth` to 1.1 or 1.05 (gentler growth)
   - Both
 
 ### Recommended Next Steps
 
-1. **Immediate:** Set `minDt: 1e-5` in configuration
+1. **Immediate:** Set `minimumTimeStep: 1e-5` in configuration
 2. **Test:** Run simulation and verify Step 1 retry succeeds
-3. **Optimize:** Reduce `maxTimestepGrowth` to 1.1 if still unstable
+3. **Optimize:** Reduce `maximumTimeStepGrowth` to 1.1 if still unstable
 4. **Monitor:** Track κ, linear_error, and convergence behavior
 5. **Report:** Document which configuration works best
 

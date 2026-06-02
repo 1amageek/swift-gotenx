@@ -1,4 +1,4 @@
-// ToraxReferenceDataLoader.swift
+// TORAXReferenceDataLoader.swift
 // NetCDF I/O for TORAX reference data
 
 import Foundation
@@ -7,13 +7,13 @@ import GotenxCore
 
 // MARK: - NetCDF Loading Extension
 
-extension ToraxReferenceData {
+extension TORAXReferenceData {
 
     /// Load TORAX reference data from NetCDF file
     ///
     /// - Parameter path: Path to TORAX NetCDF output file
-    /// - Returns: ToraxReferenceData with all profiles
-    /// - Throws: ToraxDataError if file cannot be read
+    /// - Returns: TORAXReferenceData with all profiles
+    /// - Throws: TORAXDataError if file cannot be read
     ///
     /// ## Expected NetCDF structure
     ///
@@ -39,86 +39,86 @@ extension ToraxReferenceData {
     /// ## Example
     ///
     /// ```swift
-    /// let toraxData = try ToraxReferenceData.loadFromNetCDF(
+    /// let toraxData = try TORAXReferenceData.loadFromNetCDF(
     ///     path: "Tests/GotenxTests/Validation/ReferenceData/torax_iter_baseline.nc"
     /// )
     /// print("Loaded \(toraxData.time.count) time points")
-    /// print("Grid size: \(toraxData.rho.count) cells")
+    /// print("Grid size: \(toraxData.normalizedRadius.count) cells")
     /// ```
-    public static func loadFromNetCDF(path: String) throws -> ToraxReferenceData {
+    public static func loadFromNetCDF(path: String) throws -> TORAXReferenceData {
         // Check file exists
         guard FileManager.default.fileExists(atPath: path) else {
-            throw ToraxDataError.fileNotFound(path)
+            throw TORAXDataError.fileNotFound(path)
         }
 
         // Open NetCDF file
         guard let file = try NetCDF.open(path: path, allowUpdate: false) else {
-            throw ToraxDataError.fileOpenFailed(path)
+            throw TORAXDataError.fileOpenFailed(path)
         }
 
         // Read coordinate variables with fallback names
         let timeCandidates = ["time", "t"]
         guard let timeVar = findVariable(file: file, candidates: timeCandidates) else {
-            throw ToraxDataError.variableNotFound("time (tried: \(timeCandidates.joined(separator: ", ")))")
+            throw TORAXDataError.variableNotFound("time (tried: \(timeCandidates.joined(separator: ", ")))")
         }
 
         let rhoCandidates = ["rho_tor_norm", "rho", "rho_toroidal"]
         guard let rhoVar = findVariable(file: file, candidates: rhoCandidates) else {
-            throw ToraxDataError.variableNotFound("rho_tor_norm (tried: \(rhoCandidates.joined(separator: ", ")))")
+            throw TORAXDataError.variableNotFound("rho_tor_norm (tried: \(rhoCandidates.joined(separator: ", ")))")
         }
 
         guard let timeVarTyped = timeVar.asType(Float.self) else {
-            throw ToraxDataError.invalidData("time variable is not Float type")
+            throw TORAXDataError.invalidData("time variable is not Float type")
         }
         guard let rhoVarTyped = rhoVar.asType(Float.self) else {
-            throw ToraxDataError.invalidData("rho_tor_norm variable is not Float type")
+            throw TORAXDataError.invalidData("rho_tor_norm variable is not Float type")
         }
 
         let timeData: [Float] = try timeVarTyped.read()
         let rhoData: [Float] = try rhoVarTyped.read()
 
-        let nTime = timeData.count
+        let timeCount = timeData.count
         let nRho = rhoData.count
 
         // Validate dimensions
-        guard nTime > 0 else {
-            throw ToraxDataError.invalidDimensions("time dimension is empty")
+        guard timeCount > 0 else {
+            throw TORAXDataError.invalidDimensions("time dimension is empty")
         }
         guard nRho >= 10 && nRho <= 200 else {
-            throw ToraxDataError.invalidDimensions("rho_tor_norm must be 10-200, got \(nRho)")
+            throw TORAXDataError.invalidDimensions("rho_tor_norm must be 10-200, got \(nRho)")
         }
 
         // Verify rho is in ascending order (0 → 1)
         if rhoData.first! > rhoData.last! {
-            throw ToraxDataError.invalidData("rho_tor_norm must be in ascending order (0 → 1), got descending")
+            throw TORAXDataError.invalidData("rho_tor_norm must be in ascending order (0 → 1), got descending")
         }
 
         // Read profile variables with fallback names
         let tiCandidates = ["ion_temperature", "temp_ion", "Ti", "ti"]
-        let Ti = try read2DProfileWithFallback(file: file, candidates: tiCandidates, nTime: nTime, nRho: nRho)
+        let ionTemperature = try read2DProfileWithFallback(file: file, candidates: tiCandidates, timeCount: timeCount, nRho: nRho)
 
         let teCandidates = ["electron_temperature", "temp_electron", "Te", "te", "temp_el"]
-        let Te = try read2DProfileWithFallback(file: file, candidates: teCandidates, nTime: nTime, nRho: nRho)
+        let electronTemperature = try read2DProfileWithFallback(file: file, candidates: teCandidates, timeCount: timeCount, nRho: nRho)
 
         let neCandidates = ["electron_density", "ne", "n_e", "dens_electron"]
-        let ne = try read2DProfileWithFallback(file: file, candidates: neCandidates, nTime: nTime, nRho: nRho)
+        let electronDensity = try read2DProfileWithFallback(file: file, candidates: neCandidates, timeCount: timeCount, nRho: nRho)
 
         // Poloidal flux is optional
         let psiCandidates = ["poloidal_flux", "psi", "flux_pol"]
-        let psi: [[Float]]?
+        let poloidalFlux: [[Float]]?
         if findVariable(file: file, candidates: psiCandidates) != nil {
-            psi = try read2DProfileWithFallback(file: file, candidates: psiCandidates, nTime: nTime, nRho: nRho)
+            poloidalFlux = try read2DProfileWithFallback(file: file, candidates: psiCandidates, timeCount: timeCount, nRho: nRho)
         } else {
-            psi = nil
+            poloidalFlux = nil
         }
 
-        return ToraxReferenceData(
+        return TORAXReferenceData(
             time: timeData,
-            rho: rhoData,
-            Ti: Ti,
-            Te: Te,
-            ne: ne,
-            psi: psi
+            normalizedRadius: rhoData,
+            ionTemperature: ionTemperature,
+            electronTemperature: electronTemperature,
+            electronDensity: electronDensity,
+            poloidalFlux: poloidalFlux
         )
     }
 
@@ -142,32 +142,32 @@ extension ToraxReferenceData {
     /// - Parameters:
     ///   - file: NetCDF file group
     ///   - candidates: List of candidate variable names
-    ///   - nTime: Expected time dimension length
+    ///   - timeCount: Expected time dimension length
     ///   - nRho: Expected rho dimension length
-    /// - Returns: 2D array [nTime][nRho]
+    /// - Returns: 2D array [timeCount][nRho]
     private static func read2DProfileWithFallback(
         file: Group,
         candidates: [String],
-        nTime: Int,
+        timeCount: Int,
         nRho: Int
     ) throws -> [[Float]] {
         guard let variable = findVariable(file: file, candidates: candidates) else {
-            throw ToraxDataError.variableNotFound("\(candidates[0]) (tried: \(candidates.joined(separator: ", ")))")
+            throw TORAXDataError.variableNotFound("\(candidates[0]) (tried: \(candidates.joined(separator: ", ")))")
         }
 
-        return try read2DProfile(variable: variable, nTime: nTime, nRho: nRho)
+        return try read2DProfile(variable: variable, timeCount: timeCount, nRho: nRho)
     }
 
     /// Read 2D profile variable from NetCDF file
     ///
     /// - Parameters:
     ///   - variable: NetCDF variable
-    ///   - nTime: Expected time dimension length
+    ///   - timeCount: Expected time dimension length
     ///   - nRho: Expected rho dimension length
-    /// - Returns: 2D array [nTime][nRho]
+    /// - Returns: 2D array [timeCount][nRho]
     private static func read2DProfile(
         variable: Variable,
-        nTime: Int,
+        timeCount: Int,
         nRho: Int
     ) throws -> [[Float]] {
         let name = variable.name
@@ -175,7 +175,7 @@ extension ToraxReferenceData {
         // Verify dimensions
         let dims = variable.dimensions
         guard dims.count == 2 else {
-            throw ToraxDataError.invalidDimensions("\(name) must be 2D, got \(dims.count)D")
+            throw TORAXDataError.invalidDimensions("\(name) must be 2D, got \(dims.count)D")
         }
 
         // Verify dimension order: expect [time, rho]
@@ -184,7 +184,7 @@ extension ToraxReferenceData {
         let isRhoSecond = dimNames[1].contains("rho")
 
         guard isTimeFirst && isRhoSecond else {
-            throw ToraxDataError.invalidDimensions(
+            throw TORAXDataError.invalidDimensions(
                 "\(name) dimensions: expected [time, rho_*], got [\(dimNames[0]), \(dimNames[1])]"
             )
         }
@@ -193,32 +193,32 @@ extension ToraxReferenceData {
         let actualNTime = dims[0].length
         let actualNRho = dims[1].length
 
-        guard actualNTime == nTime else {
-            throw ToraxDataError.invalidDimensions(
-                "\(name) time dimension mismatch: expected \(nTime), got \(actualNTime)"
+        guard actualNTime == timeCount else {
+            throw TORAXDataError.invalidDimensions(
+                "\(name) time dimension mismatch: expected \(timeCount), got \(actualNTime)"
             )
         }
         guard actualNRho == nRho else {
-            throw ToraxDataError.invalidDimensions(
+            throw TORAXDataError.invalidDimensions(
                 "\(name) rho dimension mismatch: expected \(nRho), got \(actualNRho)"
             )
         }
 
         // Get typed variable
         guard let typedVar = variable.asType(Float.self) else {
-            throw ToraxDataError.invalidData("\(name) is not Float type")
+            throw TORAXDataError.invalidData("\(name) is not Float type")
         }
 
         // Read flat data (row-major: [T0R0, T0R1, ..., T0Rn, T1R0, T1R1, ...])
-        let flatData: [Float] = try typedVar.read(offset: [0, 0], count: [nTime, nRho])
+        let flatData: [Float] = try typedVar.read(offset: [0, 0], count: [timeCount, nRho])
 
         // Verify data size
-        guard flatData.count == nTime * nRho else {
-            throw ToraxDataError.invalidData("\(name) size mismatch: expected \(nTime * nRho), got \(flatData.count)")
+        guard flatData.count == timeCount * nRho else {
+            throw TORAXDataError.invalidData("\(name) size mismatch: expected \(timeCount * nRho), got \(flatData.count)")
         }
 
         // Reshape to [[Float]] (time-series of profiles)
-        let profiles: [[Float]] = (0..<nTime).map { t in
+        let profiles: [[Float]] = (0..<timeCount).map { t in
             let start = t * nRho
             let end = start + nRho
             return Array(flatData[start..<end])
