@@ -175,21 +175,39 @@ public struct DifferentiableSimulation {
                 geometry: geo,
                 parameters: dynamicParameters.transportParameters
             )
+            let geometricFactors = GeometricFactors.from(
+                geometry: geo,
+                evaluationMode: .deferred
+            )
 
             let sourceTerms = sources.reduce(
                 into: SourceTerms.zero(
                     cellCount: staticParameters.mesh.cellCount,
+                    evaluationMode: .deferred,
                     metadata: nil,
                     validateDebugUnits: false
                 )
             ) { total, model in
                 if let parameters = dynamicParameters.sourceParameters[model.name] {
-                    let contribution = model.computeTermsForSolver(
+                    let context = SourceEvaluationContext(
                         profiles: profs,
                         geometry: geo,
-                        parameters: parameters
+                        geometricFactors: geometricFactors,
+                        parameters: parameters,
+                        purpose: .solver
                     )
-                    total = total.adding(contribution, validateDebugUnits: false)
+                    let contribution: SourceTerms
+                    do {
+                        contribution = try model.computeTerms(in: context)
+                    } catch {
+                        contribution = SourceTerms.invalidNumerics(cellCount: staticParameters.mesh.cellCount)
+                    }
+                    total = total.adding(
+                        contribution,
+                        evaluationMode: .deferred,
+                        metadata: nil,
+                        validateDebugUnits: false
+                    )
                 }
             }
 
@@ -198,7 +216,9 @@ public struct DifferentiableSimulation {
                 sources: sourceTerms,
                 geometry: geo,
                 staticParameters: staticParameters,
-                profiles: profs
+                profiles: profs,
+                evaluationMode: .deferred,
+                geometricFactors: geometricFactors
             )
         }
 

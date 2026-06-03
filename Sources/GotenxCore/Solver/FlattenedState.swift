@@ -146,17 +146,26 @@ public struct FlattenedState: Sendable {
         self.layout = layout
     }
 
+    package init(values: MLXArray, layout: StateLayout, evaluationMode: MLXEvaluationMode) {
+        self.values = evaluationMode.wrap(values)
+        self.layout = layout
+    }
+
     // MARK: - Conversion
 
     /// Restore to CoreProfiles
     ///
     /// - Returns: Core profiles reconstructed from flattened state
     public func toCoreProfiles() -> CoreProfiles {
+        toCoreProfiles(evaluationMode: .eager)
+    }
+
+    package func toCoreProfiles(evaluationMode: MLXEvaluationMode) -> CoreProfiles {
         // Extract MLXArray from EvaluatedArray
         let array = values.value
 
         // Slice array and wrap each slice in EvaluatedArray
-        let extracted = EvaluatedArray.evaluatingBatch([
+        let extracted = evaluationMode.wrapBatch([
             array[layout.tiRange],
             array[layout.teRange],
             array[layout.neRange],
@@ -201,6 +210,10 @@ public struct FlattenedState: Sendable {
     /// - Parameter reference: Reference state for normalization
     /// - Returns: Scaled state with values normalized by reference
     public func scaled(by reference: FlattenedState) -> FlattenedState {
+        scaled(by: reference, evaluationMode: .eager)
+    }
+
+    package func scaled(by reference: FlattenedState, evaluationMode: MLXEvaluationMode) -> FlattenedState {
         // Validate layout compatibility before scaling.
         // This prevents silent broadcasting errors that can cause solver divergence.
         precondition(reference.layout == layout,
@@ -214,11 +227,11 @@ public struct FlattenedState: Sendable {
         // Perform element-wise division on the active MLX backend.
         // Add a small epsilon to prevent division by zero.
         let scaledValues = values.value / (reference.values.value + 1e-10)
-        eval(scaledValues)
 
         return FlattenedState(
-            values: EvaluatedArray(evaluating: scaledValues),
-            layout: layout
+            values: scaledValues,
+            layout: layout,
+            evaluationMode: evaluationMode
         )
     }
 
@@ -247,6 +260,10 @@ public struct FlattenedState: Sendable {
     /// - Parameter reference: Reference state used for original scaling
     /// - Returns: Unscaled state in physical units
     public func unscaled(by reference: FlattenedState) -> FlattenedState {
+        unscaled(by: reference, evaluationMode: .eager)
+    }
+
+    package func unscaled(by reference: FlattenedState, evaluationMode: MLXEvaluationMode) -> FlattenedState {
         // Validate layout compatibility before unscaling.
         // This prevents silent broadcasting errors that can cause solver divergence.
         precondition(reference.layout == layout,
@@ -260,11 +277,11 @@ public struct FlattenedState: Sendable {
         // Perform element-wise multiplication on the active MLX backend.
         // Use reference plus epsilon to match the scaling formula.
         let unscaledValues = values.value * (reference.values.value + 1e-10)
-        eval(unscaledValues)
 
         return FlattenedState(
-            values: EvaluatedArray(evaluating: unscaledValues),
-            layout: layout
+            values: unscaledValues,
+            layout: layout,
+            evaluationMode: evaluationMode
         )
     }
 
@@ -287,7 +304,7 @@ public struct FlattenedState: Sendable {
         eval(safeScales)
 
         return FlattenedState(
-            values: EvaluatedArray(evaluating: safeScales),
+            values: .uncheckedLazy(safeScales),
             layout: layout
         )
     }
@@ -320,17 +337,16 @@ public struct FlattenedState: Sendable {
         let psiScale: Float = 1.0  // 1 Wb
 
         // Create scaling array: [Ti_scale; Te_scale; ne_scale; psi_scale]
-        // Use Swift arrays and convert to MLXArray
-        let tiScales = MLXArray(Array(repeating: tiScale, count: cellCount))
-        let teScales = MLXArray(Array(repeating: teScale, count: cellCount))
-        let neScales = MLXArray(Array(repeating: neScale, count: cellCount))
-        let psiScales = MLXArray(Array(repeating: psiScale, count: cellCount))
+        let tiScales = MLXArray.full([cellCount], values: MLXArray(tiScale), dtype: .float32)
+        let teScales = MLXArray.full([cellCount], values: MLXArray(teScale), dtype: .float32)
+        let neScales = MLXArray.full([cellCount], values: MLXArray(neScale), dtype: .float32)
+        let psiScales = MLXArray.full([cellCount], values: MLXArray(psiScale), dtype: .float32)
 
         let scaleArray = concatenated([tiScales, teScales, neScales, psiScales], axis: 0)
         eval(scaleArray)
 
         return FlattenedState(
-            values: EvaluatedArray(evaluating: scaleArray),
+            values: .uncheckedLazy(scaleArray),
             layout: layout
         )
     }
@@ -406,6 +422,96 @@ public func computeJacobianViaVJP(
     let rows = vmap(vjpRow, inAxes: [0], outAxes: [0])([identity])[0]
     eval(rows)
     return rows
+}
+
+/// Compute the local block-tridiagonal Jacobian candidate using colored VJPs.
+///
+/// The 1D finite-volume residual is local in radius: each cell residual depends on
+/// the same cell and its immediate neighbors. Residual rows whose cells differ by
+/// at least three therefore have disjoint gradient support. Coloring cells by
+/// `cell % 3` lets one VJP recover many independent rows at once.
+///
+/// The returned matrix keeps the existing variable-major layout `[Ti; Te; ne; psi]`
+/// and stores zero outside the three-cell stencil. Use a true directional derivative
+/// after solving to decide whether omitted non-local physics requires a full dense
+/// VJP fallback.
+public func computeBlockTriDiagonalJacobianViaColoredVJP(
+    _ residualFn: @escaping (MLXArray) -> MLXArray,
+    _ x: MLXArray,
+    layout: FlattenedState.StateLayout
+) -> MLXArray {
+    let dimension = layout.totalSize
+    let cellCount = layout.cellCount
+    var jacobian = [Float](repeating: 0, count: dimension * dimension)
+    var cotangents = [Float](repeating: 0, count: 12 * dimension)
+
+    let wrappedFn: ([MLXArray]) -> [MLXArray] = { inputs in
+        [residualFn(inputs[0])]
+    }
+
+    let vjpRow: ([MLXArray]) -> [MLXArray] = { cotangentInputs in
+        let (_, gradients) = vjp(wrappedFn, primals: [x], cotangents: [cotangentInputs[0]])
+        return [gradients[0]]
+    }
+
+    for rowComponent in 0..<4 {
+        for color in 0..<3 {
+            let seedIndex = rowComponent * 3 + color
+            for cell in stride(from: color, to: cellCount, by: 3) {
+                let row = variableMajorIndex(cell: cell, component: rowComponent, cellCount: cellCount)
+                cotangents[seedIndex * dimension + row] = 1
+            }
+        }
+    }
+
+    let cotangentMatrix = MLXArray(cotangents).reshaped([12, dimension])
+    let gradientMatrix = vmap(vjpRow, inAxes: [0], outAxes: [0])([cotangentMatrix])[0]
+    eval(gradientMatrix)
+    let gradientRows = gradientMatrix.asArray(Float.self)
+
+    for rowComponent in 0..<4 {
+        for color in 0..<3 {
+            let seedIndex = rowComponent * 3 + color
+            for cell in stride(from: color, to: cellCount, by: 3) {
+                let row = variableMajorIndex(cell: cell, component: rowComponent, cellCount: cellCount)
+                let firstColumnCell = max(0, cell - 1)
+                let lastColumnCell = min(cellCount - 1, cell + 1)
+                for columnCell in firstColumnCell...lastColumnCell {
+                    for columnComponent in 0..<4 {
+                        let column = variableMajorIndex(
+                            cell: columnCell,
+                            component: columnComponent,
+                            cellCount: cellCount
+                        )
+                        jacobian[row * dimension + column] = gradientRows[seedIndex * dimension + column]
+                    }
+                }
+            }
+        }
+    }
+
+    let matrix = MLXArray(jacobian).reshaped([dimension, dimension])
+    eval(matrix)
+    return matrix
+}
+
+/// Compute the true directional derivative at `x` for a candidate direction.
+public func computeDirectionalDerivativeViaFiniteDifference(
+    _ residualFn: @escaping (MLXArray) -> MLXArray,
+    _ x: MLXArray,
+    tangent: MLXArray,
+    epsilon: Float = 1e-3
+) -> MLXArray {
+    let tangentNorm = maximum(MLX.norm(tangent), MLXArray(1e-20))
+    let stepScale = MLXArray(epsilon) / tangentNorm
+    let step = tangent * stepScale
+    let derivative = (residualFn(x + step) - residualFn(x - step)) / (2.0 * stepScale)
+    eval(derivative)
+    return derivative
+}
+
+private func variableMajorIndex(cell: Int, component: Int, cellCount: Int) -> Int {
+    component * cellCount + cell
 }
 
 // MARK: - Error Descriptions

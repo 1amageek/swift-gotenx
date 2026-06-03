@@ -312,6 +312,62 @@ struct Block1DCoeffsBuilderTests {
         }
     }
 
+    @Test("Disabled equations use inert coefficients without evaluating inactive physics")
+    func testDisabledEquationsUseInactiveCoefficients() throws {
+        let cellCount = 25
+        let meshConfig = MeshConfig(
+            cellCount: cellCount,
+            majorRadius: 6.2,
+            minorRadius: 2.0,
+            toroidalField: 5.3,
+            geometryType: .circular
+        )
+        let geometry = Geometry(config: meshConfig)
+        let profiles = CoreProfiles(
+            ionTemperature: EvaluatedArray(evaluating: MLXArray(Array(repeating: Float(10_000.0), count: cellCount))),
+            electronTemperature: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+            electronDensity: EvaluatedArray(evaluating: MLXArray(Array(repeating: Float(1e20), count: cellCount))),
+            poloidalFlux: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
+        )
+        let transport = TransportCoefficients(
+            ionHeatDiffusivity: EvaluatedArray(evaluating: MLXArray(Array(repeating: Float(1.0), count: cellCount))),
+            electronHeatDiffusivity: EvaluatedArray(evaluating: MLXArray(Array(repeating: Float(1.0), count: cellCount))),
+            particleDiffusivity: EvaluatedArray(evaluating: MLXArray(Array(repeating: Float(1.0), count: cellCount))),
+            convectionVelocity: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
+        )
+        let sources = SourceTerms(
+            ionHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+            electronHeating: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+            particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
+            currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
+        )
+        let staticParameters = StaticRuntimeParameters(
+            mesh: meshConfig,
+            evolveIonHeat: false,
+            evolveElectronHeat: false,
+            evolveElectronDensity: false,
+            evolvePoloidalFlux: false,
+            solverType: .linear,
+            theta: 1.0,
+            solverTolerance: 1e-6,
+            solverMaximumIterations: 100
+        )
+
+        let coeffs = buildBlock1DCoeffs(
+            transport: transport,
+            sources: sources,
+            geometry: geometry,
+            staticParameters: staticParameters,
+            profiles: profiles
+        )
+        try coeffs.validateNumerics()
+
+        let fluxDiffusion = coeffs.fluxCoeffs.faceDiffusionCoefficient.value.asArray(Float.self)
+        for value in fluxDiffusion {
+            #expect(value == 0)
+        }
+    }
+
     // MARK: - Current Diffusion Equation Tests
 
     /// Test Spitzer resistivity magnitude and temperature scaling

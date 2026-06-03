@@ -98,11 +98,9 @@ struct ValidationIntegrationTest {
     @Test("Load mock Gotenx output with ToraxReferenceDataLoader")
     func testLoadMockGotenxOutput() throws {
         // Setup temp file
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "ValidationIntegration")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("mock_gotenx_output.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         let (timeCount, nRho) = try createMockGotenxOutput(path: filePath)
@@ -118,9 +116,6 @@ struct ValidationIntegrationTest {
         #expect(data.ionTemperature.count == timeCount, "Ti should have \(timeCount) time points")
         #expect(data.ionTemperature[0].count == nRho, "Ti[0] should have \(nRho) rho points")
 
-        // Clean up
-        removeTestItemIfExists(atPath: filePath)
-
         print("✅ Successfully loaded mock Gotenx output")
         print("   Time points: \(data.time.count)")
         print("   Grid size: \(data.normalizedRadius.count)")
@@ -129,11 +124,9 @@ struct ValidationIntegrationTest {
     @Test("Validate physical quantities in mock output")
     func testPhysicalQuantityValidation() throws {
         // Setup temp file
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "ValidationIntegration")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("mock_gotenx_physics.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         try createMockGotenxOutput(path: filePath)
@@ -181,20 +174,15 @@ struct ValidationIntegrationTest {
         #expect(Te_edge < coreElectronTemperature, "Edge Te should be less than core Te")
         #expect(ne_edge < coreElectronDensity, "Edge density should be less than core density")
 
-        // Clean up
-        removeTestItemIfExists(atPath: filePath)
-
         print("✅ All physical quantity validations passed")
     }
 
     @Test("ValidationConfigMatcher with mock output")
     func testValidationConfigMatcherWithMockOutput() throws {
         // Setup temp file
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "ValidationIntegration")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("mock_gotenx_matcher.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         try createMockGotenxOutput(path: filePath)
@@ -232,9 +220,6 @@ struct ValidationIntegrationTest {
         #expect(config.runtime.dynamic.boundaries.electronDensity == expectedNe,
                 "Boundary ne should match data edge value")
 
-        // Clean up
-        removeTestItemIfExists(atPath: filePath)
-
         print("✅ ValidationConfigMatcher test passed")
         print("   Matched config parameters:")
         print("     Mesh size: \(config.runtime.static.mesh.cellCount)")
@@ -244,11 +229,9 @@ struct ValidationIntegrationTest {
     @Test("Profile comparison with self-consistency")
     func testProfileComparison() throws {
         // Setup temp file
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "ValidationIntegration")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("mock_gotenx_compare.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         // Create mock output
         try createMockGotenxOutput(path: filePath)
@@ -281,9 +264,6 @@ struct ValidationIntegrationTest {
                         "Self-comparison correlation should be 1.0, got \(result.correlation)")
             }
         }
-
-        // Clean up
-        removeTestItemIfExists(atPath: filePath)
 
         print("✅ Self-consistency test passed")
         print("   All \(results.count) comparisons had perfect agreement")

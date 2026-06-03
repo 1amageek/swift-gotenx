@@ -133,4 +133,99 @@ struct ProfileValidationMatrixTests {
         #expect(matrix.passed)
         #expect(matrix.results.count == 3)
     }
+
+    @Test("Empty aggregate matrix does not pass")
+    func emptyAggregateMatrixDoesNotPass() throws {
+        let matrix = ProfileValidationMatrix(
+            sourceName: "empty",
+            thresholds: .torax,
+            results: []
+        )
+
+        #expect(!matrix.passed)
+    }
+
+    @Test("Time-series comparison rejects empty reference data")
+    func rejectsEmptyTimeSeries() throws {
+        let empty = TORAXReferenceData(
+            time: [],
+            normalizedRadius: [],
+            ionTemperature: [],
+            electronTemperature: [],
+            electronDensity: []
+        )
+
+        #expect(throws: ProfileValidationMatrixError.self) {
+            try ProfileValidationMatrix.compareTimeSeries(
+                predicted: empty,
+                reference: empty
+            )
+        }
+    }
+
+    @Test("Profile matrix rejects non-physical negative temperature")
+    func rejectsNegativeTemperature() throws {
+        let baseline = ITERBaselineData.load()
+        var invalidIonTemperature = baseline.profiles.ionTemperature
+        invalidIonTemperature[0] = -1.0
+
+        let invalid = ReferenceProfiles(
+            normalizedRadius: baseline.profiles.normalizedRadius,
+            ionTemperature: invalidIonTemperature,
+            electronTemperature: baseline.profiles.electronTemperature,
+            electronDensity: baseline.profiles.electronDensity,
+            time: baseline.profiles.time
+        )
+
+        #expect(throws: ProfileValidationMatrixError.self) {
+            try ProfileValidationMatrix.compare(
+                predicted: invalid,
+                reference: baseline.profiles
+            )
+        }
+    }
+
+    @Test("Profile matrix rejects non-physical zero density")
+    func rejectsZeroDensity() throws {
+        let baseline = ITERBaselineData.load()
+        var invalidDensity = baseline.profiles.electronDensity
+        invalidDensity[0] = 0.0
+
+        let invalid = ReferenceProfiles(
+            normalizedRadius: baseline.profiles.normalizedRadius,
+            ionTemperature: baseline.profiles.ionTemperature,
+            electronTemperature: baseline.profiles.electronTemperature,
+            electronDensity: invalidDensity,
+            time: baseline.profiles.time
+        )
+
+        #expect(throws: ProfileValidationMatrixError.self) {
+            try ProfileValidationMatrix.compare(
+                predicted: invalid,
+                reference: baseline.profiles
+            )
+        }
+    }
+
+    @Test("Profile matrix rejects radius values outside normalized range")
+    func rejectsOutOfRangeRadius() throws {
+        let baseline = ITERBaselineData.load()
+        var invalidRadius = baseline.profiles.normalizedRadius
+        invalidRadius[0] = -1e-3
+
+        let invalid = ReferenceProfiles(
+            normalizedRadius: invalidRadius,
+            ionTemperature: baseline.profiles.ionTemperature,
+            electronTemperature: baseline.profiles.electronTemperature,
+            electronDensity: baseline.profiles.electronDensity,
+            time: baseline.profiles.time
+        )
+
+        #expect(throws: ProfileValidationMatrixError.self) {
+            try ProfileValidationMatrix.compare(
+                predicted: invalid,
+                reference: baseline.profiles
+            )
+        }
+    }
 }

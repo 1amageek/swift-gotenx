@@ -59,10 +59,12 @@ extension CoreProfiles {
         try validateProfileShape(electronDensity.value, field: "electronDensity", cellCount: cellCount)
         try validateProfileShape(poloidalFlux.value, field: "poloidalFlux", cellCount: cellCount)
 
-        try NumericalValidation.validatePositive(ionTemperature.value, field: "ionTemperature")
-        try NumericalValidation.validatePositive(electronTemperature.value, field: "electronTemperature")
-        try NumericalValidation.validatePositive(electronDensity.value, field: "electronDensity")
-        try NumericalValidation.validateFinite(poloidalFlux.value, field: "poloidalFlux")
+        try NumericalValidation.validate([
+            .positive(ionTemperature.value, field: "ionTemperature"),
+            .positive(electronTemperature.value, field: "electronTemperature"),
+            .positive(electronDensity.value, field: "electronDensity"),
+            .finite(poloidalFlux.value, field: "poloidalFlux")
+        ])
     }
 
     private func validateProfileShape(_ array: MLXArray, field: String, cellCount: Int) throws {

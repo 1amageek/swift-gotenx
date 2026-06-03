@@ -12,11 +12,9 @@ struct ToraxReferenceDataTests {
     @Test("Load mock TORAX NetCDF file")
     func testLoadMockToraxData() throws {
         // Create mock TORAX NetCDF file
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "ToraxReferenceData")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("mock_torax_test.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         // Create mock TORAX file
         let (timeCount, nRho) = try createMockToraxFile(path: filePath)
@@ -50,9 +48,6 @@ struct ToraxReferenceDataTests {
             #expect(psi[0].count == nRho, "psi[0] should have \(nRho) rho points")
         }
 
-        // Clean up
-        removeTestItemIfExists(atPath: filePath)
-
         print("✅ Successfully loaded mock TORAX data:")
         print("   Time points: \(data.time.count)")
         print("   Grid size: \(data.normalizedRadius.count)")
@@ -64,11 +59,9 @@ struct ToraxReferenceDataTests {
     @Test("Load TORAX file without poloidal flux")
     func testLoadWithoutPsi() throws {
         // Create mock file without psi
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "ToraxReferenceData")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("mock_torax_no_psi.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         try createMockToraxFile(path: filePath, includePsi: false)
 
@@ -77,9 +70,6 @@ struct ToraxReferenceDataTests {
 
         // Verify psi is nil
         #expect(data.poloidalFlux == nil, "psi should be nil when not present in file")
-
-        // Clean up
-        removeTestItemIfExists(atPath: filePath)
 
         print("✅ Successfully loaded TORAX data without psi")
     }
@@ -94,11 +84,9 @@ struct ToraxReferenceDataTests {
     @Test("Error: Invalid dimensions (too few cells)")
     func testInvalidDimensions() throws {
         // Create file with only 5 rho points (< 10 minimum)
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "ToraxReferenceData")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("mock_torax_invalid_dims.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         try createMockToraxFile(path: filePath, nRho: 5)
 
@@ -106,8 +94,6 @@ struct ToraxReferenceDataTests {
             try TORAXReferenceData.loadFromNetCDF(path: filePath)
         }
 
-        // Clean up
-        removeTestItemIfExists(atPath: filePath)
     }
 
     @Test("Time utilities: findTimeIndex")

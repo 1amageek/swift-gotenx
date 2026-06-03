@@ -16,7 +16,7 @@ public struct ProfileValidationMatrix: Sendable {
     }
 
     public var passed: Bool {
-        results.allSatisfy(\.passed)
+        !results.isEmpty && results.allSatisfy(\.passed)
     }
 
     public var failedResults: [ComparisonResult] {
@@ -106,6 +106,13 @@ public struct ProfileValidationMatrix: Sendable {
         radiusTolerance: Float = 1e-5,
         timeTolerance: Float = 1e-6
     ) throws -> ProfileValidationMatrix {
+        guard !predicted.time.isEmpty else {
+            throw ProfileValidationMatrixError.emptyTimeSeries(label: "predicted")
+        }
+        guard !reference.time.isEmpty else {
+            throw ProfileValidationMatrixError.emptyTimeSeries(label: "reference")
+        }
+
         guard predicted.time.count == reference.time.count else {
             throw ProfileValidationMatrixError.timeCountMismatch(
                 predicted: predicted.time.count,
@@ -134,6 +141,7 @@ public struct ProfileValidationMatrix: Sendable {
     }
 
     private static func validate(profiles: ReferenceProfiles, label: String) throws {
+        let radiusRangeTolerance: Float = 1e-5
         let count = profiles.normalizedRadius.count
         guard count > 1 else {
             throw ProfileValidationMatrixError.emptyProfileSet(label: label)
@@ -143,6 +151,21 @@ public struct ProfileValidationMatrix: Sendable {
         try validate(values: profiles.ionTemperature, label: label, quantity: "ionTemperature", expectedCount: count)
         try validate(values: profiles.electronTemperature, label: label, quantity: "electronTemperature", expectedCount: count)
         try validate(values: profiles.electronDensity, label: label, quantity: "electronDensity", expectedCount: count)
+
+        try validatePositive(values: profiles.ionTemperature, label: label, quantity: "ionTemperature")
+        try validatePositive(values: profiles.electronTemperature, label: label, quantity: "electronTemperature")
+        try validatePositive(values: profiles.electronDensity, label: label, quantity: "electronDensity")
+
+        for (index, radius) in profiles.normalizedRadius.enumerated() {
+            guard radius >= -radiusRangeTolerance && radius <= 1.0 + radiusRangeTolerance else {
+                throw ProfileValidationMatrixError.radiusOutOfRange(
+                    label: label,
+                    index: index,
+                    value: radius,
+                    tolerance: radiusRangeTolerance
+                )
+            }
+        }
 
         for index in 1..<profiles.normalizedRadius.count {
             let previous = profiles.normalizedRadius[index - 1]
@@ -184,6 +207,21 @@ public struct ProfileValidationMatrix: Sendable {
 
         for (index, value) in values.enumerated() where !value.isFinite {
             throw ProfileValidationMatrixError.nonFiniteValue(
+                label: label,
+                quantity: quantity,
+                index: index,
+                value: value
+            )
+        }
+    }
+
+    private static func validatePositive(
+        values: [Float],
+        label: String,
+        quantity: String
+    ) throws {
+        for (index, value) in values.enumerated() where value <= 0 {
+            throw ProfileValidationMatrixError.nonPositiveValue(
                 label: label,
                 quantity: quantity,
                 index: index,

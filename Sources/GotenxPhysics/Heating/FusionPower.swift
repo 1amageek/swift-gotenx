@@ -125,11 +125,23 @@ public struct FusionPower: Sendable {
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
     public func compute(electronDensity: MLXArray, ionTemperature: MLXArray) throws -> MLXArray {
+        try compute(
+            electronDensity: electronDensity,
+            ionTemperature: ionTemperature,
+            validatesInputs: true
+        )
+    }
 
-        // Validate inputs (CRITICAL FIX #3)
-        try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
-        try PhysicsValidation.validateTemperature(ionTemperature, name: "ionTemperature")
-        try PhysicsValidation.validateShapes([electronDensity, ionTemperature], names: ["electronDensity", "ionTemperature"])
+    package func compute(
+        electronDensity: MLXArray,
+        ionTemperature: MLXArray,
+        validatesInputs: Bool
+    ) throws -> MLXArray {
+        if validatesInputs {
+            try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
+            try PhysicsValidation.validateTemperature(ionTemperature, name: "ionTemperature")
+            try PhysicsValidation.validateShapes([electronDensity, ionTemperature], names: ["electronDensity", "ionTemperature"])
+        }
 
         // Convert temperature to keV
         let ionTemperatureKeV = ionTemperature / Float(1000.0)
@@ -300,6 +312,16 @@ public struct FusionPower: Sendable {
 // MARK: - Source Model Protocol Conformance
 
 extension FusionPower {
+    private static func metadataCollection(
+        existing: SourceMetadataCollection?,
+        appending metadata: SourceMetadata
+    ) -> SourceMetadataCollection {
+        if let existing {
+            SourceMetadataCollection(entries: existing.entries + [metadata])
+        } else {
+            SourceMetadataCollection(entries: [metadata])
+        }
+    }
 
     /// Apply fusion heating to source terms with alpha slowing-down model
     ///
@@ -319,10 +341,46 @@ extension FusionPower {
         _ sources: SourceTerms,
         profiles: CoreProfiles
     ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: nil,
+            evaluationMode: .eager,
+            includesMetadata: false,
+            validateDebugUnits: true,
+            validatesInputs: true
+        )
+    }
 
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        context: SourceEvaluationContext
+    ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: context.geometricFactors,
+            evaluationMode: context.evaluationMode,
+            includesMetadata: context.includesMetadata,
+            validateDebugUnits: context.validatesDebugUnits,
+            validatesInputs: context.includesMetadata
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        geometricFactors: GeometricFactors?,
+        evaluationMode: MLXEvaluationMode,
+        includesMetadata: Bool,
+        validateDebugUnits: Bool,
+        validatesInputs: Bool
+    ) throws -> SourceTerms {
         let P_fusion_watts = try compute(
             electronDensity: profiles.electronDensity.value,
-            ionTemperature: profiles.ionTemperature.value
+            ionTemperature: profiles.ionTemperature.value,
+            validatesInputs: validatesInputs
         )
 
         // Convert to MW/m³ for SourceTerms
@@ -336,16 +394,37 @@ extension FusionPower {
         let P_ion = fusionPower * ionFraction
         let P_electron = fusionPower * (Float(1.0) - ionFraction)
 
+        let metadata: SourceMetadataCollection?
+        if includesMetadata, let geometricFactors {
+            let cellVolumes = geometricFactors.cellVolumes.value
+            let P_ion_total = (P_fusion_watts * ionFraction * cellVolumes).sum()
+            let P_electron_total = (P_fusion_watts * (Float(1.0) - ionFraction) * cellVolumes).sum()
+            let P_fusion_total = (P_fusion_watts * cellVolumes).sum()
+            eval(P_ion_total, P_electron_total, P_fusion_total)
+
+            let fusionMetadata = SourceMetadata(
+                modelName: "fusion_power",
+                category: .fusion,
+                ionPower: P_ion_total.item(Float.self),
+                electronPower: P_electron_total.item(Float.self),
+                alphaPower: P_fusion_total.item(Float.self) * 0.2
+            )
+            metadata = Self.metadataCollection(
+                existing: sources.metadata,
+                appending: fusionMetadata
+            )
+        } else {
+            metadata = sources.metadata
+        }
+
         // Create new SourceTerms with updated heating
         return SourceTerms(
-            ionHeating: EvaluatedArray(
-                evaluating: sources.ionHeating.value + P_ion
-            ),
-            electronHeating: EvaluatedArray(
-                evaluating: sources.electronHeating.value + P_electron
-            ),
+            ionHeating: evaluationMode.wrap(sources.ionHeating.value + P_ion),
+            electronHeating: evaluationMode.wrap(sources.electronHeating.value + P_electron),
             particleSource: sources.particleSource,
-            currentSource: sources.currentSource
+            currentSource: sources.currentSource,
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
         )
     }
 }

@@ -358,19 +358,15 @@ public struct SimpleSawtoothRedistribution: Sendable {
         let scaleFactor: Float = 0.8
 
         // Apply scaling to inner region (up to q=1 surface)
-        let fluxArray = originalFlux.asArray(Float.self)
-        var updatedFlux = fluxArray
+        let innerFlux = originalFlux[0...indexQ1]
+        let innerRho = rhoNorm[0...indexQ1]
+        let outerFlux = originalFlux[(indexQ1 + 1)...]
 
-        // Smoothly reduce flux gradient in core
-        for i in 0...indexQ1 {
-            let rho = rhoNorm[i].item(Float.self)
-            let weight = 1.0 - (rho / rhoQ1)  // 1.0 at axis, 0.0 at q=1 surface
+        // Smoothly reduce flux gradient in core.
+        let weight = 1.0 - (innerRho / rhoQ1)
+        let reduction = (1.0 - scaleFactor) * weight
+        let updatedInnerFlux = innerFlux * (1.0 - reduction)
 
-            // Reduce flux by scaling factor weighted by distance from q=1 surface
-            let reduction = (1.0 - scaleFactor) * weight
-            updatedFlux[i] = fluxArray[i] * (1.0 - reduction)
-        }
-
-        return MLXArray(updatedFlux)
+        return concatenated([updatedInnerFlux, outerFlux], axis: 0)
     }
 }

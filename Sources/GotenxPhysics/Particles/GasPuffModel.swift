@@ -79,7 +79,18 @@ public struct GasPuffModel: Sendable {
     ///   - geometry: Tokamak geometry
     /// - Returns: Particle source density [m⁻³/s]
     public func computeParticleSource(geometry: Geometry) -> MLXArray {
-        let geometricFactors = GeometricFactors.from(geometry: geometry)
+        computeParticleSource(
+            geometry: geometry,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            validatesConservation: true
+        )
+    }
+
+    package func computeParticleSource(
+        geometry: Geometry,
+        geometricFactors: GeometricFactors,
+        validatesConservation: Bool
+    ) -> MLXArray {
         let r = geometricFactors.cellRadii.value  // Physical radius r [m]
         let rho = r / geometry.minorRadius    // Normalized radius ρ = r/a
         let volumes = geometricFactors.cellVolumes.value
@@ -91,10 +102,11 @@ public struct GasPuffModel: Sendable {
 
         // Normalize to total puff rate
         // ∫ S(ρ) dV = puffRate [particles/s]
-        let integral = (profile * volumes).sum().item(Float.self)
+        let integralArray = (profile * volumes).sum()
+        let integral = validatesConservation ? integralArray.item(Float.self) : 1.0
 
         // Validate integral is non-zero to prevent division by zero
-        guard integral > 1e-20 else {
+        if validatesConservation && integral <= 1e-20 {
             #if DEBUG
             print("⚠️  Warning: Gas puff profile integral too small: \(integral)")
             print("   penetrationDepth = \(penetrationDepth) may be invalid")
@@ -103,18 +115,20 @@ public struct GasPuffModel: Sendable {
             return MLXArray.zeros(profile.shape)
         }
 
-        let S_particles = puffRate * profile / integral  // [m⁻³/s]
+        let S_particles = puffRate * profile / (integralArray + 1e-20)  // [m⁻³/s]
 
         // Validate particle conservation (DEBUG builds only)
         #if DEBUG
-        let totalParticles = (S_particles * volumes).sum().item(Float.self)
-        let conservationError = abs(totalParticles - puffRate) / puffRate
+        if validatesConservation {
+            let totalParticles = (S_particles * volumes).sum().item(Float.self)
+            let conservationError = abs(totalParticles - puffRate) / puffRate
 
-        if conservationError > 0.01 {  // 1% tolerance
-            print("⚠️  Warning: Gas puff particle conservation error: \(conservationError * 100)%")
-            print("   Expected: \(puffRate) particles/s")
-            print("   Computed: \(totalParticles) particles/s")
-            print("   Check: ∫ S(ρ) dV = puffRate")
+            if conservationError > 0.01 {  // 1% tolerance
+                print("⚠️  Warning: Gas puff particle conservation error: \(conservationError * 100)%")
+                print("   Expected: \(puffRate) particles/s")
+                print("   Computed: \(totalParticles) particles/s")
+                print("   Check: ∫ S(ρ) dV = puffRate")
+            }
         }
         #endif
 
@@ -140,8 +154,43 @@ public struct GasPuffModel: Sendable {
         _ sources: SourceTerms,
         geometry: Geometry
     ) -> SourceTerms {
-        // Compute particle source
-        let S_particles = computeParticleSource(geometry: geometry)
+        applyToSources(
+            sources,
+            geometry: geometry,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            evaluationMode: .eager,
+            validatesConservation: true,
+            validateDebugUnits: true
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        context: SourceEvaluationContext
+    ) -> SourceTerms {
+        applyToSources(
+            sources,
+            geometry: context.geometry,
+            geometricFactors: context.geometricFactors,
+            evaluationMode: context.evaluationMode,
+            validatesConservation: context.includesMetadata,
+            validateDebugUnits: context.validatesDebugUnits
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        geometry: Geometry,
+        geometricFactors: GeometricFactors,
+        evaluationMode: MLXEvaluationMode,
+        validatesConservation: Bool,
+        validateDebugUnits: Bool
+    ) -> SourceTerms {
+        let S_particles = computeParticleSource(
+            geometry: geometry,
+            geometricFactors: geometricFactors,
+            validatesConservation: validatesConservation
+        )
 
         // Add to existing particle source
         let updated_particles = sources.particleSource.value + S_particles
@@ -149,8 +198,10 @@ public struct GasPuffModel: Sendable {
         return SourceTerms(
             ionHeating: sources.ionHeating,
             electronHeating: sources.electronHeating,
-            particleSource: EvaluatedArray(evaluating: updated_particles),
-            currentSource: sources.currentSource
+            particleSource: evaluationMode.wrap(updated_particles),
+            currentSource: sources.currentSource,
+            metadata: sources.metadata,
+            validateDebugUnits: validateDebugUnits
         )
     }
 

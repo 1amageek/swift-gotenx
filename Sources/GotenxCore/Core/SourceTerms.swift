@@ -54,8 +54,14 @@ public struct SourceTerms: Sendable, Equatable {
         // localized exchange terms can exceed ordinary external-heating densities,
         // while an already-converted eV/(m³·s) value is typically O(1e24).
         let heatingUnitSentinel: Float = 1e12
-        let maxIonHeatingMagnitude = abs(ionHeating.value).max().item(Float.self)
-        let maxElectronHeatingMagnitude = abs(electronHeating.value).max().item(Float.self)
+        let unitMaxima = MLX.stacked([
+            abs(ionHeating.value).max(),
+            abs(electronHeating.value).max(),
+            abs(particleSource.value).max(),
+            abs(currentSource.value).max()
+        ], axis: 0).asArray(Float.self)
+        let maxIonHeatingMagnitude = unitMaxima[0]
+        let maxElectronHeatingMagnitude = unitMaxima[1]
 
         precondition(maxIonHeatingMagnitude < heatingUnitSentinel,
             """
@@ -83,23 +89,24 @@ public struct SourceTerms: Sendable, Equatable {
             Conversion to eV/(m³·s) happens in Block1DCoeffsBuilder, not in physics models.
             """)
 
-        // Validate particle source units (should be m^-3/s)
-        // ITER gas puff: ~1e21 particles/s over ~1000 m³ → ~1e18 m^-3/s average
-        // Allow up to 1e20 m^-3/s for localized injection
-        let maxParticleSource = abs(particleSource.value).max().item(Float.self)
+        // Validate particle source units (should be m^-3/s).
+        // This is a unit-conversion sentinel, not a physics limiter: edge-localized
+        // gas puffing can exceed 1e20 m^-3/s in the deposition cells.
+        let maxParticleSource = unitMaxima[2]
 
-        precondition(maxParticleSource < 1e20,
+        precondition(maxParticleSource < 1e23,
             """
             SourceTerms: Suspicious particle source value: \(maxParticleSource) m^-3/s
 
-            Typical range: 1e16 - 1e19 m^-3/s
-            If value is much larger, check your calculation.
+            Typical average range: 1e16 - 1e19 m^-3/s
+            Localized edge fueling can be higher, but values near this sentinel
+            usually indicate an unnormalized particle source.
             """)
 
         // Validate current density (should be MA/m²)
         // ITER: ~15 MA total current, ~30 m² cross-section → ~0.5 MA/m² average
         // Allow up to 100 MA/m² for localized current drive
-        let maxCurrentSource = abs(currentSource.value).max().item(Float.self)
+        let maxCurrentSource = unitMaxima[3]
 
         precondition(maxCurrentSource < 100.0,
             """
@@ -133,11 +140,26 @@ public struct SourceTerms: Sendable, Equatable {
         metadata: SourceMetadataCollection? = SourceMetadataCollection.empty,
         validateDebugUnits: Bool = true
     ) -> SourceTerms {
-        SourceTerms(
-            ionHeating: .zeros([cellCount]),
-            electronHeating: .zeros([cellCount]),
-            particleSource: .zeros([cellCount]),
-            currentSource: .zeros([cellCount]),
+        zero(
+            cellCount: cellCount,
+            evaluationMode: .eager,
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
+        )
+    }
+
+    package static func zero(
+        cellCount: Int,
+        evaluationMode: MLXEvaluationMode,
+        metadata: SourceMetadataCollection?,
+        validateDebugUnits: Bool
+    ) -> SourceTerms {
+        let zeros = evaluationMode.wrap(MLXArray.zeros([cellCount]))
+        return SourceTerms(
+            ionHeating: zeros,
+            electronHeating: zeros,
+            particleSource: zeros,
+            currentSource: zeros,
             metadata: metadata,
             validateDebugUnits: validateDebugUnits
         )
@@ -176,12 +198,40 @@ public struct SourceTerms: Sendable, Equatable {
             mergedMetadata = nil
         }
 
-        return SourceTerms(
-            ionHeating: EvaluatedArray(evaluating: ionHeating.value + other.ionHeating.value),
-            electronHeating: EvaluatedArray(evaluating: electronHeating.value + other.electronHeating.value),
-            particleSource: EvaluatedArray(evaluating: particleSource.value + other.particleSource.value),
-            currentSource: EvaluatedArray(evaluating: currentSource.value + other.currentSource.value),
+        return adding(
+            other,
+            evaluationMode: .eager,
             metadata: mergedMetadata,
+            validateDebugUnits: validateDebugUnits
+        )
+    }
+
+    package func adding(
+        _ other: SourceTerms,
+        evaluationMode: MLXEvaluationMode,
+        metadata: SourceMetadataCollection?,
+        validateDebugUnits: Bool
+    ) -> SourceTerms {
+        SourceTerms(
+            ionHeating: evaluationMode.wrap(ionHeating.value + other.ionHeating.value),
+            electronHeating: evaluationMode.wrap(electronHeating.value + other.electronHeating.value),
+            particleSource: evaluationMode.wrap(particleSource.value + other.particleSource.value),
+            currentSource: evaluationMode.wrap(currentSource.value + other.currentSource.value),
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
+        )
+    }
+
+    package func replacingMetadata(
+        _ metadata: SourceMetadataCollection?,
+        validateDebugUnits: Bool
+    ) -> SourceTerms {
+        SourceTerms(
+            ionHeating: ionHeating,
+            electronHeating: electronHeating,
+            particleSource: particleSource,
+            currentSource: currentSource,
+            metadata: metadata,
             validateDebugUnits: validateDebugUnits
         )
     }
@@ -197,10 +247,12 @@ extension SourceTerms {
         try NumericalValidation.validateShape(particleSource.value, field: "particleSource", expected: [expectedCellCount])
         try NumericalValidation.validateShape(currentSource.value, field: "currentSource", expected: [expectedCellCount])
 
-        try NumericalValidation.validateFinite(ionHeating.value, field: "ionHeating")
-        try NumericalValidation.validateFinite(electronHeating.value, field: "electronHeating")
-        try NumericalValidation.validateFinite(particleSource.value, field: "particleSource")
-        try NumericalValidation.validateFinite(currentSource.value, field: "currentSource")
+        try NumericalValidation.validate([
+            .finite(ionHeating.value, field: "ionHeating"),
+            .finite(electronHeating.value, field: "electronHeating"),
+            .finite(particleSource.value, field: "particleSource"),
+            .finite(currentSource.value, field: "currentSource")
+        ])
 
         guard let metadata else {
             if requiresMetadata {

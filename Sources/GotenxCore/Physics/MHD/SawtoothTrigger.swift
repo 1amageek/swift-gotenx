@@ -87,7 +87,7 @@ public struct SimpleSawtoothTrigger: Sendable {
         }
 
         // Find q=1 surface location
-        guard let (rhoQ1, indexQ1) = findQ1Surface(q: q, geometry: geometry) else {
+        guard let (rhoQ1, indexQ1, qValues) = findQ1Surface(q: q, geometry: geometry) else {
             return (false, nil)
         }
 
@@ -101,7 +101,7 @@ public struct SimpleSawtoothTrigger: Sendable {
         let shear = profiles.magneticShear(geometry: geometry)
         let shearQ1 = interpolateShearAtQ1(
             shear: shear,
-            q: q,
+            qValues: qValues,
             indexQ1: indexQ1,
             rhoQ1: rhoQ1,
             geometry: geometry
@@ -126,11 +126,11 @@ public struct SimpleSawtoothTrigger: Sendable {
     /// - q: Safety factor profile [cellCount]
     /// - geometry: Tokamak geometry
     ///
-    /// **Returns**: Tuple of (rho_norm_q1, index) or nil if no q=1 surface found
+    /// **Returns**: Tuple of (rho_norm_q1, index, q values) or nil if no q=1 surface found
     private func findQ1Surface(
         q: MLXArray,
         geometry: Geometry
-    ) -> (rhoNorm: Float, index: Int)? {
+    ) -> (rhoNorm: Float, index: Int, qValues: [Float])? {
         let qArray = q.asArray(Float.self)
         let radii = geometry.radii.value.asArray(Float.self)
         let minorRadius = geometry.minorRadius
@@ -151,7 +151,7 @@ public struct SimpleSawtoothTrigger: Sendable {
                 let rQ1 = r_i + (r_next - r_i) * fraction
                 let rhoNormQ1 = rQ1 / minorRadius
 
-                return (rhoNormQ1, i)
+                return (rhoNormQ1, i, qArray)
             }
         }
 
@@ -165,7 +165,7 @@ public struct SimpleSawtoothTrigger: Sendable {
     ///
     /// **Parameters**:
     /// - shear: Magnetic shear profile [cellCount]
-    /// - q: Safety factor profile [cellCount]
+    /// - qValues: Safety factor profile values [cellCount]
     /// - indexQ1: Grid index where q crosses 1 (q[i] < 1, q[i+1] >= 1)
     /// - rhoQ1: Normalized radius of q=1 surface
     /// - geometry: Tokamak geometry
@@ -173,13 +173,12 @@ public struct SimpleSawtoothTrigger: Sendable {
     /// **Returns**: Interpolated shear at q=1 surface
     private func interpolateShearAtQ1(
         shear: MLXArray,
-        q: MLXArray,
+        qValues: [Float],
         indexQ1: Int,
         rhoQ1: Float,
         geometry: Geometry
     ) -> Float {
         let shearArray = shear.asArray(Float.self)
-        let qArray = q.asArray(Float.self)
 
         // Safety check: ensure we have valid indices
         guard indexQ1 < shearArray.count - 1 else {
@@ -192,8 +191,8 @@ public struct SimpleSawtoothTrigger: Sendable {
         let shear_next = shearArray[indexQ1 + 1]
 
         // Get q values at adjacent grid points
-        let q_i = qArray[indexQ1]
-        let q_next = qArray[indexQ1 + 1]
+        let q_i = qValues[indexQ1]
+        let q_next = qValues[indexQ1 + 1]
 
         // Linear interpolation weight based on q values
         // w = (1 - q_i) / (q_next - q_i)

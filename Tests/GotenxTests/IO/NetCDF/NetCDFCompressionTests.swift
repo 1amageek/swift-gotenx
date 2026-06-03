@@ -22,11 +22,9 @@ struct NetCDFCompressionTests {
     /// - ✅ Data round-trip verified
     @Test("Write IMAS core_profiles structure")
     func testIMASCoreProfiles() throws {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "NetCDFCompression")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("imas_core_profiles.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         // Create NetCDF-4 file
         let file = try NetCDF.create(path: filePath, overwriteExisting: true)
@@ -138,13 +136,10 @@ struct NetCDFCompressionTests {
     /// - ✅ Data integrity preserved
     @Test("Measure compression ratio")
     func testCompressionRatio() throws {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "NetCDFCompression")
+        defer { removeTestItemIfExists(at: tempDir) }
         let uncompressedPath = tempDir.appendingPathComponent("test_uncompressed.nc").path
         let compressedPath = tempDir.appendingPathComponent("test_compressed.nc").path
-
-        // Clean up any existing files
-        removeTestItemIfExists(atPath: uncompressedPath)
-        removeTestItemIfExists(atPath: compressedPath)
 
         // Generate test data (4 variables × 1000 time × 100 rho = 400,000 floats per variable)
         // This simulates a realistic TORAX run (1000+ timesteps common for 2s simulation)
@@ -268,14 +263,11 @@ struct NetCDFCompressionTests {
     /// - Full-time chunks: [timeCount, 1] - Optimized for time evolution at single location
     @Test("Compare chunking strategies")
     func testChunkingStrategies() throws {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "NetCDFCompression")
+        defer { removeTestItemIfExists(at: tempDir) }
         let timeSlicePath = tempDir.appendingPathComponent("test_chunk_timeslice.nc").path
         let multiSlicePath = tempDir.appendingPathComponent("test_chunk_multislice.nc").path
         let fullTimePath = tempDir.appendingPathComponent("test_chunk_fulltime.nc").path
-
-        removeTestItemIfExists(atPath: timeSlicePath)
-        removeTestItemIfExists(atPath: multiSlicePath)
-        removeTestItemIfExists(atPath: fullTimePath)
 
         let timeCount = 100
         let nRho = 100

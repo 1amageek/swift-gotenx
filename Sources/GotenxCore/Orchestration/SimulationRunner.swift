@@ -63,9 +63,6 @@ public actor SimulationRunner: SimulationRunnable {
             profileConditions: profileConditions
         )
 
-        // Convert to serializable format
-        let serializableProfiles = initialProfiles.toSerializable()
-
         // Create MHD models from config if not provided
         let mhdModelsToUse: [any MHDModel]
         if let provided = mhdModels {
@@ -80,7 +77,7 @@ public actor SimulationRunner: SimulationRunnable {
         // Initialize orchestrator with provided models
         self.orchestrator = await SimulationOrchestrator(
             staticParameters: staticParameters,
-            initialProfiles: serializableProfiles,
+            initialProfiles: initialProfiles,
             transport: transportModel,
             sources: sourceModels,
             mhdModels: mhdModelsToUse,

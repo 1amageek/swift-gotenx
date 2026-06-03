@@ -67,6 +67,9 @@ public actor SimulationOrchestrator {
     /// Geometry (cached for diagnostics computation)
     private let geometry: Geometry
 
+    /// Cached host snapshot for repeated progress polling at the same step.
+    private var progressProfilesSnapshot: (step: Int, profiles: SerializableProfiles)?
+
     // MARK: - Pause/Resume State
 
     /// Pause state
@@ -79,7 +82,7 @@ public actor SimulationOrchestrator {
 
     public init(
         staticParameters: StaticRuntimeParameters,
-        initialProfiles: SerializableProfiles,
+        initialProfiles: CoreProfiles,
         transport: any TransportModel,
         sources: [any SourceModel] = [],
         mhdModels: [any MHDModel] = [],
@@ -142,7 +145,7 @@ public actor SimulationOrchestrator {
 
         // Initialize state with high-precision time accumulation
         self.state = SimulationState(
-            profiles: CoreProfiles(from: initialProfiles),
+            profiles: initialProfiles,
             timeAccumulator: 0.0,
             timeStep: 1e-4,
             step: 0
@@ -168,6 +171,7 @@ public actor SimulationOrchestrator {
     ) async throws -> SimulationResult {
         let startWallTime = Date()
         var timeSeries: [TimePoint] = []
+        var finalProfilesSnapshot: SerializableProfiles?
 
         // Capture initial state (always)
         if samplingConfig.profileSamplingInterval != nil {
@@ -228,7 +232,9 @@ public actor SimulationOrchestrator {
 
         // Capture final state (always)
         if samplingConfig.profileSamplingInterval != nil && !timeSeries.isEmpty {
-            timeSeries.append(captureTimePoint())
+            let finalTimePoint = captureTimePoint()
+            finalProfilesSnapshot = finalTimePoint.profiles
+            timeSeries.append(finalTimePoint)
         }
 
         logger.debug("Simulation complete", metadata: [
@@ -242,7 +248,7 @@ public actor SimulationOrchestrator {
         finalStats.wallTime = wallTime
 
         return SimulationResult(
-            finalProfiles: state.profiles.toSerializable(),
+            finalProfiles: finalProfilesSnapshot ?? state.profiles.toSerializable(),
             statistics: finalStats,
             timeSeries: timeSeries.isEmpty ? nil : timeSeries
         )
@@ -264,7 +270,13 @@ public actor SimulationOrchestrator {
         // Convert profiles if needed
         let serializedProfiles: SerializableProfiles?
         if includeProfiles {
-            serializedProfiles = state.profiles.toSerializable()
+            if let snapshot = progressProfilesSnapshot, snapshot.step == state.step {
+                serializedProfiles = snapshot.profiles
+            } else {
+                let snapshot = state.profiles.toSerializable()
+                progressProfilesSnapshot = (step: state.step, profiles: snapshot)
+                serializedProfiles = snapshot
+            }
         } else {
             serializedProfiles = nil
         }
@@ -551,21 +563,39 @@ public actor SimulationOrchestrator {
                 geometry: geo,
                 parameters: dynamicParameters.transportParameters
             )
+            let geometricFactors = GeometricFactors.from(
+                geometry: geo,
+                evaluationMode: .deferred
+            )
 
             let sourceTerms = sources.reduce(
                 into: SourceTerms.zero(
                     cellCount: staticParameters.mesh.cellCount,
+                    evaluationMode: .deferred,
                     metadata: nil,
                     validateDebugUnits: false
                 )
             ) { total, model in
                 if let parameters = dynamicParameters.sourceParameters[model.name] {
-                    let contribution = model.computeTermsForSolver(
+                    let context = SourceEvaluationContext(
                         profiles: profiles,
                         geometry: geo,
-                        parameters: parameters
+                        geometricFactors: geometricFactors,
+                        parameters: parameters,
+                        purpose: .solver
                     )
-                    total = total.adding(contribution, validateDebugUnits: false)
+                    let contribution: SourceTerms
+                    do {
+                        contribution = try model.computeTerms(in: context)
+                    } catch {
+                        contribution = SourceTerms.invalidNumerics(cellCount: staticParameters.mesh.cellCount)
+                    }
+                    total = total.adding(
+                        contribution,
+                        evaluationMode: .deferred,
+                        metadata: nil,
+                        validateDebugUnits: false
+                    )
                 }
             }
 
@@ -574,7 +604,9 @@ public actor SimulationOrchestrator {
                 sources: sourceTerms,
                 geometry: geo,
                 staticParameters: staticParameters,
-                profiles: profiles
+                profiles: profiles,
+                evaluationMode: .deferred,
+                geometricFactors: geometricFactors
             )
         }
 

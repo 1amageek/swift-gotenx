@@ -70,4 +70,34 @@ struct NumericalValidationTests {
             try transport.validateNumerics(expectedCellCount: 8)
         }
     }
+
+    @Test("Batched validation preserves field-specific positive failures")
+    func batchedValidationPreservesPositiveFailure() {
+        do {
+            try NumericalValidation.validate([
+                .positive(MLXArray([Float(1), Float(2)]), field: "temperature"),
+                .positive(MLXArray([Float(0), Float(1)]), field: "density")
+            ])
+            Issue.record("Expected batched validation to reject zero density")
+        } catch let error as NumericalValidationError {
+            #expect(error == .nonPositive(field: "density", minimum: 0))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Batched validation preserves field-specific nonnegative failures")
+    func batchedValidationPreservesNonnegativeFailure() {
+        do {
+            try NumericalValidation.validate([
+                .finite(MLXArray([Float(1), Float(2)]), field: "source"),
+                .nonNegative(MLXArray([Float(-1), Float(0)]), field: "diffusivity")
+            ])
+            Issue.record("Expected batched validation to reject negative diffusivity")
+        } catch let error as NumericalValidationError {
+            #expect(error == .negativeValue(field: "diffusivity", minimum: -1))
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
 }

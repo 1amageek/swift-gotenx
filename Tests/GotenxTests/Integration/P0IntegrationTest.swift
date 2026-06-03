@@ -135,6 +135,15 @@ struct P0IntegrationTest {
         // Inline zero source model for the minimal transport benchmark.
         struct SimpleZeroSource: SourceModel {
             let name = "zero"
+            func computeTerms(in context: SourceEvaluationContext) throws -> SourceTerms {
+                SourceTerms.zero(
+                    cellCount: context.cellCount,
+                    evaluationMode: context.evaluationMode,
+                    metadata: context.initialMetadata,
+                    validateDebugUnits: context.validatesDebugUnits
+                )
+            }
+
             func computeTerms(profiles: CoreProfiles, geometry: Geometry, parameters: SourceParameters) -> SourceTerms {
                 let cellCount = profiles.ionTemperature.shape[0]
                 let zeros = EvaluatedArray.zeros([cellCount])

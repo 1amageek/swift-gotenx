@@ -65,11 +65,27 @@ public struct OhmicHeating: Sendable {
         jParallel: MLXArray,
         geometry: Geometry
     ) throws -> MLXArray {
+        try compute(
+            electronTemperature: electronTemperature,
+            jParallel: jParallel,
+            geometry: geometry,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            validatesInputs: true
+        )
+    }
 
-        // Validate inputs (CRITICAL FIX #3)
-        try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
-        try PhysicsValidation.validateFinite(jParallel, name: "jParallel")
-        try PhysicsValidation.validateShapes([electronTemperature, jParallel], names: ["electronTemperature", "jParallel"])
+    package func compute(
+        electronTemperature: MLXArray,
+        jParallel: MLXArray,
+        geometry: Geometry,
+        geometricFactors: GeometricFactors,
+        validatesInputs: Bool
+    ) throws -> MLXArray {
+        if validatesInputs {
+            try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
+            try PhysicsValidation.validateFinite(jParallel, name: "jParallel")
+            try PhysicsValidation.validateShapes([electronTemperature, jParallel], names: ["electronTemperature", "jParallel"])
+        }
 
         // Spitzer resistivity [Ω·m]
         // η_Spitzer = 5.2 × 10⁻⁵ * effectiveCharge * ln(Λ) / T_e^(3/2)
@@ -80,8 +96,7 @@ public struct OhmicHeating: Sendable {
         if useNeoclassical {
             // Neoclassical correction for trapped particles
             // Inverse aspect ratio: ε = r/R₀
-            let geomFactors = GeometricFactors.from(geometry: geometry)
-            let epsilon = geomFactors.cellRadii.value / geometry.majorRadius
+            let epsilon = geometricFactors.cellRadii.value / geometry.majorRadius
 
             // Trapped particle correction factor: f_trap ≈ 1 + ε^(3/2)
             let f_trap = 1.0 + pow(epsilon, 1.5)
@@ -190,6 +205,16 @@ public struct OhmicHeating: Sendable {
 // MARK: - Source Model Protocol Conformance
 
 extension OhmicHeating {
+    private static func metadataCollection(
+        existing: SourceMetadataCollection?,
+        appending metadata: SourceMetadata
+    ) -> SourceMetadataCollection {
+        if let existing {
+            SourceMetadataCollection(entries: existing.entries + [metadata])
+        } else {
+            SourceMetadataCollection(entries: [metadata])
+        }
+    }
 
     /// Apply Ohmic heating to source terms
     ///
@@ -223,7 +248,52 @@ extension OhmicHeating {
         geometry: Geometry,
         plasmaCurrentDensity: MLXArray? = nil
     ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometry: geometry,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            evaluationMode: .eager,
+            includesMetadata: true,
+            validateDebugUnits: true,
+            validatesInputs: true,
+            validatesFluxVariation: true,
+            plasmaCurrentDensity: plasmaCurrentDensity
+        )
+    }
 
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        context: SourceEvaluationContext,
+        plasmaCurrentDensity: MLXArray? = nil
+    ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometry: context.geometry,
+            geometricFactors: context.geometricFactors,
+            evaluationMode: context.evaluationMode,
+            includesMetadata: context.includesMetadata,
+            validateDebugUnits: context.validatesDebugUnits,
+            validatesInputs: context.includesMetadata,
+            validatesFluxVariation: context.includesMetadata,
+            plasmaCurrentDensity: plasmaCurrentDensity
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        geometricFactors: GeometricFactors,
+        evaluationMode: MLXEvaluationMode,
+        includesMetadata: Bool,
+        validateDebugUnits: Bool,
+        validatesInputs: Bool,
+        validatesFluxVariation: Bool,
+        plasmaCurrentDensity: MLXArray? = nil
+    ) throws -> SourceTerms {
         // Compute parallel current density
         let jParallel: MLXArray
         if let providedCurrent = plasmaCurrentDensity {
@@ -232,87 +302,52 @@ extension OhmicHeating {
             // Estimate from poloidal flux if available
             jParallel = try computeParallelCurrentFromProfiles(
                 profiles: profiles,
-                geometry: geometry
+                geometry: geometry,
+                geometricFactors: geometricFactors,
+                validatesFluxVariation: validatesFluxVariation
             )
         }
 
         let Q_ohm_watts = try compute(
             electronTemperature: profiles.electronTemperature.value,
             jParallel: jParallel,
-            geometry: geometry
+            geometry: geometry,
+            geometricFactors: geometricFactors,
+            validatesInputs: validatesInputs
         )
 
         // Convert to MW/m³ for SourceTerms
         let Q_ohm = PhysicsConstants.wattsToMegawatts(Q_ohm_watts)
 
-        // Compute metadata for power balance tracking
-        // Reuse Q_ohm_watts to avoid duplicate computation
-        let cellVolumes = GeometricFactors.from(geometry: geometry).cellVolumes.value
-        let P_ohmic_total = (Q_ohm_watts * cellVolumes).sum()
-        eval(P_ohmic_total)
-        let ohmicPower = P_ohmic_total.item(Float.self)
+        let metadata: SourceMetadataCollection?
+        if includesMetadata {
+            let cellVolumes = geometricFactors.cellVolumes.value
+            let P_ohmic_total = (Q_ohm_watts * cellVolumes).sum()
+            eval(P_ohmic_total)
+            let ohmicPower = P_ohmic_total.item(Float.self)
 
-        let ohmicMetadata = SourceMetadata(
-            modelName: "ohmic_heating",
-            category: .ohmic,
-            ionPower: 0,
-            electronPower: ohmicPower
-        )
-
-        // Merge with existing metadata
-        let mergedMetadata: SourceMetadataCollection
-        if let existingMetadata = sources.metadata {
-            mergedMetadata = SourceMetadataCollection(
-                entries: existingMetadata.entries + [ohmicMetadata]
+            let ohmicMetadata = SourceMetadata(
+                modelName: "ohmic_heating",
+                category: .ohmic,
+                ionPower: 0,
+                electronPower: ohmicPower
+            )
+            metadata = Self.metadataCollection(
+                existing: sources.metadata,
+                appending: ohmicMetadata
             )
         } else {
-            mergedMetadata = SourceMetadataCollection(entries: [ohmicMetadata])
+            metadata = sources.metadata
         }
 
         // Create new SourceTerms with updated electron heating and metadata
         return SourceTerms(
             ionHeating: sources.ionHeating,
-            electronHeating: EvaluatedArray(
-                evaluating: sources.electronHeating.value + Q_ohm
-            ),
+            electronHeating: evaluationMode.wrap(sources.electronHeating.value + Q_ohm),
             particleSource: sources.particleSource,
             currentSource: sources.currentSource,
-            metadata: mergedMetadata
-        )
-    }
-
-    public func applyToSourcesForSolver(
-        _ sources: SourceTerms,
-        profiles: CoreProfiles,
-        geometry: Geometry,
-        plasmaCurrentDensity: MLXArray? = nil
-    ) throws -> SourceTerms {
-        let jParallel: MLXArray
-        if let providedCurrent = plasmaCurrentDensity {
-            jParallel = providedCurrent
-        } else {
-            jParallel = computeParallelCurrentFromProfilesForSolver(
-                profiles: profiles,
-                geometry: geometry
-            )
-        }
-
-        let qOhmWatts = computeForSolver(
-            electronTemperature: profiles.electronTemperature.value,
-            jParallel: jParallel,
-            geometry: geometry
-        )
-        let qOhm = PhysicsConstants.wattsToMegawatts(qOhmWatts)
-
-        return SourceTerms(
-            ionHeating: sources.ionHeating,
-            electronHeating: EvaluatedArray(
-                evaluating: sources.electronHeating.value + qOhm
-            ),
-            particleSource: sources.particleSource,
-            currentSource: sources.currentSource,
-            metadata: sources.metadata,
-            validateDebugUnits: false
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
         )
     }
 
@@ -338,25 +373,39 @@ extension OhmicHeating {
         profiles: CoreProfiles,
         geometry: Geometry
     ) throws -> MLXArray {
+        try computeParallelCurrentFromProfiles(
+            profiles: profiles,
+            geometry: geometry,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            validatesFluxVariation: true
+        )
+    }
 
+    private func computeParallelCurrentFromProfiles(
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        geometricFactors: GeometricFactors,
+        validatesFluxVariation: Bool
+    ) throws -> MLXArray {
         let psi = profiles.poloidalFlux.value
         let cellCount = psi.shape[0]
 
-        // Check if we have meaningful flux data
-        let psiRange = MLX.max(psi).item(Float.self) - MLX.min(psi).item(Float.self)
-        let psiMax = MLX.max(abs(psi)).item(Float.self)
+        if validatesFluxVariation {
+            // Check if we have meaningful flux data
+            let psiRange = MLX.max(psi).item(Float.self) - MLX.min(psi).item(Float.self)
+            let psiMax = MLX.max(abs(psi)).item(Float.self)
 
-        // Use relative threshold: dψ/ψ_max < threshold
-        let relativeVariation = psiRange / max(psiMax, 1e-10)
+            // Use relative threshold: dψ/ψ_max < threshold
+            let relativeVariation = psiRange / max(psiMax, 1e-10)
 
-        guard relativeVariation > thresholds.fluxVariationThreshold else {
-            // Poloidal flux variation is negligible → no meaningful current
-            // This happens in startup or when psi solver hasn't run yet
-            return MLXArray.zeros([cellCount])
+            guard relativeVariation > thresholds.fluxVariationThreshold else {
+                // Poloidal flux variation is negligible → no meaningful current
+                // This happens in startup or when psi solver hasn't run yet
+                return MLXArray.zeros([cellCount])
+            }
         }
 
-        let geomFactors = GeometricFactors.from(geometry: geometry)
-        let cellRadii = geomFactors.cellRadii.value
+        let cellRadii = geometricFactors.cellRadii.value
 
         // Compute radial derivative of psi using central differences
         // ∂ψ/∂r ≈ (ψ[i+1] - ψ[i-1]) / (r[i+1] - r[i-1])
@@ -393,59 +442,5 @@ extension OhmicHeating {
         let j_parallel = grad_psi / (mu0 * R0)
 
         return j_parallel
-    }
-
-    private func computeForSolver(
-        electronTemperature: MLXArray,
-        jParallel: MLXArray,
-        geometry: Geometry
-    ) -> MLXArray {
-        let etaSpitzer = PhysicsConstants.spitzerPrefactor * effectiveCharge * coulombLogarithm / pow(electronTemperature, 1.5)
-
-        let eta: MLXArray
-        if useNeoclassical {
-            let geomFactors = GeometricFactors.from(geometry: geometry)
-            let epsilon = geomFactors.cellRadii.value / geometry.majorRadius
-            eta = etaSpitzer * (1.0 + pow(epsilon, 1.5))
-        } else {
-            eta = etaSpitzer
-        }
-
-        return eta * jParallel * jParallel
-    }
-
-    private func computeParallelCurrentFromProfilesForSolver(
-        profiles: CoreProfiles,
-        geometry: Geometry
-    ) -> MLXArray {
-        let psi = profiles.poloidalFlux.value
-        let cellCount = psi.shape[0]
-
-        guard cellCount >= 3 else {
-            return MLXArray.zeros([cellCount])
-        }
-
-        let geomFactors = GeometricFactors.from(geometry: geometry)
-        let cellRadii = geomFactors.cellRadii.value
-
-        let drInterior = cellRadii[2..<cellCount] - cellRadii[0..<(cellCount - 2)]
-        let dpsiInterior = psi[2..<cellCount] - psi[0..<(cellCount - 2)]
-        let gradPsiInterior = dpsiInterior / (drInterior + 1e-10)
-
-        let drLeft = cellRadii[1] - cellRadii[0]
-        let dpsiLeft = psi[1] - psi[0]
-        let gradPsiLeft = dpsiLeft / (drLeft + 1e-10)
-
-        let drRight = cellRadii[cellCount - 1] - cellRadii[cellCount - 2]
-        let dpsiRight = psi[cellCount - 1] - psi[cellCount - 2]
-        let gradPsiRight = dpsiRight / (drRight + 1e-10)
-
-        let gradPsi = concatenated([
-            gradPsiLeft.reshaped([1]),
-            gradPsiInterior,
-            gradPsiRight.reshaped([1])
-        ], axis: 0)
-
-        return gradPsi / (PhysicsConstants.mu0 * geometry.majorRadius)
     }
 }

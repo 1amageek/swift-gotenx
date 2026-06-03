@@ -73,9 +73,11 @@ extension TransportCoefficients {
             expected: [expectedCellCount]
         )
 
-        try NumericalValidation.validateNonNegative(ionHeatDiffusivity.value, field: "ionHeatDiffusivity")
-        try NumericalValidation.validateNonNegative(electronHeatDiffusivity.value, field: "electronHeatDiffusivity")
-        try NumericalValidation.validateNonNegative(particleDiffusivity.value, field: "particleDiffusivity")
-        try NumericalValidation.validateFinite(convectionVelocity.value, field: "convectionVelocity")
+        try NumericalValidation.validate([
+            .nonNegative(ionHeatDiffusivity.value, field: "ionHeatDiffusivity"),
+            .nonNegative(electronHeatDiffusivity.value, field: "electronHeatDiffusivity"),
+            .nonNegative(particleDiffusivity.value, field: "particleDiffusivity"),
+            .finite(convectionVelocity.value, field: "convectionVelocity")
+        ])
     }
 }

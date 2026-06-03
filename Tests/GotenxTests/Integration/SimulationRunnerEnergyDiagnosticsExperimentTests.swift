@@ -143,12 +143,57 @@ struct SimulationRunnerEnergyDiagnosticsExperimentTests {
 private struct TemperatureScaledDiagnosticSource: SourceModel {
     let name = "composite"
 
+    func computeTerms(in context: SourceEvaluationContext) throws -> SourceTerms {
+        let terms = makeTerms(
+            profiles: context.profiles,
+            evaluationMode: context.evaluationMode
+        )
+
+        guard context.includesMetadata else {
+            return terms
+        }
+
+        let volumes = context.geometricFactors.cellVolumes.value
+        let ionPower = (terms.ionHeating.value * volumes).sum() * 1e6
+        let electronPower = (terms.electronHeating.value * volumes).sum() * 1e6
+        eval(ionPower, electronPower)
+
+        let metadata = SourceMetadataCollection(entries: [
+            SourceMetadata(
+                modelName: "diagnostic_auxiliary",
+                category: .auxiliary,
+                ionPower: ionPower.item(Float.self),
+                electronPower: 0
+            ),
+            SourceMetadata(
+                modelName: "diagnostic_ohmic",
+                category: .ohmic,
+                ionPower: 0,
+                electronPower: electronPower.item(Float.self)
+            )
+        ])
+
+        return terms.replacingMetadata(
+            metadata,
+            validateDebugUnits: context.validatesDebugUnits
+        )
+    }
+
     func computeTerms(
         profiles: CoreProfiles,
         geometry: Geometry,
         parameters: SourceParameters
     ) -> SourceTerms {
-        let terms = makeTerms(profiles: profiles)
+        let context = SourceEvaluationContext(
+            profiles: profiles,
+            geometry: geometry,
+            parameters: parameters,
+            purpose: .diagnostic
+        )
+        let terms = makeTerms(
+            profiles: profiles,
+            evaluationMode: context.evaluationMode
+        )
         let volumes = GeometricFactors.from(geometry: geometry).cellVolumes.value
 
         let ionPower = (terms.ionHeating.value * volumes).sum() * 1e6
@@ -179,19 +224,14 @@ private struct TemperatureScaledDiagnosticSource: SourceModel {
         )
     }
 
-    func computeTermsForSolver(
+    private func makeTerms(
         profiles: CoreProfiles,
-        geometry: Geometry,
-        parameters: SourceParameters
+        evaluationMode: MLXEvaluationMode
     ) -> SourceTerms {
-        makeTerms(profiles: profiles)
-    }
-
-    private func makeTerms(profiles: CoreProfiles) -> SourceTerms {
         let cellCount = profiles.ionTemperature.shape[0]
         let ionHeating = profiles.ionTemperature.value * 0.0002
         let electronHeating = profiles.electronTemperature.value * 0.0004
-        let evaluated = EvaluatedArray.evaluatingBatch([
+        let evaluated = evaluationMode.wrapBatch([
             ionHeating,
             electronHeating,
             MLXArray.zeros([cellCount]),

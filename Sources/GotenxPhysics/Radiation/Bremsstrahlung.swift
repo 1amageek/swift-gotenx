@@ -52,11 +52,23 @@ public struct Bremsstrahlung: Sendable {
     /// - Note: Returns a lazy MLXArray. Call `eval()` before using `.item()` to extract values.
     ///   When used with `EvaluatedArray(evaluating:)`, evaluation is automatic.
     public func compute(electronDensity: MLXArray, electronTemperature: MLXArray) throws -> MLXArray {
+        try compute(
+            electronDensity: electronDensity,
+            electronTemperature: electronTemperature,
+            validatesInputs: true
+        )
+    }
 
-        // Validate inputs (CRITICAL FIX #3)
-        try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
-        try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
-        try PhysicsValidation.validateShapes([electronDensity, electronTemperature], names: ["electronDensity", "electronTemperature"])
+    package func compute(
+        electronDensity: MLXArray,
+        electronTemperature: MLXArray,
+        validatesInputs: Bool
+    ) throws -> MLXArray {
+        if validatesInputs {
+            try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
+            try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
+            try PhysicsValidation.validateShapes([electronDensity, electronTemperature], names: ["electronDensity", "electronTemperature"])
+        }
 
         var f_rel = MLXArray.zeros(like: electronTemperature)
 
@@ -163,6 +175,16 @@ public struct Bremsstrahlung: Sendable {
 // MARK: - Source Model Protocol Conformance
 
 extension Bremsstrahlung {
+    private static func metadataCollection(
+        existing: SourceMetadataCollection?,
+        appending metadata: SourceMetadata
+    ) -> SourceMetadataCollection {
+        if let existing {
+            SourceMetadataCollection(entries: existing.entries + [metadata])
+        } else {
+            SourceMetadataCollection(entries: [metadata])
+        }
+    }
 
     /// Apply Bremsstrahlung radiation to source terms
     ///
@@ -178,84 +200,81 @@ extension Bremsstrahlung {
         profiles: CoreProfiles,
         geometry: Geometry
     ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            evaluationMode: .eager,
+            includesMetadata: true,
+            validateDebugUnits: true,
+            validatesInputs: true
+        )
+    }
 
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        context: SourceEvaluationContext
+    ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: context.geometricFactors,
+            evaluationMode: context.evaluationMode,
+            includesMetadata: context.includesMetadata,
+            validateDebugUnits: context.validatesDebugUnits,
+            validatesInputs: context.includesMetadata
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        geometricFactors: GeometricFactors,
+        evaluationMode: MLXEvaluationMode,
+        includesMetadata: Bool,
+        validateDebugUnits: Bool,
+        validatesInputs: Bool
+    ) throws -> SourceTerms {
         let P_brems_watts = try compute(
             electronDensity: profiles.electronDensity.value,
-            electronTemperature: profiles.electronTemperature.value
+            electronTemperature: profiles.electronTemperature.value,
+            validatesInputs: validatesInputs
         )
 
         // Convert to MW/m³ for SourceTerms
         let P_brems = PhysicsConstants.wattsToMegawatts(P_brems_watts)
 
-        // Compute metadata for power balance tracking
-        // Reuse P_brems_watts to avoid duplicate computation
-        let cellVolumes = GeometricFactors.from(geometry: geometry).cellVolumes.value
-        let P_brems_total = (P_brems_watts * cellVolumes).sum()
-        eval(P_brems_total)
-        let bremsPower = P_brems_total.item(Float.self)
+        let metadata: SourceMetadataCollection?
+        if includesMetadata {
+            let cellVolumes = geometricFactors.cellVolumes.value
+            let P_brems_total = (P_brems_watts * cellVolumes).sum()
+            eval(P_brems_total)
+            let bremsPower = P_brems_total.item(Float.self)
 
-        let bremsMetadata = SourceMetadata(
-            modelName: "bremsstrahlung",
-            category: .radiation,
-            ionPower: 0,
-            electronPower: bremsPower
-        )
-
-        // Merge with existing metadata
-        let mergedMetadata: SourceMetadataCollection
-        if let existingMetadata = sources.metadata {
-            mergedMetadata = SourceMetadataCollection(
-                entries: existingMetadata.entries + [bremsMetadata]
+            let bremsMetadata = SourceMetadata(
+                modelName: "bremsstrahlung",
+                category: .radiation,
+                ionPower: 0,
+                electronPower: bremsPower
+            )
+            metadata = Self.metadataCollection(
+                existing: sources.metadata,
+                appending: bremsMetadata
             )
         } else {
-            mergedMetadata = SourceMetadataCollection(entries: [bremsMetadata])
+            metadata = sources.metadata
         }
 
         // Create new SourceTerms with updated electron heating and metadata
         return SourceTerms(
             ionHeating: sources.ionHeating,
-            electronHeating: EvaluatedArray(
-                evaluating: sources.electronHeating.value + P_brems
-            ),
+            electronHeating: evaluationMode.wrap(sources.electronHeating.value + P_brems),
             particleSource: sources.particleSource,
             currentSource: sources.currentSource,
-            metadata: mergedMetadata
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
         )
-    }
-
-    public func applyToSourcesForSolver(
-        _ sources: SourceTerms,
-        profiles: CoreProfiles
-    ) throws -> SourceTerms {
-        let pBremsWatts = computeForSolver(
-            electronDensity: profiles.electronDensity.value,
-            electronTemperature: profiles.electronTemperature.value
-        )
-        let pBrems = PhysicsConstants.wattsToMegawatts(pBremsWatts)
-
-        return SourceTerms(
-            ionHeating: sources.ionHeating,
-            electronHeating: EvaluatedArray(
-                evaluating: sources.electronHeating.value + pBrems
-            ),
-            particleSource: sources.particleSource,
-            currentSource: sources.currentSource,
-            metadata: sources.metadata,
-            validateDebugUnits: false
-        )
-    }
-
-    private func computeForSolver(electronDensity: MLXArray, electronTemperature: MLXArray) -> MLXArray {
-        var fRel = MLXArray.zeros(like: electronTemperature)
-
-        if includeRelativistic {
-            let mask = MLX.greater(electronTemperature, Float(1000.0))
-            let maskFloat = mask.asType(.float32)
-            let relativisticFactor = (electronTemperature / m_e_c2) * (Float(4.0) * sqrt(Float(2.0)) - Float(1.0)) / Float.pi
-            fRel = maskFloat * relativisticFactor
-        }
-
-        return -C_brems * electronDensity * sqrt(electronTemperature) * electronDensity * effectiveCharge * (Float(1.0) + fRel)
     }
 }
 

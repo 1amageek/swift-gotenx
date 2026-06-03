@@ -162,6 +162,13 @@ public struct GeometricFactors: Sendable {
     /// - Parameter geometry: Tokamak geometry
     /// - Returns: Geometric factors for finite volume discretization
     public static func from(geometry: Geometry) -> GeometricFactors {
+        from(geometry: geometry, evaluationMode: .eager)
+    }
+
+    package static func from(
+        geometry: Geometry,
+        evaluationMode: MLXEvaluationMode
+    ) -> GeometricFactors {
         let cellCount = geometry.cellCount
         let faceCount = cellCount + 1
         let radialSpacing = geometry.radialSpacing  // Assumes uniform spacing
@@ -242,15 +249,26 @@ public struct GeometricFactors: Sendable {
         let majorRadiusMetric = 0.5 * (majorRadiusMetricFaces[0..<cellCount] + majorRadiusMetricFaces[1..<(cellCount+1)])
         let shapeMetric = 0.5 * (shapeMetricFaces[0..<cellCount] + shapeMetricFaces[1..<(cellCount+1)])
 
+        let wrapped = evaluationMode.wrapBatch([
+            cellVolumes,
+            faceAreas,
+            cellDistances,
+            cellRadii,
+            faceRadii,
+            jacobian,
+            majorRadiusMetric,
+            shapeMetric
+        ])
+
         return GeometricFactors(
-            cellVolumes: EvaluatedArray(evaluating: cellVolumes),
-            faceAreas: EvaluatedArray(evaluating: faceAreas),
-            cellDistances: EvaluatedArray(evaluating: cellDistances),
-            cellRadii: EvaluatedArray(evaluating: cellRadii),
-            faceRadii: EvaluatedArray(evaluating: faceRadii),
-            jacobian: EvaluatedArray(evaluating: jacobian),
-            majorRadiusMetric: EvaluatedArray(evaluating: majorRadiusMetric),
-            shapeMetric: EvaluatedArray(evaluating: shapeMetric)
+            cellVolumes: wrapped[0],
+            faceAreas: wrapped[1],
+            cellDistances: wrapped[2],
+            cellRadii: wrapped[3],
+            faceRadii: wrapped[4],
+            jacobian: wrapped[5],
+            majorRadiusMetric: wrapped[6],
+            shapeMetric: wrapped[7]
         )
     }
 }
@@ -306,13 +324,15 @@ extension Block1DCoeffs {
         try densityCoeffs.validateNumerics(cellCount: cellCount, name: "densityCoeffs")
         try fluxCoeffs.validateNumerics(cellCount: cellCount, name: "fluxCoeffs")
 
-        try NumericalValidation.validatePositive(geometry.cellVolumes.value, field: "geometry.cellVolumes")
-        try NumericalValidation.validatePositive(geometry.faceAreas.value, field: "geometry.faceAreas")
-        try NumericalValidation.validatePositive(geometry.cellDistances.value, field: "geometry.cellDistances")
-        try NumericalValidation.validateFinite(geometry.cellRadii.value, field: "geometry.cellRadii")
-        try NumericalValidation.validateFinite(geometry.faceRadii.value, field: "geometry.faceRadii")
-        try NumericalValidation.validatePositive(geometry.jacobian.value, field: "geometry.jacobian")
-        try NumericalValidation.validateFinite(geometry.majorRadiusMetric.value, field: "geometry.majorRadiusMetric")
-        try NumericalValidation.validateFinite(geometry.shapeMetric.value, field: "geometry.shapeMetric")
+        try NumericalValidation.validate([
+            .positive(geometry.cellVolumes.value, field: "geometry.cellVolumes"),
+            .positive(geometry.faceAreas.value, field: "geometry.faceAreas"),
+            .positive(geometry.cellDistances.value, field: "geometry.cellDistances"),
+            .finite(geometry.cellRadii.value, field: "geometry.cellRadii"),
+            .finite(geometry.faceRadii.value, field: "geometry.faceRadii"),
+            .positive(geometry.jacobian.value, field: "geometry.jacobian"),
+            .finite(geometry.majorRadiusMetric.value, field: "geometry.majorRadiusMetric"),
+            .finite(geometry.shapeMetric.value, field: "geometry.shapeMetric")
+        ])
     }
 }

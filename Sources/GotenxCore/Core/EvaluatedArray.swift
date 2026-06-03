@@ -28,12 +28,22 @@ public struct EvaluatedArray: @unchecked Sendable {
     public static func evaluatingBatch(_ arrays: [MLXArray]) -> [EvaluatedArray] {
         // Force all arrays in one MLX evaluation pass.
         eval(arrays)
-        return arrays.map { EvaluatedArray(preEvaluated: $0) }
+        return arrays.map { EvaluatedArray(uncheckedLazy: $0) }
     }
 
-    /// Internal initializer for pre-evaluated arrays (skip redundant eval)
-    private init(preEvaluated: MLXArray) {
-        self.array = preEvaluated
+    /// Wrap an array without forcing evaluation.
+    ///
+    /// This is intended for pure MLX graph composition in solver internals where
+    /// eager evaluation would break fusion and add synchronization points. Callers
+    /// must force evaluation before storing the value across actor or task
+    /// boundaries.
+    package static func uncheckedLazy(_ array: MLXArray) -> EvaluatedArray {
+        EvaluatedArray(uncheckedLazy: array)
+    }
+
+    /// Internal initializer for arrays whose evaluation is managed by the caller.
+    private init(uncheckedLazy array: MLXArray) {
+        self.array = array
     }
 
     /// Read-only access to the evaluated MLXArray

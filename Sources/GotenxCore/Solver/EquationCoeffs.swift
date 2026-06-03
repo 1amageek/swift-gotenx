@@ -80,7 +80,25 @@ public struct EquationCoeffs: Sendable {
         cellSourceMatrixCoefficient: MLXArray,
         transientCoefficient: MLXArray
     ) {
-        let evaluated = EvaluatedArray.evaluatingBatch([
+        self.init(
+            faceDiffusionCoefficient: faceDiffusionCoefficient,
+            faceConvectionVelocity: faceConvectionVelocity,
+            cellSource: cellSource,
+            cellSourceMatrixCoefficient: cellSourceMatrixCoefficient,
+            transientCoefficient: transientCoefficient,
+            evaluationMode: .eager
+        )
+    }
+
+    package init(
+        faceDiffusionCoefficient: MLXArray,
+        faceConvectionVelocity: MLXArray,
+        cellSource: MLXArray,
+        cellSourceMatrixCoefficient: MLXArray,
+        transientCoefficient: MLXArray,
+        evaluationMode: MLXEvaluationMode
+    ) {
+        let evaluated = evaluationMode.wrapBatch([
             faceDiffusionCoefficient,
             faceConvectionVelocity,
             cellSource,
@@ -151,26 +169,13 @@ extension EquationCoeffs {
     public func validateNumerics(cellCount: Int, name: String) throws {
         try validate(cellCount: cellCount)
 
-        try NumericalValidation.validateNonNegative(
-            faceDiffusionCoefficient.value,
-            field: "\(name).faceDiffusionCoefficient"
-        )
-        try NumericalValidation.validateFinite(
-            faceConvectionVelocity.value,
-            field: "\(name).faceConvectionVelocity"
-        )
-        try NumericalValidation.validateFinite(
-            cellSource.value,
-            field: "\(name).cellSource"
-        )
-        try NumericalValidation.validateFinite(
-            cellSourceMatrixCoefficient.value,
-            field: "\(name).cellSourceMatrixCoefficient"
-        )
-        try NumericalValidation.validatePositive(
-            transientCoefficient.value,
-            field: "\(name).transientCoefficient"
-        )
+        try NumericalValidation.validate([
+            .nonNegative(faceDiffusionCoefficient.value, field: "\(name).faceDiffusionCoefficient"),
+            .finite(faceConvectionVelocity.value, field: "\(name).faceConvectionVelocity"),
+            .finite(cellSource.value, field: "\(name).cellSource"),
+            .finite(cellSourceMatrixCoefficient.value, field: "\(name).cellSourceMatrixCoefficient"),
+            .positive(transientCoefficient.value, field: "\(name).transientCoefficient")
+        ])
     }
 }
 

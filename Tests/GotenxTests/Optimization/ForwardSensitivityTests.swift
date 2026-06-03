@@ -24,10 +24,33 @@ final class SimpleHeatingSource: GradientAwareSource, @unchecked Sendable {
         self.mlxPower = power
     }
 
+    func computeTerms(in context: SourceEvaluationContext) throws -> SourceTerms {
+        makeTerms(
+            profiles: context.profiles,
+            geometry: context.geometry,
+            parameters: context.parameters,
+            evaluationMode: context.evaluationMode
+        )
+    }
+
     func computeTerms(
         profiles: CoreProfiles,
         geometry: Geometry,
         parameters: SourceParameters
+    ) -> SourceTerms {
+        makeTerms(
+            profiles: profiles,
+            geometry: geometry,
+            parameters: parameters,
+            evaluationMode: .eager
+        )
+    }
+
+    private func makeTerms(
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        parameters: SourceParameters,
+        evaluationMode: MLXEvaluationMode
     ) -> SourceTerms {
         let cellCount = profiles.ionTemperature.shape[0]
 
@@ -46,10 +69,11 @@ final class SimpleHeatingSource: GradientAwareSource, @unchecked Sendable {
             let electronHeatingArray = MLXArray.full([cellCount], values: electronHeating_mlx)
 
             return SourceTerms(
-                ionHeating: EvaluatedArray(evaluating: ionHeatingArray),
-                electronHeating: EvaluatedArray(evaluating: electronHeatingArray),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
+                ionHeating: evaluationMode.wrap(ionHeatingArray),
+                electronHeating: evaluationMode.wrap(electronHeatingArray),
+                particleSource: evaluationMode.wrap(MLXArray.zeros([cellCount])),
+                currentSource: evaluationMode.wrap(MLXArray.zeros([cellCount])),
+                validateDebugUnits: evaluationMode == .eager
             )
         } else {
             // Fallback to Float path (no gradients)
@@ -60,10 +84,11 @@ final class SimpleHeatingSource: GradientAwareSource, @unchecked Sendable {
             let electronHeating = powerDensity / 2.0
 
             return SourceTerms(
-                ionHeating: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(ionHeating))),
-                electronHeating: EvaluatedArray(evaluating: MLXArray.full([cellCount], values: MLXArray(electronHeating))),
-                particleSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount])),
-                currentSource: EvaluatedArray(evaluating: MLXArray.zeros([cellCount]))
+                ionHeating: evaluationMode.wrap(MLXArray.full([cellCount], values: MLXArray(ionHeating))),
+                electronHeating: evaluationMode.wrap(MLXArray.full([cellCount], values: MLXArray(electronHeating))),
+                particleSource: evaluationMode.wrap(MLXArray.zeros([cellCount])),
+                currentSource: evaluationMode.wrap(MLXArray.zeros([cellCount])),
+                validateDebugUnits: evaluationMode == .eager
             )
         }
     }

@@ -71,12 +71,19 @@ extension CoreProfiles {
     /// - Parameter minimum: Minimum allowed density [m^-3]
     /// - Returns: New CoreProfiles instance with clamped density
     public func withElectronDensityClamped(minimum: Float = 1e18) -> CoreProfiles {
+        withElectronDensityClamped(minimum: minimum, evaluationMode: .eager)
+    }
+
+    package func withElectronDensityClamped(
+        minimum: Float = 1e18,
+        evaluationMode: MLXEvaluationMode
+    ) -> CoreProfiles {
         let clampedDensity = maximum(electronDensity.value, MLXArray(minimum))
 
         return CoreProfiles(
             ionTemperature: ionTemperature,
             electronTemperature: electronTemperature,
-            electronDensity: EvaluatedArray(evaluating: clampedDensity),
+            electronDensity: evaluationMode.wrap(clampedDensity),
             poloidalFlux: poloidalFlux
         )
     }
@@ -101,17 +108,30 @@ extension CoreProfiles {
         temperatureMin: Float = 1.0,
         densityMin: Float = 1e18
     ) -> CoreProfiles {
+        withPhysicalFloors(
+            temperatureMin: temperatureMin,
+            densityMin: densityMin,
+            evaluationMode: .eager
+        )
+    }
+
+    package func withPhysicalFloors(
+        temperatureMin: Float = 1.0,
+        densityMin: Float = 1e18,
+        evaluationMode: MLXEvaluationMode
+    ) -> CoreProfiles {
         let clampedTi = maximum(ionTemperature.value, MLXArray(temperatureMin))
         let clampedTe = maximum(electronTemperature.value, MLXArray(temperatureMin))
         let clampedNe = maximum(electronDensity.value, MLXArray(densityMin))
 
         return CoreProfiles(
-            ionTemperature: EvaluatedArray(evaluating: clampedTi),
-            electronTemperature: EvaluatedArray(evaluating: clampedTe),
-            electronDensity: EvaluatedArray(evaluating: clampedNe),
+            ionTemperature: evaluationMode.wrap(clampedTi),
+            electronTemperature: evaluationMode.wrap(clampedTe),
+            electronDensity: evaluationMode.wrap(clampedNe),
             poloidalFlux: poloidalFlux
         )
     }
+
 }
 
 // MARK: - Helper Functions

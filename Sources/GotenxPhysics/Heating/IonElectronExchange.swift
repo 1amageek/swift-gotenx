@@ -59,12 +59,26 @@ public struct IonElectronExchange: Sendable {
         electronTemperature: MLXArray,
         ionTemperature: MLXArray
     ) throws -> MLXArray {
+        try compute(
+            electronDensity: electronDensity,
+            electronTemperature: electronTemperature,
+            ionTemperature: ionTemperature,
+            validatesInputs: true
+        )
+    }
 
-        // Validate inputs (CRITICAL FIX #3)
-        try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
-        try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
-        try PhysicsValidation.validateTemperature(ionTemperature, name: "ionTemperature")
-        try PhysicsValidation.validateShapes([electronDensity, electronTemperature, ionTemperature], names: ["electronDensity", "electronTemperature", "ionTemperature"])
+    package func compute(
+        electronDensity: MLXArray,
+        electronTemperature: MLXArray,
+        ionTemperature: MLXArray,
+        validatesInputs: Bool
+    ) throws -> MLXArray {
+        if validatesInputs {
+            try PhysicsValidation.validateDensity(electronDensity, name: "electronDensity")
+            try PhysicsValidation.validateTemperature(electronTemperature, name: "electronTemperature")
+            try PhysicsValidation.validateTemperature(ionTemperature, name: "ionTemperature")
+            try PhysicsValidation.validateShapes([electronDensity, electronTemperature, ionTemperature], names: ["electronDensity", "electronTemperature", "ionTemperature"])
+        }
 
         // Coulomb logarithm with bounds (MEDIUM FIX #1)
         // ln(Λ) = 24 - ln(√(n_e/10⁶) / T_e)
@@ -154,6 +168,16 @@ public struct IonElectronExchange: Sendable {
 // MARK: - Source Model Protocol Conformance
 
 extension IonElectronExchange {
+    private static func metadataCollection(
+        existing: SourceMetadataCollection?,
+        appending metadata: SourceMetadata
+    ) -> SourceMetadataCollection {
+        if let existing {
+            SourceMetadataCollection(entries: existing.entries + [metadata])
+        } else {
+            SourceMetadataCollection(entries: [metadata])
+        }
+    }
 
     /// Apply heat exchange to source terms
     ///
@@ -170,102 +194,98 @@ extension IonElectronExchange {
         profiles: CoreProfiles,
         geometry: Geometry
     ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            evaluationMode: .eager,
+            includesMetadata: true,
+            validateDebugUnits: true,
+            validatesInputs: true
+        )
+    }
 
-        let validatedProfiles = try ValidatedProfiles.validate(profiles)
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        context: SourceEvaluationContext
+    ) throws -> SourceTerms {
+        try applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: context.geometricFactors,
+            evaluationMode: context.evaluationMode,
+            includesMetadata: context.includesMetadata,
+            validateDebugUnits: context.validatesDebugUnits,
+            validatesInputs: context.includesMetadata
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        geometricFactors: GeometricFactors,
+        evaluationMode: MLXEvaluationMode,
+        includesMetadata: Bool,
+        validateDebugUnits: Bool,
+        validatesInputs: Bool
+    ) throws -> SourceTerms {
+        let activeProfiles = if validatesInputs {
+            try ValidatedProfiles.validate(profiles).toCoreProfiles()
+        } else {
+            profiles
+        }
 
         let Q_ie_watts = try compute(
-            electronDensity: validatedProfiles.electronDensity.value,
-            electronTemperature: validatedProfiles.electronTemperature.value,
-            ionTemperature: validatedProfiles.ionTemperature.value
+            electronDensity: activeProfiles.electronDensity.value,
+            electronTemperature: activeProfiles.electronTemperature.value,
+            ionTemperature: activeProfiles.ionTemperature.value,
+            validatesInputs: validatesInputs
         )
 
         // Convert to MW/m³ for SourceTerms
         let Q_ie = PhysicsConstants.wattsToMegawatts(Q_ie_watts)
 
-        let Q_ie_min = Q_ie.min().item(Float.self)
-        let Q_ie_max = Q_ie.max().item(Float.self)
-        guard !Q_ie_min.isNaN && !Q_ie_min.isInfinite &&
-              !Q_ie_max.isNaN && !Q_ie_max.isInfinite else {
-            throw NumericalValidationError.nonFinite(
-                field: "ionElectronExchange",
-                minimum: Q_ie_min,
-                maximum: Q_ie_max
+        let metadata: SourceMetadataCollection?
+        if includesMetadata {
+            let Q_ie_min = Q_ie.min().item(Float.self)
+            let Q_ie_max = Q_ie.max().item(Float.self)
+            guard !Q_ie_min.isNaN && !Q_ie_min.isInfinite &&
+                  !Q_ie_max.isNaN && !Q_ie_max.isInfinite else {
+                throw NumericalValidationError.nonFinite(
+                    field: "ionElectronExchange",
+                    minimum: Q_ie_min,
+                    maximum: Q_ie_max
+                )
+            }
+
+            let cellVolumes = geometricFactors.cellVolumes.value
+            let P_ie_total = (Q_ie_watts * cellVolumes).sum()
+            eval(P_ie_total)
+            let exchangePower = P_ie_total.item(Float.self)
+
+            let exchangeMetadata = SourceMetadata(
+                modelName: "ion_electron_exchange",
+                category: .other,
+                ionPower: exchangePower,
+                electronPower: -exchangePower
             )
-        }
-
-        // Compute metadata for power balance tracking
-        // Reuse Q_ie_watts to avoid duplicate computation
-        let cellVolumes = GeometricFactors.from(geometry: geometry).cellVolumes.value
-        let P_ie_total = (Q_ie_watts * cellVolumes).sum()
-        eval(P_ie_total)
-        let exchangePower = P_ie_total.item(Float.self)
-
-        let exchangeMetadata = SourceMetadata(
-            modelName: "ion_electron_exchange",
-            category: .other,
-            ionPower: exchangePower,
-            electronPower: -exchangePower
-        )
-
-        // Merge with existing metadata
-        let mergedMetadata: SourceMetadataCollection
-        if let existingMetadata = sources.metadata {
-            mergedMetadata = SourceMetadataCollection(
-                entries: existingMetadata.entries + [exchangeMetadata]
+            metadata = Self.metadataCollection(
+                existing: sources.metadata,
+                appending: exchangeMetadata
             )
         } else {
-            mergedMetadata = SourceMetadataCollection(entries: [exchangeMetadata])
+            metadata = sources.metadata
         }
 
         // Create new SourceTerms with updated heating and metadata
         return SourceTerms(
-            ionHeating: EvaluatedArray(
-                evaluating: sources.ionHeating.value + Q_ie
-            ),
-            electronHeating: EvaluatedArray(
-                evaluating: sources.electronHeating.value - Q_ie
-            ),
+            ionHeating: evaluationMode.wrap(sources.ionHeating.value + Q_ie),
+            electronHeating: evaluationMode.wrap(sources.electronHeating.value - Q_ie),
             particleSource: sources.particleSource,
             currentSource: sources.currentSource,
-            metadata: mergedMetadata
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
         )
-    }
-
-    public func applyToSourcesForSolver(
-        _ sources: SourceTerms,
-        profiles: CoreProfiles
-    ) throws -> SourceTerms {
-        let qIEWatts = computeForSolver(
-            electronDensity: profiles.electronDensity.value,
-            electronTemperature: profiles.electronTemperature.value,
-            ionTemperature: profiles.ionTemperature.value
-        )
-        let qIE = PhysicsConstants.wattsToMegawatts(qIEWatts)
-
-        return SourceTerms(
-            ionHeating: EvaluatedArray(
-                evaluating: sources.ionHeating.value + qIE
-            ),
-            electronHeating: EvaluatedArray(
-                evaluating: sources.electronHeating.value - qIE
-            ),
-            particleSource: sources.particleSource,
-            currentSource: sources.currentSource,
-            metadata: sources.metadata,
-            validateDebugUnits: false
-        )
-    }
-
-    private func computeForSolver(
-        electronDensity: MLXArray,
-        electronTemperature: MLXArray,
-        ionTemperature: MLXArray
-    ) -> MLXArray {
-        let lnLambdaRaw = Float(24.0) - log(sqrt(electronDensity / Float(1e6)) / electronTemperature)
-        let coulombLogarithm = PhysicsValidation.clampCoulombLog(lnLambdaRaw)
-        let nuEI = PhysicsConstants.collisionFrequencyPrefactor * electronDensity * effectiveCharge * coulombLogarithm / pow(electronTemperature, Float(1.5))
-        let mi = PhysicsConstants.atomicMassUnitsToKilograms(ionMass)
-
-        return (Float(3.0) / Float(2.0)) * (me / mi) * electronDensity * nuEI * kB * (electronTemperature - ionTemperature)
     }
 }

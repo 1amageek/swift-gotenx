@@ -40,6 +40,30 @@ struct SourceModelAdaptersTests {
     func expectClose(_ lhs: MLXArray, _ rhs: MLXArray, name: String) {
         #expect(allClose(lhs, rhs).item(Bool.self), "\(name) should match")
     }
+
+    func expectSolverTermsMatchDiagnostic(_ solver: SourceTerms, _ diagnostic: SourceTerms) {
+        expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
+        expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
+        expectClose(solver.particleSource.value, diagnostic.particleSource.value, name: "particle source")
+        expectClose(solver.currentSource.value, diagnostic.currentSource.value, name: "current source")
+        #expect(solver.metadata == nil, "Solver terms should skip diagnostic metadata")
+    }
+
+    func computeSolverTerms(
+        source: any SourceModel,
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        parameters: SourceParameters
+    ) throws -> SourceTerms {
+        try source.computeTerms(
+            in: SourceEvaluationContext(
+                profiles: profiles,
+                geometry: geometry,
+                parameters: parameters,
+                purpose: .solver
+            )
+        )
+    }
     
     // MARK: - Ohmic Heating Source Tests
     
@@ -83,13 +107,9 @@ struct SourceModelAdaptersTests {
         let parameters = SourceParameters(modelType: "ohmic_heating")
 
         let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
-        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: source, profiles: profiles, geometry: geometry, parameters: parameters)
 
-        expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
-        expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
-        expectClose(solver.particleSource.value, diagnostic.particleSource.value, name: "particle source")
-        expectClose(solver.currentSource.value, diagnostic.currentSource.value, name: "current source")
-        #expect(solver.metadata == nil, "Solver terms should skip diagnostic metadata")
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
     }
     
     // MARK: - Bremsstrahlung Source Tests
@@ -134,13 +154,9 @@ struct SourceModelAdaptersTests {
         let parameters = SourceParameters(modelType: "bremsstrahlung")
 
         let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
-        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: source, profiles: profiles, geometry: geometry, parameters: parameters)
 
-        expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
-        expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
-        expectClose(solver.particleSource.value, diagnostic.particleSource.value, name: "particle source")
-        expectClose(solver.currentSource.value, diagnostic.currentSource.value, name: "current source")
-        #expect(solver.metadata == nil, "Solver terms should skip diagnostic metadata")
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
     }
     
     // MARK: - Ion-Electron Exchange Source Tests
@@ -186,13 +202,9 @@ struct SourceModelAdaptersTests {
         let parameters = SourceParameters(modelType: "ion_electron_exchange")
 
         let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
-        let solver = source.computeTermsForSolver(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: source, profiles: profiles, geometry: geometry, parameters: parameters)
 
-        expectClose(solver.ionHeating.value, diagnostic.ionHeating.value, name: "ion heating")
-        expectClose(solver.electronHeating.value, diagnostic.electronHeating.value, name: "electron heating")
-        expectClose(solver.particleSource.value, diagnostic.particleSource.value, name: "particle source")
-        expectClose(solver.currentSource.value, diagnostic.currentSource.value, name: "current source")
-        #expect(solver.metadata == nil, "Solver terms should skip diagnostic metadata")
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
     }
     
     // MARK: - Fusion Power Source Tests
@@ -222,6 +234,64 @@ struct SourceModelAdaptersTests {
         let fusionMetadata = metadata.entries.first { $0.modelName.contains("fusion") }
         #expect(fusionMetadata != nil, "Should contain fusion metadata")
         #expect(fusionMetadata?.category == .fusion, "Category should be .fusion")
+    }
+
+    @Test("Fusion power solver terms match diagnostic terms without metadata")
+    func testFusionPowerSolverTermsMatchDiagnosticTerms() throws {
+        let source = FusionPowerSource()
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let parameters = SourceParameters(modelType: "fusion")
+
+        let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: source, profiles: profiles, geometry: geometry, parameters: parameters)
+
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
+    }
+
+    // MARK: - ECRH Source Tests
+
+    @Test("ECRH solver terms match diagnostic terms without metadata")
+    func testECRHSolverTermsMatchDiagnosticTerms() throws {
+        let source = ECRHSource()
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let parameters = SourceParameters(modelType: "ecrh")
+
+        let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: source, profiles: profiles, geometry: geometry, parameters: parameters)
+
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
+    }
+
+    // MARK: - Gas Puff Source Tests
+
+    @Test("Gas puff solver terms match diagnostic terms without metadata")
+    func testGasPuffSolverTermsMatchDiagnosticTerms() throws {
+        let source = GasPuffSource()
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let parameters = SourceParameters(modelType: "gas_puff")
+
+        let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: source, profiles: profiles, geometry: geometry, parameters: parameters)
+
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
+    }
+
+    // MARK: - Impurity Radiation Source Tests
+
+    @Test("Impurity radiation solver terms match diagnostic terms without metadata")
+    func testImpurityRadiationSolverTermsMatchDiagnosticTerms() throws {
+        let source = ImpurityRadiationSource()
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let parameters = SourceParameters(modelType: "impurity_radiation")
+
+        let diagnostic = try source.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: source, profiles: profiles, geometry: geometry, parameters: parameters)
+
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
     }
     
     // MARK: - Composite Source Model Tests
@@ -288,5 +358,27 @@ struct SourceModelAdaptersTests {
         if let metadata = terms.metadata {
             #expect(metadata.entries.isEmpty, "Empty composite should have empty metadata")
         }
+    }
+
+    @Test("Composite solver terms match diagnostic terms without metadata")
+    func testCompositeSolverTermsMatchDiagnosticTerms() throws {
+        let composite = CompositeSourceModel(sources: [
+            "ohmic": OhmicHeatingSource(),
+            "brems": BremsstrahlungSource(),
+            "exchange": IonElectronExchangeSource(),
+            "fusion": FusionPowerSource(),
+            "ecrh": ECRHSource(),
+            "gasPuff": GasPuffSource(),
+            "impurity": ImpurityRadiationSource()
+        ])
+
+        let profiles = try createTestProfiles()
+        let geometry = createTestGeometry()
+        let parameters = SourceParameters(modelType: "composite")
+
+        let diagnostic = try composite.computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
+        let solver = try computeSolverTerms(source: composite, profiles: profiles, geometry: geometry, parameters: parameters)
+
+        expectSolverTermsMatchDiagnostic(solver, diagnostic)
     }
 }

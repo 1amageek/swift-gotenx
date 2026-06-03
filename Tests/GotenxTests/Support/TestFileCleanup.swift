@@ -14,3 +14,10 @@ func removeTestItemIfExists(atPath path: String) {
         Issue.record("Failed to remove test item at \(path): \(error)")
     }
 }
+
+func makeUniqueTemporaryDirectory(prefix: String = "GotenxTests") throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+        .appendingPathComponent("\(prefix)-\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+}

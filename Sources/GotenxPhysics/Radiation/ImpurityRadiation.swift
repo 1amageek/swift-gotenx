@@ -157,19 +157,26 @@ public struct ImpurityRadiationModel: Sendable {
     ///
     /// - Parameter electronTemperature: Electron temperature [eV]
     /// - Returns: Radiation coefficient L_z [W⋅m³]
-    private func computeRadiationCoefficient(electronTemperature: MLXArray) -> MLXArray {
+    private func computeRadiationCoefficient(
+        electronTemperature: MLXArray,
+        emitDebugWarning: Bool = true
+    ) -> MLXArray {
         // Clamp temperature to valid range [0.1 keV, 100 keV] = [100 eV, 100,000 eV]
         // This matches TORAX implementation (Mavrin 2018 polynomial validity range)
         let Te_clamped = MLX.clip(electronTemperature, min: 100.0, max: 100000.0)
 
         // Diagnostic warning for values outside validity range
         #if DEBUG
-        let Te_min = electronTemperature.min().item(Float.self)
-        let Te_max = electronTemperature.max().item(Float.self)
-        if Te_min < 100.0 || Te_max > 100000.0 {
-            print("⚠️  Warning: T_e outside ADAS validity range [\(Te_min), \(Te_max)] eV")
-            print("   Valid range: [100, 100000] eV (0.1 - 100 keV)")
-            print("   Polynomial extrapolation may be unreliable")
+        if emitDebugWarning {
+            let teRange = MLX.stacked([
+                electronTemperature.min(),
+                electronTemperature.max()
+            ], axis: 0).asArray(Float.self)
+            if teRange[0] < 100.0 || teRange[1] > 100000.0 {
+                print("Warning: T_e outside ADAS validity range [\(teRange[0]), \(teRange[1])] eV")
+                print("   Valid range: [100, 100000] eV (0.1 - 100 keV)")
+                print("   Polynomial extrapolation may be unreliable")
+            }
         }
         #endif
 
@@ -252,20 +259,39 @@ public struct ImpurityRadiationModel: Sendable {
     ///   - electronTemperature: Electron temperature [eV]
     /// - Returns: Radiation power loss [W/m³] (NEGATIVE value)
     public func compute(electronDensity: MLXArray, electronTemperature: MLXArray) -> MLXArray {
-        // Compute radiation coefficient
-        let Lz = computeRadiationCoefficient(electronTemperature: electronTemperature)
+        compute(
+            electronDensity: electronDensity,
+            electronTemperature: electronTemperature,
+            emitsDebugWarning: true
+        )
+    }
 
-        // Impurity density
-        let n_imp = impurityFraction * electronDensity
+    package func compute(
+        electronDensity: MLXArray,
+        electronTemperature: MLXArray,
+        emitsDebugWarning: Bool
+    ) -> MLXArray {
+        let radiationCoefficient = computeRadiationCoefficient(
+            electronTemperature: electronTemperature,
+            emitDebugWarning: emitsDebugWarning
+        )
+        let impurityDensity = impurityFraction * electronDensity
 
-        // Radiation power: P_rad = -n_e × n_imp × L_z [W/m³]
-        // Negative sign: radiation is a power LOSS
-        let P_rad = -(electronDensity * n_imp * Lz)
-
-        return P_rad
+        return -(electronDensity * impurityDensity * radiationCoefficient)
     }
 
     // MARK: - Apply to Source Terms
+
+    private static func metadataCollection(
+        existing: SourceMetadataCollection?,
+        appending metadata: SourceMetadata
+    ) -> SourceMetadataCollection {
+        if let existing {
+            SourceMetadataCollection(entries: existing.entries + [metadata])
+        } else {
+            SourceMetadataCollection(entries: [metadata])
+        }
+    }
 
     /// Apply impurity radiation to source terms
     ///
@@ -286,11 +312,51 @@ public struct ImpurityRadiationModel: Sendable {
         _ sources: SourceTerms,
         profiles: CoreProfiles
     ) throws -> SourceTerms {
+        applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: nil,
+            evaluationMode: .eager,
+            includesMetadata: false,
+            validateDebugUnits: true,
+            emitsDebugWarning: true
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        context: SourceEvaluationContext
+    ) -> SourceTerms {
+        applyToSources(
+            sources,
+            profiles: profiles,
+            geometricFactors: context.geometricFactors,
+            evaluationMode: context.evaluationMode,
+            includesMetadata: context.includesMetadata,
+            validateDebugUnits: context.validatesDebugUnits,
+            emitsDebugWarning: context.includesMetadata
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        geometricFactors: GeometricFactors?,
+        evaluationMode: MLXEvaluationMode,
+        includesMetadata: Bool,
+        validateDebugUnits: Bool,
+        emitsDebugWarning: Bool
+    ) -> SourceTerms {
         let electronDensity = profiles.electronDensity.value
         let electronTemperature = profiles.electronTemperature.value
 
         // Compute radiation power loss [W/m³] (returns NEGATIVE value)
-        let P_rad_watts = compute(electronDensity: electronDensity, electronTemperature: electronTemperature)
+        let P_rad_watts = compute(
+            electronDensity: electronDensity,
+            electronTemperature: electronTemperature,
+            emitsDebugWarning: emitsDebugWarning
+        )
 
         // Convert to MW/m³ for SourceTerms
         let P_rad_MW = PhysicsConstants.wattsToMegawatts(P_rad_watts)
@@ -298,11 +364,33 @@ public struct ImpurityRadiationModel: Sendable {
         // Add radiation loss (negative value) to electron heating
         let updated_electron = sources.electronHeating.value + P_rad_MW
 
+        let metadata: SourceMetadataCollection?
+        if includesMetadata, let geometricFactors {
+            let cellVolumes = geometricFactors.cellVolumes.value
+            let P_rad_total = (P_rad_watts * cellVolumes).sum()
+            eval(P_rad_total)
+
+            let radiationMetadata = SourceMetadata(
+                modelName: "impurity_radiation",
+                category: .radiation,
+                ionPower: 0,
+                electronPower: P_rad_total.item(Float.self)
+            )
+            metadata = Self.metadataCollection(
+                existing: sources.metadata,
+                appending: radiationMetadata
+            )
+        } else {
+            metadata = sources.metadata
+        }
+
         return SourceTerms(
             ionHeating: sources.ionHeating,
-            electronHeating: EvaluatedArray(evaluating: updated_electron),
+            electronHeating: evaluationMode.wrap(updated_electron),
             particleSource: sources.particleSource,
-            currentSource: sources.currentSource
+            currentSource: sources.currentSource,
+            metadata: metadata,
+            validateDebugUnits: validateDebugUnits
         )
     }
 

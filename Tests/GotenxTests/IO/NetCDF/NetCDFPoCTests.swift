@@ -16,11 +16,9 @@ struct NetCDFPoCTests {
     /// - ✅ Data is retrievable via ncdump
     @Test("PoC: Write single variable to NetCDF")
     func testMinimalNetCDFWrite() throws {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "NetCDFPoC")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("poc_test.nc").path
-
-        // Clean up any existing file
-        removeTestItemIfExists(atPath: filePath)
 
         // Create NetCDF file
         let file = try NetCDF.create(path: filePath, overwriteExisting: true)
@@ -97,7 +95,8 @@ struct NetCDFPoCTests {
     /// Week 1 PoC: Verify ncdump can read the file
     @Test("PoC: ncdump verification")
     func testNcdumpVerification() throws {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "NetCDFPoC")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("poc_test_ncdump.nc").path
 
         // Create simple file in a scope to ensure it's closed
@@ -143,7 +142,8 @@ struct NetCDFPoCTests {
     /// Week 1 PoC: Test CF-1.8 compliance with standard_name
     @Test("PoC: CF-1.8 standard_name compliance")
     func testCFStandardNames() throws {
-        let tempDir = FileManager.default.temporaryDirectory
+        let tempDir = try makeUniqueTemporaryDirectory(prefix: "NetCDFPoC")
+        defer { removeTestItemIfExists(at: tempDir) }
         let filePath = tempDir.appendingPathComponent("poc_test_cf.nc").path
 
         let file = try NetCDF.create(path: filePath, overwriteExisting: true)

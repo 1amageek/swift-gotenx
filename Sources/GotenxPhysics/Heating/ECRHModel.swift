@@ -101,7 +101,16 @@ public struct ECRHModel: Sendable {
     ///   - geometry: Tokamak geometry
     /// - Returns: Power density [W/m³]
     public func computePowerDensity(geometry: Geometry) -> MLXArray {
-        let geometricFactors = GeometricFactors.from(geometry: geometry)
+        computePowerDensity(
+            geometry: geometry,
+            geometricFactors: GeometricFactors.from(geometry: geometry)
+        )
+    }
+
+    package func computePowerDensity(
+        geometry: Geometry,
+        geometricFactors: GeometricFactors
+    ) -> MLXArray {
         let r = geometricFactors.cellRadii.value  // Physical radius r [m]
         let rho = r / geometry.minorRadius    // Normalized radius ρ = r/a
         let volumes = geometricFactors.cellVolumes.value
@@ -168,8 +177,43 @@ public struct ECRHModel: Sendable {
         profiles: CoreProfiles,
         geometry: Geometry
     ) throws -> SourceTerms {
-        // Compute power deposition
-        let P_watts = computePowerDensity(geometry: geometry)
+        applyToSources(
+            sources,
+            profiles: profiles,
+            geometry: geometry,
+            geometricFactors: GeometricFactors.from(geometry: geometry),
+            evaluationMode: .eager,
+            validateDebugUnits: true
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        context: SourceEvaluationContext
+    ) -> SourceTerms {
+        applyToSources(
+            sources,
+            profiles: profiles,
+            geometry: context.geometry,
+            geometricFactors: context.geometricFactors,
+            evaluationMode: context.evaluationMode,
+            validateDebugUnits: context.validatesDebugUnits
+        )
+    }
+
+    package func applyToSources(
+        _ sources: SourceTerms,
+        profiles: CoreProfiles,
+        geometry: Geometry,
+        geometricFactors: GeometricFactors,
+        evaluationMode: MLXEvaluationMode,
+        validateDebugUnits: Bool
+    ) -> SourceTerms {
+        let P_watts = computePowerDensity(
+            geometry: geometry,
+            geometricFactors: geometricFactors
+        )
 
         // Convert to MW/m³ for SourceTerms
         let P_MW = PhysicsConstants.wattsToMegawatts(P_watts)
@@ -183,9 +227,11 @@ public struct ECRHModel: Sendable {
 
         return SourceTerms(
             ionHeating: sources.ionHeating,
-            electronHeating: EvaluatedArray(evaluating: updated_electron),
+            electronHeating: evaluationMode.wrap(updated_electron),
             particleSource: sources.particleSource,
-            currentSource: EvaluatedArray(evaluating: updated_current)
+            currentSource: evaluationMode.wrap(updated_current),
+            metadata: sources.metadata,
+            validateDebugUnits: validateDebugUnits
         )
     }
 

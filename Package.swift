@@ -26,6 +26,10 @@ let package = Package(
             name: "GotenxCLI",
             targets: ["GotenxCLI"]
         ),
+        .executable(
+            name: "GotenxBenchmarks",
+            targets: ["GotenxBenchmarks"]
+        ),
     ],
     dependencies: [
         // MLX-Swift: Array framework for machine learning on Apple Silicon
@@ -97,6 +101,15 @@ let package = Package(
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "SwiftNetCDF", package: "SwiftNetCDF"),
                 .product(name: "Logging", package: "swift-log"),
+            ]
+        ),
+
+        .executableTarget(
+            name: "GotenxBenchmarks",
+            dependencies: [
+                "GotenxCore",
+                "GotenxPhysics",
+                .product(name: "MLX", package: "mlx-swift"),
             ]
         ),
 

@@ -7,6 +7,13 @@ import Logging
 // Logger for Newton-Raphson solver
 private let logger = Logger(label: "com.gotenx.core.newton")
 
+private struct NewtonDirection {
+    let delta: MLXArray
+    let linearError: Float
+    let meritDescent: Float
+    let usedBandedJacobian: Bool
+}
+
 /// Newton-Raphson solver for nonlinear implicit PDE systems
 ///
 /// Uses automatic differentiation (vjp) for efficient Jacobian computation.
@@ -35,6 +42,13 @@ public struct NewtonRaphsonSolver: PDESolver {
     /// Hybrid linear solver
     private let linearSolver: HybridLinearSolver
 
+    /// Whether to try the colored-VJP block-tridiagonal Jacobian before full dense VJP.
+    ///
+    /// This candidate is verified with a true directional derivative before use, but
+    /// it is opt-in because current MLX overhead makes full dense VJP faster for the
+    /// default 100-cell benchmark.
+    package let usesBandedJacobianCandidate: Bool
+
     // MARK: - Initialization
 
     /// Pereverzev-Galeev artificial-diffusion factor.
@@ -53,12 +67,31 @@ public struct NewtonRaphsonSolver: PDESolver {
         linearSolver: HybridLinearSolver = HybridLinearSolver(),
         pereverzevFactor: Float = 0.5
     ) {
+        self.init(
+            tolerance: tolerance,
+            maximumIterations: maximumIterations,
+            theta: theta,
+            linearSolver: linearSolver,
+            pereverzevFactor: pereverzevFactor,
+            usesBandedJacobianCandidate: false
+        )
+    }
+
+    package init(
+        tolerance: Float = 1e-6,
+        maximumIterations: Int = 100,
+        theta: Float = 1.0,
+        linearSolver: HybridLinearSolver = HybridLinearSolver(),
+        pereverzevFactor: Float = 0.5,
+        usesBandedJacobianCandidate: Bool = false
+    ) {
         precondition(theta >= 0.0 && theta <= 1.0, "Theta must be in [0, 1]")
         self.tolerance = tolerance
         self.maximumIterations = maximumIterations
         self.theta = theta
         self.linearSolver = linearSolver
         self.pereverzevFactor = pereverzevFactor
+        self.usesBandedJacobianCandidate = usesBandedJacobianCandidate
     }
 
     // MARK: - PDESolver Protocol
@@ -112,20 +145,28 @@ public struct NewtonRaphsonSolver: PDESolver {
         // Scale initial state to O(1)
         var xScaled = xFlat.scaled(by: referenceState)
 
-        // Get coefficients at old time
-        // Floor the old-time profiles too: a previous step may have left a cell at
-        // (or just below) zero temperature, which would make the old-time source
-        // coefficients blow up to NaN before the new step can even begin.
-        let coeffsOld = coeffsCallback(coreProfilesT.withPhysicalFloors(), geometryT)
-        do {
-            try coeffsOld.validateNumerics()
-        } catch {
-            logger.error("Invalid old-time coefficients", metadata: ["error": "\(error)"])
-            return validationFailureResult(
-                profiles: coreProfilesTplusDt,
-                timeStep: timeStep,
-                failureType: 5.0
-            )
+        // Old-time coefficients are only used by theta methods with an explicit
+        // old spatial contribution. Backward Euler skips them entirely, avoiding
+        // unnecessary source/transport graph construction before the Newton loop.
+        let coeffsOld: Block1DCoeffs?
+        if theta == 1.0 {
+            coeffsOld = nil
+        } else {
+            // Floor the old-time profiles too: a previous step may have left a cell at
+            // (or just below) zero temperature, which would make the old-time source
+            // coefficients blow up to NaN before the new step can even begin.
+            let oldCoefficients = coeffsCallback(coreProfilesT.withPhysicalFloors(), geometryT)
+            do {
+                try oldCoefficients.validateNumerics()
+            } catch {
+                logger.error("Invalid old-time coefficients", metadata: ["error": "\(error)"])
+                return validationFailureResult(
+                    profiles: coreProfilesTplusDt,
+                    timeStep: timeStep,
+                    failureType: 5.0
+                )
+            }
+            coeffsOld = oldCoefficients
         }
 
         // Extract boundary conditions
@@ -135,14 +176,18 @@ public struct NewtonRaphsonSolver: PDESolver {
         // This ensures physics calculations use correct units
         let residualFnPhysical: (MLXArray) -> MLXArray = { xNewFlatPhysical in
             // Unflatten to CoreProfiles (physical units)
-            let xNewState = FlattenedState(values: EvaluatedArray(evaluating: xNewFlatPhysical), layout: layout)
+            let xNewState = FlattenedState(
+                values: xNewFlatPhysical,
+                layout: layout,
+                evaluationMode: .deferred
+            )
             // Floor temperatures and density to keep source/transport derivatives
             // bounded (and NaN-free) while a variable transiently overshoots during
             // the Newton iteration. Only the coefficient evaluation sees the floored
             // state; the residual's time-derivative term still uses the raw state.
             let profilesNew = xNewState
-                .toCoreProfiles()
-                .withPhysicalFloors()
+                .toCoreProfiles(evaluationMode: .deferred)
+                .withPhysicalFloors(evaluationMode: .deferred)
 
             // Get coefficients at new time (via callback)
             let coeffsNew = coeffsCallback(profilesNew, geometryTplusDt)
@@ -156,6 +201,7 @@ public struct NewtonRaphsonSolver: PDESolver {
                 timeStep: timeStep,
                 theta: self.theta,
                 layout: layout,
+                staticParameters: staticParameters,
                 boundaryConditions: boundaryConditions
             )
 
@@ -166,19 +212,26 @@ public struct NewtonRaphsonSolver: PDESolver {
         // Converts scaled variables to physical, computes residual, then scales residual back
         let residualFnScaled: (MLXArray) -> MLXArray = { xNewScaled in
             // Unscale to physical units
-            let xScaledState = FlattenedState(values: EvaluatedArray(evaluating: xNewScaled), layout: layout)
-            let xPhysical = xScaledState.unscaled(by: referenceState)
+            let xScaledState = FlattenedState(
+                values: xNewScaled,
+                layout: layout,
+                evaluationMode: .deferred
+            )
+            let xPhysical = xScaledState.unscaled(by: referenceState, evaluationMode: .deferred)
 
             // Compute residual in physical units
             let residualPhysical = residualFnPhysical(xPhysical.values.value)
 
             // Scale residual for uniform precision
-            let residualState = FlattenedState(values: EvaluatedArray(evaluating: residualPhysical), layout: layout)
-            let residualScaled = residualState.scaled(by: referenceState)
+            let residualState = FlattenedState(
+                values: residualPhysical,
+                layout: layout,
+                evaluationMode: .deferred
+            )
+            let residualScaled = residualState.scaled(by: referenceState, evaluationMode: .deferred)
 
             return residualScaled.values.value
         }
-
         // Newton-Raphson iteration in SCALED space
         var converged = false
         var iterations = 0
@@ -192,21 +245,6 @@ public struct NewtonRaphsonSolver: PDESolver {
 
         for iter in 0..<maximumIterations {
             iterations = iter + 1
-
-            // Guard against NaN/Inf creeping into the scaled state.
-            let xRange = MLX.stacked([
-                xScaled.values.value.min(keepDims: false),
-                xScaled.values.value.max(keepDims: false)
-            ], axis: 0).asArray(Float.self)
-            let x_min = xRange[0]
-            let x_max = xRange[1]
-
-            if !x_min.isFinite || !x_max.isFinite {
-                logger.warning("xScaled contains NaN/Inf; stopping iteration", metadata: [
-                    "iter": "\(iter)", "min": "\(x_min)", "max": "\(x_max)"
-                ])
-                break
-            }
 
             // Compute residual in scaled space
             let residualScaled = residualFnScaled(xScaled.values.value)
@@ -234,6 +272,13 @@ public struct NewtonRaphsonSolver: PDESolver {
             let residualNorm_Te = norms[2]
             let residualNorm_ne = norms[3]
             let residualNorm_psi = norms[4]
+
+            if !residualNorm.isFinite {
+                logger.warning("Residual contains NaN/Inf; stopping iteration", metadata: [
+                    "iter": "\(iter)", "total": "\(residualNorm)"
+                ])
+                break
+            }
 
             logger.debug("Newton residual", metadata: [
                 "iter": "\(iter)",
@@ -321,15 +366,26 @@ public struct NewtonRaphsonSolver: PDESolver {
                 ])
             }
 
-            let jacobianScaled = computeJacobianViaVJP(
-                residualFnScaled,
-                xScaled.values.value,
-                basis: jacobianBasis
-            )
+            // Terminate early only when the Newton direction is truly
+            // unusable. This is an *inexact* Newton method: the linear system only has
+            // to be solved accurately enough that the direction still reduces the
+            // residual. Inexact/Newton-Krylov theory uses a forcing term eta (here 0.5):
+            // any direction with ||J*delta + R|| <= eta*||R|| is acceptable. In Float32 a
+            // stiff, ill-conditioned Jacobian can leave a few-percent linear error even
+            // after equilibration; that direction is still a valid descent direction,
+            // and the descent check and line search below are the real safeguards.
+            let linearErrorThreshold: Float = 0.5
 
-            let deltaScaled: MLXArray
+            let direction: NewtonDirection
             do {
-                deltaScaled = try linearSolver.solve(jacobianScaled, rightHandSide: -residualScaled)
+                direction = try computeNewtonDirection(
+                    residualFn: residualFnScaled,
+                    x: xScaled.values.value,
+                    residual: residualScaled,
+                    layout: layout,
+                    jacobianBasis: jacobianBasis,
+                    linearErrorThreshold: linearErrorThreshold
+                )
             } catch {
                 logger.error("Linear solver failed", metadata: ["iter": "\(iter)", "error": "\(error)"])
                 let finalPhysical = xScaled.unscaled(by: referenceState)
@@ -346,35 +402,17 @@ public struct NewtonRaphsonSolver: PDESolver {
                 )
             }
 
-            let jacobianDelta = jacobianScaled.matmul(deltaScaled)
-            let linearResidual = jacobianDelta + residualScaled
-            let dirChecks = MLX.stacked([
-                MLX.norm(linearResidual),
-                MLX.norm(residualScaled),
-                -(residualScaled * jacobianDelta).sum()
-            ], axis: 0).asArray(Float.self)
-            let linear_residual_norm = dirChecks[0]
-            let residual_norm_val = dirChecks[1]
-            let merit_descent = dirChecks[2]
-            let linear_error = linear_residual_norm / (residual_norm_val + 1e-20)
+            let deltaScaled = direction.delta
+            let linear_error = direction.linearError
+            let merit_descent = direction.meritDescent
 
             logger.debug("Newton direction", metadata: [
                 "iter": "\(iter)",
                 "linearError": "\(String(format: "%.2e", linear_error))",
-                "meritDescent": "\(String(format: "%.2e", merit_descent))"
+                "meritDescent": "\(String(format: "%.2e", merit_descent))",
+                "jacobian": "\(direction.usedBandedJacobian ? "banded" : "dense")"
             ])
 
-            // Terminate early only when the Newton direction is truly
-            // unusable. This is an *inexact* Newton method: the linear system only has
-            // to be solved accurately enough that the direction still reduces the
-            // residual. Inexact/Newton-Krylov theory uses a forcing term η (here 0.5):
-            // any direction with ||J·Δ + R|| ≤ η·||R|| is acceptable. In Float32 a
-            // stiff, ill-conditioned Jacobian (κ ≈ 4·10⁵ from blow-up of source-term
-            // derivatives) can leave a few-percent linear error even after
-            // equilibration + refinement; that direction is still a valid descent
-            // direction, and the descent check and line search below are the real
-            // safeguards — a step is taken only if it actually decreases the residual.
-            let linearErrorThreshold: Float = 0.5
             if linear_error > linearErrorThreshold {
                 logger.error("Linear solver error too high - aborting", metadata: [
                     "linearError": "\(String(format: "%.2e", linear_error))",
@@ -496,6 +534,88 @@ public struct NewtonRaphsonSolver: PDESolver {
         )
     }
 
+    private func computeNewtonDirection(
+        residualFn: @escaping (MLXArray) -> MLXArray,
+        x: MLXArray,
+        residual: MLXArray,
+        layout: FlattenedState.StateLayout,
+        jacobianBasis: MLXArray,
+        linearErrorThreshold: Float
+    ) throws -> NewtonDirection {
+        if usesBandedJacobianCandidate {
+            let bandedJacobian = computeBlockTriDiagonalJacobianViaColoredVJP(
+                residualFn,
+                x,
+                layout: layout
+            )
+
+            do {
+                let candidateDelta = try linearSolver.solve(bandedJacobian, rightHandSide: -residual)
+                let trueJacobianDelta = computeDirectionalDerivativeViaFiniteDifference(
+                    residualFn,
+                    x,
+                    tangent: candidateDelta
+                )
+                let candidateMetrics = directionMetrics(
+                    jacobianDelta: trueJacobianDelta,
+                    residual: residual
+                )
+
+                if candidateMetrics.linearError <= linearErrorThreshold,
+                   candidateMetrics.meritDescent > 0 {
+                    return NewtonDirection(
+                        delta: candidateDelta,
+                        linearError: candidateMetrics.linearError,
+                        meritDescent: candidateMetrics.meritDescent,
+                        usedBandedJacobian: true
+                    )
+                }
+
+                logger.debug("Banded Jacobian candidate requires dense fallback", metadata: [
+                    "linearError": "\(String(format: "%.2e", candidateMetrics.linearError))",
+                    "meritDescent": "\(String(format: "%.2e", candidateMetrics.meritDescent))"
+                ])
+            } catch {
+                logger.debug("Banded Jacobian candidate failed; using dense fallback", metadata: [
+                    "error": "\(error)"
+                ])
+            }
+        }
+
+        let denseJacobian = computeJacobianViaVJP(
+            residualFn,
+            x,
+            basis: jacobianBasis
+        )
+        let delta = try linearSolver.solve(denseJacobian, rightHandSide: -residual)
+        let jacobianDelta = denseJacobian.matmul(delta)
+        let metrics = directionMetrics(jacobianDelta: jacobianDelta, residual: residual)
+
+        return NewtonDirection(
+            delta: delta,
+            linearError: metrics.linearError,
+            meritDescent: metrics.meritDescent,
+            usedBandedJacobian: false
+        )
+    }
+
+    private func directionMetrics(
+        jacobianDelta: MLXArray,
+        residual: MLXArray
+    ) -> (linearError: Float, meritDescent: Float) {
+        let linearResidual = jacobianDelta + residual
+        let checks = MLX.stacked([
+            MLX.norm(linearResidual),
+            MLX.norm(residual),
+            -(residual * jacobianDelta).sum()
+        ], axis: 0).asArray(Float.self)
+        let linearResidualNorm = checks[0]
+        let residualNorm = checks[1]
+        let meritDescent = checks[2]
+        let linearError = linearResidualNorm / (residualNorm + 1e-20)
+        return (linearError, meritDescent)
+    }
+
     private func validationFailureResult(
         profiles: CoreProfiles,
         timeStep: Float,
@@ -557,8 +677,8 @@ public struct NewtonRaphsonSolver: PDESolver {
         let vFaceAug = faceConvectionVelocity + dPv * logGradFace
 
         return EquationCoeffs(
-            faceDiffusionCoefficient: EvaluatedArray(evaluating: dFaceAug),
-            faceConvectionVelocity: EvaluatedArray(evaluating: vFaceAug),
+            faceDiffusionCoefficient: .uncheckedLazy(dFaceAug),
+            faceConvectionVelocity: .uncheckedLazy(vFaceAug),
             cellSource: coeffs.cellSource,
             cellSourceMatrixCoefficient: coeffs.cellSourceMatrixCoefficient,
             transientCoefficient: coeffs.transientCoefficient
@@ -572,11 +692,12 @@ public struct NewtonRaphsonSolver: PDESolver {
     private func computeThetaMethodResidual(
         xOld: MLXArray,
         xNew: MLXArray,
-        coeffsOld: Block1DCoeffs,
+        coeffsOld: Block1DCoeffs?,
         coeffsNew: Block1DCoeffs,
         timeStep: Float,
         theta: Float,
         layout: FlattenedState.StateLayout,
+        staticParameters: StaticRuntimeParameters,
         boundaryConditions: BoundaryConditions
     ) -> MLXArray {
         // Unflatten state vectors
@@ -605,40 +726,59 @@ public struct NewtonRaphsonSolver: PDESolver {
         let dpsi_dt = transientCoeff_psi * (psi_new - psi_old) / timeStep
 
         // Spatial operators at new time (VECTORIZED) - with boundary conditions.
-        // The transport channels (Ti, Te, ne) use Pereverzev-Galeev–augmented
-        // coefficients (artificial diffusion + compensating pinch, evaluated at the
-        // old-time profile) to stabilise the stiff implicit step.
-        let ionCoeffsNew = pereverzevAugmented(coeffsNew.ionCoeffs, u: Ti_new, geometry: coeffsNew.geometry)
-        let electronCoeffsNew = pereverzevAugmented(coeffsNew.electronCoeffs, u: Te_new, geometry: coeffsNew.geometry)
-        let densityCoeffsNew = pereverzevAugmented(coeffsNew.densityCoeffs, u: ne_new, geometry: coeffsNew.geometry)
+        // Inactive equations use inert coefficients and do not need spatial graphs;
+        // their residual reduces to the time derivative, keeping disabled profiles fixed.
+        let zeroCells = MLXArray.zeros([layout.cellCount])
+        let f_Ti_new: MLXArray
+        if staticParameters.evolveIonHeat {
+            let ionCoeffsNew = pereverzevAugmented(coeffsNew.ionCoeffs, u: Ti_new, geometry: coeffsNew.geometry)
+            f_Ti_new = applySpatialOperator1D(
+                u: Ti_new,
+                coeffs: ionCoeffsNew,
+                geometry: coeffsNew.geometry,
+                boundaryCondition: boundaryConditions.ionTemperature
+            )
+        } else {
+            f_Ti_new = zeroCells
+        }
 
-        let f_Ti_new = applySpatialOperator1D(
-            u: Ti_new,
-            coeffs: ionCoeffsNew,
-            geometry: coeffsNew.geometry,
-            boundaryCondition: boundaryConditions.ionTemperature
-        )
+        let f_Te_new: MLXArray
+        if staticParameters.evolveElectronHeat {
+            let electronCoeffsNew = pereverzevAugmented(coeffsNew.electronCoeffs, u: Te_new, geometry: coeffsNew.geometry)
+            f_Te_new = applySpatialOperator1D(
+                u: Te_new,
+                coeffs: electronCoeffsNew,
+                geometry: coeffsNew.geometry,
+                boundaryCondition: boundaryConditions.electronTemperature
+            )
+        } else {
+            f_Te_new = zeroCells
+        }
 
-        let f_Te_new = applySpatialOperator1D(
-            u: Te_new,
-            coeffs: electronCoeffsNew,
-            geometry: coeffsNew.geometry,
-            boundaryCondition: boundaryConditions.electronTemperature
-        )
+        let f_ne_new: MLXArray
+        if staticParameters.evolveElectronDensity {
+            let densityCoeffsNew = pereverzevAugmented(coeffsNew.densityCoeffs, u: ne_new, geometry: coeffsNew.geometry)
+            f_ne_new = applySpatialOperator1D(
+                u: ne_new,
+                coeffs: densityCoeffsNew,
+                geometry: coeffsNew.geometry,
+                boundaryCondition: boundaryConditions.electronDensity
+            )
+        } else {
+            f_ne_new = zeroCells
+        }
 
-        let f_ne_new = applySpatialOperator1D(
-            u: ne_new,
-            coeffs: densityCoeffsNew,
-            geometry: coeffsNew.geometry,
-            boundaryCondition: boundaryConditions.electronDensity
-        )
-
-        let f_psi_new = applySpatialOperator1D(
-            u: psi_new,
-            coeffs: coeffsNew.fluxCoeffs,
-            geometry: coeffsNew.geometry,
-            boundaryCondition: boundaryConditions.poloidalFlux
-        )
+        let f_psi_new: MLXArray
+        if staticParameters.evolvePoloidalFlux {
+            f_psi_new = applySpatialOperator1D(
+                u: psi_new,
+                coeffs: coeffsNew.fluxCoeffs,
+                geometry: coeffsNew.geometry,
+                boundaryCondition: boundaryConditions.poloidalFlux
+            )
+        } else {
+            f_psi_new = zeroCells
+        }
 
         let R_Ti_raw: MLXArray
         let R_Te_raw: MLXArray
@@ -654,33 +794,45 @@ public struct NewtonRaphsonSolver: PDESolver {
             R_ne_raw = dne_dt - f_ne_new
             R_psi_raw = dpsi_dt - f_psi_new
         } else {
-            let f_Ti_old = applySpatialOperator1D(
-                u: Ti_old,
-                coeffs: coeffsOld.ionCoeffs,
-                geometry: coeffsOld.geometry,
-                boundaryCondition: boundaryConditions.ionTemperature
-            )
+            guard let coeffsOld else {
+                preconditionFailure("Old-time coefficients are required when theta != 1")
+            }
 
-            let f_Te_old = applySpatialOperator1D(
-                u: Te_old,
-                coeffs: coeffsOld.electronCoeffs,
-                geometry: coeffsOld.geometry,
-                boundaryCondition: boundaryConditions.electronTemperature
-            )
+            let f_Ti_old = staticParameters.evolveIonHeat
+                ? applySpatialOperator1D(
+                    u: Ti_old,
+                    coeffs: coeffsOld.ionCoeffs,
+                    geometry: coeffsOld.geometry,
+                    boundaryCondition: boundaryConditions.ionTemperature
+                )
+                : zeroCells
 
-            let f_ne_old = applySpatialOperator1D(
-                u: ne_old,
-                coeffs: coeffsOld.densityCoeffs,
-                geometry: coeffsOld.geometry,
-                boundaryCondition: boundaryConditions.electronDensity
-            )
+            let f_Te_old = staticParameters.evolveElectronHeat
+                ? applySpatialOperator1D(
+                    u: Te_old,
+                    coeffs: coeffsOld.electronCoeffs,
+                    geometry: coeffsOld.geometry,
+                    boundaryCondition: boundaryConditions.electronTemperature
+                )
+                : zeroCells
 
-            let f_psi_old = applySpatialOperator1D(
-                u: psi_old,
-                coeffs: coeffsOld.fluxCoeffs,
-                geometry: coeffsOld.geometry,
-                boundaryCondition: boundaryConditions.poloidalFlux
-            )
+            let f_ne_old = staticParameters.evolveElectronDensity
+                ? applySpatialOperator1D(
+                    u: ne_old,
+                    coeffs: coeffsOld.densityCoeffs,
+                    geometry: coeffsOld.geometry,
+                    boundaryCondition: boundaryConditions.electronDensity
+                )
+                : zeroCells
+
+            let f_psi_old = staticParameters.evolvePoloidalFlux
+                ? applySpatialOperator1D(
+                    u: psi_old,
+                    coeffs: coeffsOld.fluxCoeffs,
+                    geometry: coeffsOld.geometry,
+                    boundaryCondition: boundaryConditions.poloidalFlux
+                )
+                : zeroCells
 
             R_Ti_raw = dTi_dt - theta * f_Ti_new - oneMinusTheta * f_Ti_old
             R_Te_raw = dTe_dt - theta * f_Te_new - oneMinusTheta * f_Te_old
@@ -737,12 +889,13 @@ public struct NewtonRaphsonSolver: PDESolver {
         let maximumIterations = 10
         let batchSize = 4
         var alpha = maxAlpha
+        let initialMerit = initialNorm * initialNorm
 
         // Most stabilized Newton steps accept alpha=1. Check it before the
         // batched fallback so successful steps do not compute unused residuals.
         let firstResidual = residualFn(x + alpha * delta)
-        let firstNorm = sqrt((firstResidual * firstResidual).mean()).item(Float.self)
-        if firstNorm.isFinite && firstNorm < initialNorm {
+        let firstMerit = (firstResidual * firstResidual).mean().item(Float.self)
+        if firstMerit.isFinite && firstMerit < initialMerit {
             return alpha
         }
 
@@ -751,20 +904,22 @@ public struct NewtonRaphsonSolver: PDESolver {
 
         while checked < maximumIterations {
             var batchAlphas: [Float] = []
-            var batchNorms: [MLXArray] = []
+            var batchMerits: [MLXArray] = []
+            batchAlphas.reserveCapacity(batchSize)
+            batchMerits.reserveCapacity(batchSize)
 
             while batchAlphas.count < batchSize && checked < maximumIterations {
                 let xNew = x + alpha * delta
                 let residualNew = residualFn(xNew)
                 batchAlphas.append(alpha)
-                batchNorms.append(sqrt((residualNew * residualNew).mean()))
+                batchMerits.append((residualNew * residualNew).mean())
                 alpha *= beta
                 checked += 1
             }
 
-            let norms = MLX.stacked(batchNorms, axis: 0).asArray(Float.self)
-            for index in norms.indices {
-                if norms[index].isFinite && norms[index] < initialNorm {
+            let merits = MLX.stacked(batchMerits, axis: 0).asArray(Float.self)
+            for index in merits.indices {
+                if merits[index].isFinite && merits[index] < initialMerit {
                     return batchAlphas[index]
                 }
             }

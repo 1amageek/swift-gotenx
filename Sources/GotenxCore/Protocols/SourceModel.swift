@@ -8,42 +8,32 @@ import Foundation
 /// Solver source terms may omit metadata because they are evaluated repeatedly inside
 /// Newton iterations and automatic differentiation transforms.
 public protocol SourceModel: PhysicsComponent, Sendable {
-    /// Compute source terms for diagnostics and time-series capture.
+    /// Compute source terms from a complete evaluation context.
     ///
-    /// - Parameters:
-    ///   - profiles: Current core profiles
-    ///   - geometry: Tokamak geometry
-    ///   - parameters: Source model parameters
-    /// - Returns: Source terms with source metadata
-    func computeTerms(
-        profiles: CoreProfiles,
-        geometry: Geometry,
-        parameters: SourceParameters
-    ) throws -> SourceTerms
-
-    /// Compute source terms for solver residual evaluation.
-    ///
-    /// This path is called repeatedly inside Newton iterations and AD transforms.
-    /// Implementations should return differentiable arrays only and avoid metadata
-    /// integration or host-side scalar reads.
-    func computeTermsForSolver(
-        profiles: CoreProfiles,
-        geometry: Geometry,
-        parameters: SourceParameters
-    ) -> SourceTerms
+    /// Internal solver paths pass `.solver`, which keeps arrays lazy and omits
+    /// metadata. Diagnostic paths pass `.diagnostic`, which evaluates arrays and
+    /// includes metadata for power accounting.
+    func computeTerms(in context: SourceEvaluationContext) throws -> SourceTerms
 }
 
 extension SourceModel {
-    public func computeTermsForSolver(
+    /// Compute source terms for diagnostics and time-series capture.
+    ///
+    /// This convenience entry point builds a diagnostic context. Solver and
+    /// differentiation paths should pass a full `SourceEvaluationContext` so the
+    /// caller controls eager vs deferred MLX evaluation.
+    public func computeTerms(
         profiles: CoreProfiles,
         geometry: Geometry,
         parameters: SourceParameters
-    ) -> SourceTerms {
-        do {
-            return try computeTerms(profiles: profiles, geometry: geometry, parameters: parameters)
-        } catch {
-            let cellCount = profiles.ionTemperature.shape.first ?? 0
-            return SourceTerms.invalidNumerics(cellCount: cellCount)
-        }
+    ) throws -> SourceTerms {
+        try computeTerms(
+            in: SourceEvaluationContext(
+                profiles: profiles,
+                geometry: geometry,
+                parameters: parameters,
+                purpose: .diagnostic
+            )
+        )
     }
 }
