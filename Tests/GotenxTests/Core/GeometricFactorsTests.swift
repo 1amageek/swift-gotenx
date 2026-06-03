@@ -8,6 +8,26 @@ import MLX
 @Suite("Geometric Factors Tests")
 struct GeometricFactorsTests {
 
+    @Test("GeometricFactors validating rejects inconsistent Geometry")
+    func validatingRejectsInconsistentGeometry() {
+        let geometry = Self.inconsistentGeometry()
+
+        #expect(throws: NumericalValidationError.self) {
+            _ = try GeometricFactors.validating(geometry: geometry)
+        }
+    }
+
+    @Test("GeometricFactors from returns validation-failing factors instead of trapping")
+    func fromReturnsValidationFailingFactorsInsteadOfTrapping() {
+        let geometry = Self.inconsistentGeometry()
+
+        let geoFactors = GeometricFactors.from(geometry: geometry)
+        let volumes = geoFactors.cellVolumes.value.asArray(Float.self)
+
+        #expect(!volumes.isEmpty)
+        #expect(volumes.contains(where: { !$0.isFinite }))
+    }
+
     @Test("GeometricFactors created from Geometry includes metric tensors")
     func metricTensorInclusion() throws {
         // Create geometry with known metric tensor values
@@ -146,5 +166,21 @@ struct GeometricFactorsTests {
         for a in areas {
             #expect(abs(a - expectedArea) < expectedArea * 0.01)  // Within 1%
         }
+    }
+
+    private static func inconsistentGeometry() -> Geometry {
+        Geometry(
+            majorRadius: 3.0,
+            minorRadius: 1.0,
+            toroidalField: 5.0,
+            volume: EvaluatedArray(evaluating: MLXArray(Float(1.0))),
+            fluxSurfaceMetric: .ones([4]),
+            majorRadiusMetric: .ones([4]),
+            shapeMetric: .ones([4]),
+            minorRadiusMetric: .ones([4]),
+            radii: .ones([2]),
+            safetyFactor: .ones([3]),
+            type: .circular
+        )
     }
 }

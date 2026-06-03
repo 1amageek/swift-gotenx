@@ -14,6 +14,60 @@ private struct NewtonDirection {
     let usedBandedJacobian: Bool
 }
 
+private enum NewtonFailureType {
+    static let linearSolverError: Float = 1.0
+    static let invalidDescentDirection: Float = 2.0
+    static let lineSearchNoDecrease: Float = 3.0
+    static let invalidInputProfiles: Float = 4.0
+    static let invalidCoefficients: Float = 5.0
+    static let invalidFinalProfiles: Float = 6.0
+    static let maximumIterationsExceeded: Float = 7.0
+    static let invalidTolerance: Float = 8.0
+}
+
+private enum NewtonConvergenceMode {
+    static let notConverged: Float = 0.0
+    static let strict: Float = 1.0
+    static let precisionFloor: Float = 2.0
+}
+
+private struct NewtonConvergenceCriteria {
+    private static let toleranceFloor: Float = 1e-6
+
+    let requestedTolerance: Float
+    let effectiveTolerance: Float
+    let ionTemperatureResidualTolerance: Float
+    let electronTemperatureResidualTolerance: Float
+    let electronDensityResidualTolerance: Float
+    let poloidalFluxResidualTolerance: Float
+    let electronDensityPrecisionFloorBound: Float
+
+    init(requestedTolerance: Float) {
+        self.requestedTolerance = requestedTolerance
+        self.effectiveTolerance = max(requestedTolerance, Self.toleranceFloor)
+
+        let scale = effectiveTolerance / Self.toleranceFloor
+        self.ionTemperatureResidualTolerance = 10.0 * scale
+        self.electronTemperatureResidualTolerance = 10.0 * scale
+        self.electronDensityResidualTolerance = 0.1 * scale
+        self.poloidalFluxResidualTolerance = 1e-3 * scale
+        self.electronDensityPrecisionFloorBound = 5.0 * scale
+    }
+
+    var metadata: [String: Float] {
+        [
+            "requested_tolerance": requestedTolerance,
+            "effective_tolerance": effectiveTolerance,
+            "tolerance_floor_applied": requestedTolerance < Self.toleranceFloor ? 1.0 : 0.0,
+            "tolerance_ti": ionTemperatureResidualTolerance,
+            "tolerance_te": electronTemperatureResidualTolerance,
+            "tolerance_ne": electronDensityResidualTolerance,
+            "tolerance_psi": poloidalFluxResidualTolerance,
+            "ne_precision_floor_bound": electronDensityPrecisionFloorBound
+        ]
+    }
+}
+
 /// Newton-Raphson solver for nonlinear implicit PDE systems
 ///
 /// Uses automatic differentiation (vjp) for efficient Jacobian computation.
@@ -108,6 +162,17 @@ public struct NewtonRaphsonSolver: PDESolver {
         coreProfilesTplusDt: CoreProfiles,
         coeffsCallback: @escaping CoeffsCallback
     ) -> SolverResult {
+        guard tolerance.isFinite && tolerance > 0 else {
+            logger.error("Invalid Newton tolerance", metadata: ["tolerance": "\(tolerance)"])
+            return validationFailureResult(
+                profiles: coreProfilesTplusDt,
+                timeStep: timeStep,
+                failureType: NewtonFailureType.invalidTolerance,
+                extraMetadata: ["requested_tolerance": tolerance]
+            )
+        }
+        let convergenceCriteria = NewtonConvergenceCriteria(requestedTolerance: tolerance)
+
         do {
             try coreProfilesT.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
             try coreProfilesTplusDt.validateNumerics(expectedCellCount: staticParameters.mesh.cellCount)
@@ -116,7 +181,8 @@ public struct NewtonRaphsonSolver: PDESolver {
             return validationFailureResult(
                 profiles: coreProfilesTplusDt,
                 timeStep: timeStep,
-                failureType: 4.0
+                failureType: NewtonFailureType.invalidInputProfiles,
+                extraMetadata: convergenceCriteria.metadata
             )
         }
 
@@ -131,7 +197,8 @@ public struct NewtonRaphsonSolver: PDESolver {
             return validationFailureResult(
                 profiles: coreProfilesTplusDt,
                 timeStep: timeStep,
-                failureType: 4.0
+                failureType: NewtonFailureType.invalidInputProfiles,
+                extraMetadata: convergenceCriteria.metadata
             )
         }
         let layout = xFlat.layout
@@ -163,7 +230,8 @@ public struct NewtonRaphsonSolver: PDESolver {
                 return validationFailureResult(
                     profiles: coreProfilesTplusDt,
                     timeStep: timeStep,
-                    failureType: 5.0
+                    failureType: NewtonFailureType.invalidCoefficients,
+                    extraMetadata: convergenceCriteria.metadata
                 )
             }
             coeffsOld = oldCoefficients
@@ -240,6 +308,11 @@ public struct NewtonRaphsonSolver: PDESolver {
         var bestTotalResidual: Float = .infinity
         var stagnantIterations = 0
         var residualNorm: Float = 0.0
+        var residualNorm_Ti: Float = .infinity
+        var residualNorm_Te: Float = .infinity
+        var residualNorm_ne: Float = .infinity
+        var residualNorm_psi: Float = .infinity
+        var convergenceMode = NewtonConvergenceMode.notConverged
         let jacobianBasis = MLXArray.eye(xScaled.values.value.shape[0])
         eval(jacobianBasis)
 
@@ -268,10 +341,10 @@ public struct NewtonRaphsonSolver: PDESolver {
             ], axis: 0)
             let norms = normsBatched.asArray(Float.self)
             residualNorm = norms[0]
-            let residualNorm_Ti = norms[1]
-            let residualNorm_Te = norms[2]
-            let residualNorm_ne = norms[3]
-            let residualNorm_psi = norms[4]
+            residualNorm_Ti = norms[1]
+            residualNorm_Te = norms[2]
+            residualNorm_ne = norms[3]
+            residualNorm_psi = norms[4]
 
             if !residualNorm.isFinite {
                 logger.warning("Residual contains NaN/Inf; stopping iteration", metadata: [
@@ -292,10 +365,10 @@ public struct NewtonRaphsonSolver: PDESolver {
             // Keep the Newton direction and Jacobian intact; only the convergence
             // check is variable-specific.
             // Based on NEWTON_DIRECTION_ANALYSIS.md: Ti/Te stagnate, ne improves
-            let tolerance_Ti: Float = 10.0   // Relaxed (currently ~5.86)
-            let tolerance_Te: Float = 10.0   // Relaxed (currently ~5.86)
-            let tolerance_ne: Float = 0.1    // Strict (physically critical)
-            let tolerance_psi: Float = 1e-3  // Strict (already converged)
+            let tolerance_Ti = convergenceCriteria.ionTemperatureResidualTolerance
+            let tolerance_Te = convergenceCriteria.electronTemperatureResidualTolerance
+            let tolerance_ne = convergenceCriteria.electronDensityResidualTolerance
+            let tolerance_psi = convergenceCriteria.poloidalFluxResidualTolerance
 
             let converged_Ti = residualNorm_Ti < tolerance_Ti
             let converged_Te = residualNorm_Te < tolerance_Te
@@ -329,11 +402,12 @@ public struct NewtonRaphsonSolver: PDESolver {
             // density residual could be reported as converged, masking a genuinely
             // unconverged (and unphysical) density. `neAcceptanceBound` is set well above
             // the observed floor (~0.5–1) yet far below any divergent value.
-            let neAcceptanceBound: Float = 5.0
+            let neAcceptanceBound = convergenceCriteria.electronDensityPrecisionFloorBound
 
             if !converged, stagnated, converged_Ti, converged_Te, converged_psi,
                residualNorm_ne < neAcceptanceBound {
                 converged = true
+                convergenceMode = NewtonConvergenceMode.precisionFloor
                 logger.info("Converged to Float32 precision floor", metadata: [
                     "ne": "\(String(format: "%.2e", residualNorm_ne))",
                     "tolerance_ne": "\(String(format: "%.2e", tolerance_ne))",
@@ -344,6 +418,9 @@ public struct NewtonRaphsonSolver: PDESolver {
             }
 
             if converged {
+                if convergenceMode == NewtonConvergenceMode.notConverged {
+                    convergenceMode = NewtonConvergenceMode.strict
+                }
                 logger.info("All variables converged", metadata: [
                     "Ti": "\(String(format: "%.2e", residualNorm_Ti))",
                     "Te": "\(String(format: "%.2e", residualNorm_Te))",
@@ -395,10 +472,16 @@ public struct NewtonRaphsonSolver: PDESolver {
                     iterations: iterations,
                     residualNorm: residualNorm,
                     converged: false,
-                    metadata: [
-                        "theta": theta,
-                        "dt": timeStep
-                    ]
+                    metadata: resultMetadata(
+                        timeStep: timeStep,
+                        convergenceCriteria: convergenceCriteria,
+                        residualTi: residualNorm_Ti,
+                        residualTe: residualNorm_Te,
+                        residualNe: residualNorm_ne,
+                        residualPsi: residualNorm_psi,
+                        convergenceMode: NewtonConvergenceMode.notConverged,
+                        extra: ["failure_type": NewtonFailureType.linearSolverError]
+                    )
                 )
             }
 
@@ -428,12 +511,19 @@ public struct NewtonRaphsonSolver: PDESolver {
                     iterations: iterations,
                     residualNorm: residualNorm,
                     converged: false,
-                    metadata: [
-                        "theta": theta,
-                        "dt": timeStep,
-                        "linear_error": linear_error,
-                        "failure_type": 1.0  // 1.0 = linear_solver_error
-                    ]
+                    metadata: resultMetadata(
+                        timeStep: timeStep,
+                        convergenceCriteria: convergenceCriteria,
+                        residualTi: residualNorm_Ti,
+                        residualTe: residualNorm_Te,
+                        residualNe: residualNorm_ne,
+                        residualPsi: residualNorm_psi,
+                        convergenceMode: NewtonConvergenceMode.notConverged,
+                        extra: [
+                            "linear_error": linear_error,
+                            "failure_type": NewtonFailureType.linearSolverError
+                        ]
+                    )
                 )
             }
 
@@ -451,12 +541,19 @@ public struct NewtonRaphsonSolver: PDESolver {
                     iterations: iterations,
                     residualNorm: residualNorm,
                     converged: false,
-                    metadata: [
-                        "theta": theta,
-                        "dt": timeStep,
-                        "descent_value": merit_descent,
-                        "failure_type": 2.0  // 2.0 = invalid_descent_direction
-                    ]
+                    metadata: resultMetadata(
+                        timeStep: timeStep,
+                        convergenceCriteria: convergenceCriteria,
+                        residualTi: residualNorm_Ti,
+                        residualTe: residualNorm_Te,
+                        residualNe: residualNorm_ne,
+                        residualPsi: residualNorm_psi,
+                        convergenceMode: NewtonConvergenceMode.notConverged,
+                        extra: [
+                            "descent_value": merit_descent,
+                            "failure_type": NewtonFailureType.invalidDescentDirection
+                        ]
+                    )
                 )
             }
 
@@ -488,11 +585,16 @@ public struct NewtonRaphsonSolver: PDESolver {
                     iterations: iterations,
                     residualNorm: residualNorm,
                     converged: false,
-                    metadata: [
-                        "theta": theta,
-                        "dt": timeStep,
-                        "failure_type": 3.0  // 3.0 = line_search_no_decrease
-                    ]
+                    metadata: resultMetadata(
+                        timeStep: timeStep,
+                        convergenceCriteria: convergenceCriteria,
+                        residualTi: residualNorm_Ti,
+                        residualTe: residualNorm_Te,
+                        residualNe: residualNorm_ne,
+                        residualPsi: residualNorm_psi,
+                        convergenceMode: NewtonConvergenceMode.notConverged,
+                        extra: ["failure_type": NewtonFailureType.lineSearchNoDecrease]
+                    )
                 )
             }
 
@@ -517,8 +619,23 @@ public struct NewtonRaphsonSolver: PDESolver {
             return validationFailureResult(
                 profiles: finalProfiles,
                 timeStep: timeStep,
-                failureType: 6.0
+                failureType: NewtonFailureType.invalidFinalProfiles,
+                extraMetadata: convergenceCriteria.metadata
             )
+        }
+
+        var finalMetadata = resultMetadata(
+            timeStep: timeStep,
+            convergenceCriteria: convergenceCriteria,
+            residualTi: residualNorm_Ti,
+            residualTe: residualNorm_Te,
+            residualNe: residualNorm_ne,
+            residualPsi: residualNorm_psi,
+            convergenceMode: convergenceMode,
+            extra: ["variable_scaling": 1.0]
+        )
+        if !converged {
+            finalMetadata["failure_type"] = NewtonFailureType.maximumIterationsExceeded
         }
 
         return SolverResult(
@@ -526,12 +643,32 @@ public struct NewtonRaphsonSolver: PDESolver {
             iterations: iterations,
             residualNorm: residualNorm,
             converged: converged,
-            metadata: [
-                "theta": theta,
-                "dt": timeStep,
-                "variable_scaling": 1.0  // 1.0 = enabled, 0.0 = disabled
-            ]
+            metadata: finalMetadata
         )
+    }
+
+    private func resultMetadata(
+        timeStep: Float,
+        convergenceCriteria: NewtonConvergenceCriteria,
+        residualTi: Float,
+        residualTe: Float,
+        residualNe: Float,
+        residualPsi: Float,
+        convergenceMode: Float,
+        extra: [String: Float] = [:]
+    ) -> [String: Float] {
+        var metadata: [String: Float] = [
+            "theta": theta,
+            "dt": timeStep,
+            "convergence_mode": convergenceMode,
+            "residual_ti": residualTi,
+            "residual_te": residualTe,
+            "residual_ne": residualNe,
+            "residual_psi": residualPsi
+        ]
+        metadata.merge(convergenceCriteria.metadata) { _, new in new }
+        metadata.merge(extra) { _, new in new }
+        return metadata
     }
 
     private func computeNewtonDirection(
@@ -619,18 +756,22 @@ public struct NewtonRaphsonSolver: PDESolver {
     private func validationFailureResult(
         profiles: CoreProfiles,
         timeStep: Float,
-        failureType: Float
+        failureType: Float,
+        extraMetadata: [String: Float] = [:]
     ) -> SolverResult {
-        SolverResult(
+        var metadata: [String: Float] = [
+            "theta": theta,
+            "dt": timeStep,
+            "convergence_mode": NewtonConvergenceMode.notConverged,
+            "failure_type": failureType
+        ]
+        metadata.merge(extraMetadata) { _, new in new }
+        return SolverResult(
             updatedProfiles: profiles,
             iterations: 0,
             residualNorm: Float.greatestFiniteMagnitude,
             converged: false,
-            metadata: [
-                "theta": theta,
-                "dt": timeStep,
-                "failure_type": failureType
-            ]
+            metadata: metadata
         )
     }
 

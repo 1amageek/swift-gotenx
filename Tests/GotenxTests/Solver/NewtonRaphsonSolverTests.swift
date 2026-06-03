@@ -22,6 +22,60 @@ struct NewtonRaphsonSolverTests {
         #expect(result.iterations == 0)
         #expect(result.metadata["failure_type"] == 5.0)
     }
+
+    @Test("Tolerance contract is reported and floored at Float32 precision", .timeLimit(.minutes(1)))
+    func toleranceContractIsReported() throws {
+        let context = try TestContext(theta: 1.0)
+        let result = context.solveWithValidCoefficients(
+            tolerance: 1e-8,
+            maximumIterations: 2
+        )
+
+        #expect(result.converged)
+        #expect(Self.metadataValue(result, "requested_tolerance", isCloseTo: 1e-8))
+        #expect(Self.metadataValue(result, "effective_tolerance", isCloseTo: 1e-6))
+        #expect(result.metadata["tolerance_floor_applied"] == 1.0)
+        #expect(result.metadata["convergence_mode"] == 1.0)
+    }
+
+    @Test("Invalid tolerance fails before solving", .timeLimit(.minutes(1)))
+    func invalidToleranceFailsBeforeSolving() throws {
+        let context = try TestContext(theta: 1.0)
+        let result = context.solveWithValidCoefficients(
+            tolerance: .nan,
+            maximumIterations: 2
+        )
+
+        #expect(!result.converged)
+        #expect(result.iterations == 0)
+        #expect(result.metadata["failure_type"] == 8.0)
+        #expect(result.metadata["convergence_mode"] == 0.0)
+    }
+
+    @Test("Maximum iteration exhaustion is explicit in metadata", .timeLimit(.minutes(1)))
+    func maximumIterationExhaustionIsExplicit() throws {
+        let context = try TestContext(theta: 1.0)
+        let result = context.solveWithValidCoefficients(
+            tolerance: 1e-6,
+            maximumIterations: 0
+        )
+
+        #expect(!result.converged)
+        #expect(result.iterations == 0)
+        #expect(result.metadata["failure_type"] == 7.0)
+        #expect(result.metadata["convergence_mode"] == 0.0)
+    }
+
+    private static func metadataValue(
+        _ result: SolverResult,
+        _ key: String,
+        isCloseTo expected: Float
+    ) -> Bool {
+        guard let actual = result.metadata[key] else {
+            return false
+        }
+        return abs(actual - expected) <= max(abs(expected), 1.0) * 1e-6
+    }
 }
 
 private struct TestContext {
@@ -95,14 +149,9 @@ private struct TestContext {
     }
 
     func solveWithInvalidOldGeometryCoefficients() -> SolverResult {
-        let solver = NewtonRaphsonSolver(
-            tolerance: staticParameters.solverTolerance,
-            maximumIterations: staticParameters.solverMaximumIterations,
-            theta: staticParameters.theta
-        )
-        let oldMajorRadius = oldGeometry.majorRadius
-        let callback: CoeffsCallback = { profiles, geometry in
-            if abs(geometry.majorRadius - oldMajorRadius) < 1e-6 {
+        solve(tolerance: staticParameters.solverTolerance, maximumIterations: staticParameters.solverMaximumIterations) {
+            profiles, geometry in
+            if abs(geometry.majorRadius - oldGeometry.majorRadius) < 1e-6 {
                 return Self.invalidCoefficients(cellCount: cellCount, geometry: geometry)
             }
             return Self.validCoefficients(
@@ -111,7 +160,28 @@ private struct TestContext {
                 staticParameters: staticParameters
             )
         }
+    }
 
+    func solveWithValidCoefficients(tolerance: Float, maximumIterations: Int) -> SolverResult {
+        solve(tolerance: tolerance, maximumIterations: maximumIterations) { profiles, geometry in
+            Self.validCoefficients(
+                profiles: profiles,
+                geometry: geometry,
+                staticParameters: staticParameters
+            )
+        }
+    }
+
+    private func solve(
+        tolerance: Float,
+        maximumIterations: Int,
+        coeffsCallback callback: @escaping CoeffsCallback
+    ) -> SolverResult {
+        let solver = NewtonRaphsonSolver(
+            tolerance: tolerance,
+            maximumIterations: maximumIterations,
+            theta: staticParameters.theta
+        )
         return solver.solve(
             timeStep: dynamicParameters.timeStep,
             staticParameters: staticParameters,

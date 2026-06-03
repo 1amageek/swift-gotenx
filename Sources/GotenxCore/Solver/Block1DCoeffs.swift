@@ -169,32 +169,40 @@ public struct GeometricFactors: Sendable {
         geometry: Geometry,
         evaluationMode: MLXEvaluationMode
     ) -> GeometricFactors {
+        do {
+            return try validating(geometry: geometry, evaluationMode: evaluationMode)
+        } catch {
+            return invalid(geometry: geometry, evaluationMode: evaluationMode)
+        }
+    }
+
+    /// Create geometric factors from Geometry after validating public geometry shape contracts.
+    ///
+    /// Use this API at explicit validation boundaries. The nonthrowing `from` API preserves the
+    /// existing call pattern and returns validation-failing factors instead of trapping.
+    ///
+    /// - Parameter geometry: Tokamak geometry
+    /// - Returns: Geometric factors for finite volume discretization
+    /// - Throws: NumericalValidationError when geometry shapes or scalar parameters are invalid
+    public static func validating(geometry: Geometry) throws -> GeometricFactors {
+        try validating(geometry: geometry, evaluationMode: .eager)
+    }
+
+    package static func validating(
+        geometry: Geometry,
+        evaluationMode: MLXEvaluationMode
+    ) throws -> GeometricFactors {
         let cellCount = geometry.cellCount
         let faceCount = cellCount + 1
         let radialSpacing = geometry.radialSpacing  // Assumes uniform spacing
 
-        // Validate geometry shape consistency
-        let radiiShape = geometry.radii.shape[0]
-        let fluxSurfaceMetricShape = geometry.fluxSurfaceMetric.shape[0]
-
-        guard radiiShape == cellCount else {
-            fatalError("""
-                GeometricFactors.from: Geometry.radii shape mismatch.
-                Expected radii.shape[0] = \(cellCount) (cellCount)
-                Got radii.shape[0] = \(radiiShape)
-                This indicates inconsistent Geometry construction.
-                """)
-        }
-
-        guard fluxSurfaceMetricShape == faceCount else {
-            fatalError("""
-                GeometricFactors.from: Geometry.fluxSurfaceMetric shape mismatch.
-                Expected fluxSurfaceMetric.shape[0] = \(faceCount) (cellCount + 1, face-centered)
-                Got fluxSurfaceMetric.shape[0] = \(fluxSurfaceMetricShape)
-                This indicates incorrect Geometry construction.
-                Use createGeometry(from:) or Geometry(config:) to ensure correct shapes.
-                """)
-        }
+        try validateGeometryScalars(geometry, cellCount: cellCount, radialSpacing: radialSpacing)
+        try validateGeometryShape(geometry.radii.value.shape, field: "Geometry.radii", expected: [cellCount])
+        try validateGeometryShape(geometry.safetyFactor.value.shape, field: "Geometry.safetyFactor", expected: [cellCount])
+        try validateGeometryShape(geometry.fluxSurfaceMetric.value.shape, field: "Geometry.fluxSurfaceMetric", expected: [faceCount])
+        try validateGeometryShape(geometry.majorRadiusMetric.value.shape, field: "Geometry.majorRadiusMetric", expected: [faceCount])
+        try validateGeometryShape(geometry.shapeMetric.value.shape, field: "Geometry.shapeMetric", expected: [faceCount])
+        try validateGeometryShape(geometry.minorRadiusMetric.value.shape, field: "Geometry.minorRadiusMetric", expected: [faceCount])
 
         // Use existing radii from geometry (ensures consistency)
         let cellRadii = geometry.radii.value  // [cellCount]
@@ -216,17 +224,6 @@ public struct GeometricFactors: Sendable {
         // Metric tensor components from geometry
         // ALL metric tensors (fluxSurfaceMetric, majorRadiusMetric, shapeMetric) are face-centered [faceCount]
         // Convert to cell-centered [cellCount] using arithmetic average
-
-        // Validate shapes first
-        guard geometry.fluxSurfaceMetric.value.shape[0] == faceCount else {
-            fatalError("GeometricFactors.from: fluxSurfaceMetric shape mismatch. Expected \(faceCount) (faceCount), got \(geometry.fluxSurfaceMetric.value.shape[0])")
-        }
-        guard geometry.majorRadiusMetric.value.shape[0] == faceCount else {
-            fatalError("GeometricFactors.from: majorRadiusMetric shape mismatch. Expected \(faceCount) (faceCount), got \(geometry.majorRadiusMetric.value.shape[0])")
-        }
-        guard geometry.shapeMetric.value.shape[0] == faceCount else {
-            fatalError("GeometricFactors.from: shapeMetric shape mismatch. Expected \(faceCount) (faceCount), got \(geometry.shapeMetric.value.shape[0])")
-        }
 
         // Use a 1D cylindrical approximation for the Jacobian.
         // In 1D cylindrical coordinates: √g = 2πR₀ (constant)
@@ -258,6 +255,91 @@ public struct GeometricFactors: Sendable {
             jacobian,
             majorRadiusMetric,
             shapeMetric
+        ])
+
+        return GeometricFactors(
+            cellVolumes: wrapped[0],
+            faceAreas: wrapped[1],
+            cellDistances: wrapped[2],
+            cellRadii: wrapped[3],
+            faceRadii: wrapped[4],
+            jacobian: wrapped[5],
+            majorRadiusMetric: wrapped[6],
+            shapeMetric: wrapped[7]
+        )
+    }
+
+    private static func validateGeometryScalars(
+        _ geometry: Geometry,
+        cellCount: Int,
+        radialSpacing: Float
+    ) throws {
+        guard cellCount > 0 else {
+            throw NumericalValidationError.invalidValue(
+                field: "Geometry.cellCount",
+                reason: "cell count must be positive"
+            )
+        }
+        guard geometry.majorRadius.isFinite, geometry.majorRadius > 0 else {
+            throw NumericalValidationError.invalidValue(
+                field: "Geometry.majorRadius",
+                reason: "major radius must be positive and finite"
+            )
+        }
+        guard geometry.minorRadius.isFinite, geometry.minorRadius > 0 else {
+            throw NumericalValidationError.invalidValue(
+                field: "Geometry.minorRadius",
+                reason: "minor radius must be positive and finite"
+            )
+        }
+        guard geometry.toroidalField.isFinite, geometry.toroidalField > 0 else {
+            throw NumericalValidationError.invalidValue(
+                field: "Geometry.toroidalField",
+                reason: "toroidal field must be positive and finite"
+            )
+        }
+        guard radialSpacing.isFinite, radialSpacing > 0 else {
+            throw NumericalValidationError.invalidValue(
+                field: "Geometry.radialSpacing",
+                reason: "radial spacing must be positive and finite"
+            )
+        }
+    }
+
+    private static func validateGeometryShape(
+        _ actual: [Int],
+        field: String,
+        expected: [Int]
+    ) throws {
+        guard actual == expected else {
+            throw NumericalValidationError.invalidShape(
+                field: field,
+                expected: expected,
+                actual: actual
+            )
+        }
+    }
+
+    private static func invalid(
+        geometry: Geometry,
+        evaluationMode: MLXEvaluationMode
+    ) -> GeometricFactors {
+        let radiiCount = geometry.radii.value.shape.first ?? 0
+        let derivedCellCount = max(geometry.cellCount, 0)
+        let cellCount = max(2, max(radiiCount, derivedCellCount))
+        let faceCount = cellCount + 1
+        let distanceCount = cellCount - 1
+        let invalidScalar = MLXArray(Float.nan)
+
+        let wrapped = evaluationMode.wrapBatch([
+            MLXArray.full([cellCount], values: invalidScalar),
+            MLXArray.full([faceCount], values: invalidScalar),
+            MLXArray.full([distanceCount], values: invalidScalar),
+            MLXArray.full([cellCount], values: invalidScalar),
+            MLXArray.full([faceCount], values: invalidScalar),
+            MLXArray.full([cellCount], values: invalidScalar),
+            MLXArray.full([cellCount], values: invalidScalar),
+            MLXArray.full([cellCount], values: invalidScalar)
         ])
 
         return GeometricFactors(
